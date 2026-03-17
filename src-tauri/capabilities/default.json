@@ -1,0 +1,17 @@
+{
+  "identifier": "default",
+  "description": "Capability for the main and note windows",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-focus",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-inner-size",
+    "core:webview:default",
+    "shell:allow-open"
+  ]
+}

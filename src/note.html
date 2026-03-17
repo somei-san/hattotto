@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Note</title>
+<style>
+  /* ── Reset & Base ─────────────────────────────────── */
+  *, *::before, *::after {
+    margin: 0; padding: 0; box-sizing: border-box;
+  }
+
+  :root {
+    /* macOS Stickies palette */
+    --yellow:     #FFF9C4;
+    --yellow-bar: #F9E97A;
+    --blue:       #BBDEFB;
+    --blue-bar:   #7FB3E0;
+    --green:      #C8E6C9;
+    --green-bar:  #8CC98F;
+    --pink:       #F8BBD0;
+    --pink-bar:   #E88FAB;
+    --purple:     #E1BEE7;
+    --purple-bar: #C48DD0;
+    --gray:       #E0E0E0;
+    --gray-bar:   #B8B8B8;
+
+    --bg: var(--yellow);
+    --bar: var(--yellow-bar);
+    --text: #3E3A2E;
+    --text-muted: rgba(62, 58, 46, 0.4);
+    --radius: 8px;
+    --shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08);
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ── Note Container ───────────────────────────────── */
+  .note {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    transition: background 0.3s ease;
+  }
+
+  /* ── Title Bar (draggable) ────────────────────────── */
+  .titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 8px;
+    background: var(--bar);
+    cursor: grab;
+    transition: background 0.3s ease;
+  }
+
+  .titlebar:active { cursor: grabbing; }
+
+  .titlebar-left, .titlebar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* ── Toolbar Buttons ──────────────────────────────── */
+  .btn {
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.08);
+    color: var(--text);
+    font-size: 11px;
+    line-height: 1;
+    transition: background 0.15s, transform 0.1s;
+    -webkit-app-region: no-drag;
+  }
+
+  .btn:hover {
+    background: rgba(0,0,0,0.16);
+    transform: scale(1.1);
+  }
+
+  .btn:active { transform: scale(0.95); }
+
+  .btn-close {
+    background: rgba(0,0,0,0.06);
+  }
+  .btn-close:hover {
+    background: #FF5F57;
+    color: white;
+  }
+
+  .btn svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  /* ── Color Picker ─────────────────────────────────── */
+  .color-picker {
+    display: none;
+    position: absolute;
+    top: 36px;
+    right: 8px;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px;
+    padding: 8px;
+    gap: 6px;
+    display: none;
+    flex-wrap: wrap;
+    width: 90px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    z-index: 100;
+    -webkit-app-region: no-drag;
+  }
+
+  .color-picker.open { display: flex; }
+
+  .color-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+
+  .color-dot:hover { transform: scale(1.15); }
+  .color-dot.active { border-color: rgba(0,0,0,0.4); }
+
+  .color-dot[data-color="yellow"]  { background: var(--yellow-bar); }
+  .color-dot[data-color="blue"]    { background: var(--blue-bar); }
+  .color-dot[data-color="green"]   { background: var(--green-bar); }
+  .color-dot[data-color="pink"]    { background: var(--pink-bar); }
+  .color-dot[data-color="purple"]  { background: var(--purple-bar); }
+  .color-dot[data-color="gray"]    { background: var(--gray-bar); }
+
+  /* ── Text Area ────────────────────────────────────── */
+  .content {
+    flex: 1;
+    position: relative;
+  }
+
+  .lines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 27px,
+      var(--text-muted) 27px,
+      var(--text-muted) 28px
+    );
+    background-position: 0 12px;
+    opacity: 0.3;
+  }
+
+  textarea {
+    width: 100%;
+    height: 100%;
+    padding: 12px 16px;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    line-height: 28px;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  textarea::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* ── Resize Handle ────────────────────────────────── */
+  .resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    opacity: 0.3;
+    transition: opacity 0.2s;
+  }
+
+  .resize-handle:hover { opacity: 0.6; }
+
+  .resize-handle::before,
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    background: var(--text);
+    border-radius: 1px;
+  }
+  .resize-handle::before {
+    width: 8px; height: 1.5px;
+    bottom: 4px; right: 2px;
+    transform: rotate(-45deg);
+  }
+  .resize-handle::after {
+    width: 5px; height: 1.5px;
+    bottom: 3px; right: 1px;
+    transform: rotate(-45deg);
+  }
+</style>
+</head>
+<body>
+  <div class="note" id="note">
+    <!-- Titlebar -->
+    <div class="titlebar" id="titlebar">
+      <div class="titlebar-left">
+        <button class="btn btn-close" id="btn-delete" title="Delete">
+          <svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9"/><line x1="9" y1="3" x2="3" y2="9"/></svg>
+        </button>
+      </div>
+      <div class="titlebar-right">
+        <button class="btn" id="btn-new" title="New Note">
+          <svg viewBox="0 0 12 12"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>
+        </button>
+        <button class="btn" id="btn-color" title="Color">
+          <svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Color Picker -->
+    <div class="color-picker" id="color-picker">
+      <div class="color-dot" data-color="yellow"></div>
+      <div class="color-dot" data-color="blue"></div>
+      <div class="color-dot" data-color="green"></div>
+      <div class="color-dot" data-color="pink"></div>
+      <div class="color-dot" data-color="purple"></div>
+      <div class="color-dot" data-color="gray"></div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <div class="lines"></div>
+      <textarea id="editor" placeholder="メモを入力…"></textarea>
+    </div>
+  </div>
+
+<script>
+  // ── Globals ───────────────────────────────────────
+  const { invoke } = window.__TAURI__.core;
+  const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+  const appWindow = getCurrentWebviewWindow();
+
+  const params = new URLSearchParams(window.location.search);
+  const noteId = params.get('id');
+
+  const editor    = document.getElementById('editor');
+  const noteEl    = document.getElementById('note');
+  const titlebar  = document.getElementById('titlebar');
+  const picker    = document.getElementById('color-picker');
+
+  let saveTimer = null;
+
+  // ── Apply Color Theme ─────────────────────────────
+  function applyColor(color) {
+    noteEl.style.setProperty('--bg',  `var(--${color})`);
+    noteEl.style.setProperty('--bar', `var(--${color}-bar)`);
+
+    document.querySelectorAll('.color-dot').forEach(d => {
+      d.classList.toggle('active', d.dataset.color === color);
+    });
+  }
+
+  // ── Load Note Data ────────────────────────────────
+  async function loadNote() {
+    const note = await invoke('get_note', { id: noteId });
+    if (!note) return;
+
+    editor.value = note.content;
+    applyColor(note.color);
+  }
+
+  // ── Auto-Save Content ─────────────────────────────
+  editor.addEventListener('input', () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      invoke('update_note_content', { id: noteId, content: editor.value });
+    }, 300);
+  });
+
+  // ── Drag Window ───────────────────────────────────
+  titlebar.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.btn') || e.target.closest('.color-picker')) return;
+    appWindow.startDragging();
+  });
+
+  // ── Save Position/Size on Move & Resize ───────────
+  let geoTimer = null;
+  async function saveGeometry() {
+    clearTimeout(geoTimer);
+    geoTimer = setTimeout(async () => {
+      try {
+        const pos  = await appWindow.outerPosition();
+        const size = await appWindow.outerSize();
+        invoke('update_note_geometry', {
+          id: noteId,
+          x: pos.x,
+          y: pos.y,
+          width: size.width,
+          height: size.height,
+        });
+      } catch (e) {
+        // Window might be closing
+      }
+    }, 500);
+  }
+
+  // Poll for geometry changes (Tauri v2 doesn't expose move/resize events easily)
+  let lastPos = '', lastSize = '';
+  setInterval(async () => {
+    try {
+      const pos  = await appWindow.outerPosition();
+      const size = await appWindow.outerSize();
+      const key = `${pos.x},${pos.y},${size.width},${size.height}`;
+      if (key !== lastPos) {
+        lastPos = key;
+        saveGeometry();
+      }
+    } catch (e) {}
+  }, 1000);
+
+  // ── Buttons ───────────────────────────────────────
+  document.getElementById('btn-new').addEventListener('click', () => {
+    invoke('create_note');
+  });
+
+  document.getElementById('btn-delete').addEventListener('click', () => {
+    invoke('delete_note', { id: noteId });
+  });
+
+  document.getElementById('btn-color').addEventListener('click', (e) => {
+    e.stopPropagation();
+    picker.classList.toggle('open');
+  });
+
+  // Color dots
+  document.querySelectorAll('.color-dot').forEach(dot => {
+    dot.addEventListener('click', () => {
+      const color = dot.dataset.color;
+      applyColor(color);
+      invoke('update_note_color', { id: noteId, color });
+      picker.classList.remove('open');
+    });
+  });
+
+  // Close picker on click outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#color-picker') && !e.target.closest('#btn-color')) {
+      picker.classList.remove('open');
+    }
+  });
+
+  // ── Init ──────────────────────────────────────────
+  loadNote();
+</script>
+</body>
+</html>
