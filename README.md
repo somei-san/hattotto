@@ -1,6 +1,6 @@
 # Hatto-to — macOS Stickies風 付箋アプリ
 
-「貼っと」— Post-it にインスパイアされた、Tauri v2 + Rust 製のネイティブ付箋アプリ。
+「貼っとーと」— Post-it にインスパイアされた、Tauri v2 + Rust 製のネイティブ付箋アプリ。
 付箋1枚ごとに独立ウィンドウが開き、macOS Stickies のような使い心地。
 
 ## 機能
