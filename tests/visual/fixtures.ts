@@ -47,23 +47,27 @@ async function injectNoteMock(page: Page, noteOverrides: Record<string, unknown>
 
 async function injectSettingsMock(
   page: Page,
-  settingsOverrides: Record<string, unknown> = {}
+  settingsOverrides: Record<string, unknown> = {},
+  autostartEnabled = false,
 ) {
   const settings = { ...DEFAULT_SETTINGS, ...settingsOverrides };
 
-  await page.addInitScript((s) => {
+  await page.addInitScript((data) => {
     (window as any).__TAURI__ = {
       core: {
         invoke: async (cmd: string) => {
           switch (cmd) {
-            case "get_settings":    return s;
-            case "update_settings": return null;
-            default:                return null;
+            case "get_settings":               return data.settings;
+            case "update_settings":            return null;
+            case "plugin:autostart|is_enabled": return data.autostart;
+            case "plugin:autostart|enable":    return null;
+            case "plugin:autostart|disable":   return null;
+            default:                           return null;
           }
         },
       },
     };
-  }, settings);
+  }, { settings, autostart: autostartEnabled });
 }
 
 // ── Fixture types ──────────────────────────────────────────
@@ -72,7 +76,7 @@ type Fixtures = {
   notePage: Page;
   openNote: (overrides?: Record<string, unknown>) => Promise<Page>;
   settingsPage: Page;
-  openSettings: (overrides?: Record<string, unknown>) => Promise<Page>;
+  openSettings: (overrides?: Record<string, unknown>, autostart?: boolean) => Promise<Page>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -103,7 +107,7 @@ export const test = base.extend<Fixtures>({
   // settings.html — default settings
   settingsPage: async ({ page }, use) => {
     await page.setViewportSize({ width: 420, height: 520 });
-    await injectSettingsMock(page);
+    await injectSettingsMock(page, {}, false);
     await page.goto("/settings.html");
     await page.waitForLoadState("networkidle");
     await use(page);
@@ -112,10 +116,10 @@ export const test = base.extend<Fixtures>({
   // settings.html — custom settings, own browser context (420x520)
   openSettings: async ({ browser }, use) => {
     const pages: Page[] = [];
-    const open = async (overrides: Record<string, unknown> = {}) => {
+    const open = async (overrides: Record<string, unknown> = {}, autostart = false) => {
       const ctx = await browser.newContext({ viewport: { width: 420, height: 520 } });
       const page = await ctx.newPage();
-      await injectSettingsMock(page, overrides);
+      await injectSettingsMock(page, overrides, autostart);
       await page.goto("/settings.html");
       await page.waitForLoadState("networkidle");
       pages.push(page);

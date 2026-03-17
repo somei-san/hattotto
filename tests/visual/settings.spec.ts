@@ -16,6 +16,11 @@ test("settings tab — large font selected", async ({ openSettings }) => {
   await expect(page).toHaveScreenshot("settings-font-large.png");
 });
 
+test("settings tab — autostart on", async ({ openSettings }) => {
+  const page = await openSettings({}, true);
+  await expect(page).toHaveScreenshot("settings-autostart-on.png");
+});
+
 test("settings tab — after save", async ({ settingsPage }) => {
   await settingsPage.click('[data-color="green"]');
   await settingsPage.click('[data-size="12"]');
