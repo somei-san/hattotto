@@ -239,7 +239,7 @@ fn open_settings_window(app: &AppHandle) {
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let new_note = MenuItem::with_id(app, "new_note", "New Note", true, Some("CmdOrCtrl+N"))?;
-    let settings = MenuItem::with_id(app, "settings", "Settings / Help", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings / Help", true, Some("CmdOrCtrl+,"))?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
     let menu = Menu::with_items(app, &[&new_note, &settings, &quit])?;
 
