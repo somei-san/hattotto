@@ -175,7 +175,7 @@ fn update_settings(default_color: String, font_size: u32, zoom: u32, state: Stat
     let mut settings = state.settings.lock().unwrap();
     settings.default_color = default_color;
     settings.font_size = font_size;
-    settings.zoom = zoom.clamp(75, 150);
+    settings.zoom = zoom.clamp(50, 200);
     save_settings(&settings);
 }
 

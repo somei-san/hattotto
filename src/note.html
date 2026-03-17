@@ -316,8 +316,6 @@
   }
 
   // ── Zoom ──────────────────────────────────────────
-  const ZOOM_STEPS = [75, 100, 125, 150];
-
   function applyZoom(zoom) {
     document.body.style.zoom = zoom / 100;
   }
@@ -325,9 +323,7 @@
   async function changeZoom(delta) {
     const settings = await invoke('get_settings');
     const current = settings.zoom ?? 100;
-    const idx = ZOOM_STEPS.indexOf(current);
-    const nextIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + delta));
-    const next = ZOOM_STEPS[nextIdx];
+    const next = Math.max(50, Math.min(200, current + delta * 10));
     if (next === current) return;
     applyZoom(next);
     invoke('update_settings', {
