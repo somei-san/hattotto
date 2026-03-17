@@ -1,11 +1,16 @@
 import { test as base, type Page } from "@playwright/test";
 
-/**
- * Tauri API mock injected before page scripts execute.
- * Stubs window.__TAURI__ so note.html runs without the Tauri runtime.
- */
-async function injectTauriMock(page: Page, noteOverrides: Record<string, unknown> = {}) {
-  const defaultNote = {
+// ── Shared defaults ────────────────────────────────────────
+
+const DEFAULT_SETTINGS = {
+  default_color: "yellow",
+  font_size: 14,
+};
+
+// ── Note mock ──────────────────────────────────────────────
+
+async function injectNoteMock(page: Page, noteOverrides: Record<string, unknown> = {}) {
+  const note = {
     id: "test-note-id",
     content: "",
     color: "yellow",
@@ -16,22 +21,14 @@ async function injectTauriMock(page: Page, noteOverrides: Record<string, unknown
     ...noteOverrides,
   };
 
-  await page.addInitScript((note) => {
+  await page.addInitScript((data) => {
     (window as any).__TAURI__ = {
       core: {
-        invoke: async (cmd: string, _args?: Record<string, unknown>) => {
+        invoke: async (cmd: string) => {
           switch (cmd) {
-            case "get_note":
-              return note;
-            case "update_note_content":
-            case "update_note_color":
-            case "update_note_geometry":
-            case "delete_note":
-            case "create_note":
-              return null;
-            default:
-              console.warn(`[mock] unknown command: ${cmd}`);
-              return null;
+            case "get_note":       return data.note;
+            case "get_settings":   return data.settings;
+            default:               return null;
           }
         },
       },
@@ -43,42 +40,89 @@ async function injectTauriMock(page: Page, noteOverrides: Record<string, unknown
         }),
       },
     };
-  }, defaultNote);
+  }, { note, settings: DEFAULT_SETTINGS });
 }
 
-type NoteFixtures = {
+// ── Settings mock ──────────────────────────────────────────
+
+async function injectSettingsMock(
+  page: Page,
+  settingsOverrides: Record<string, unknown> = {}
+) {
+  const settings = { ...DEFAULT_SETTINGS, ...settingsOverrides };
+
+  await page.addInitScript((s) => {
+    (window as any).__TAURI__ = {
+      core: {
+        invoke: async (cmd: string) => {
+          switch (cmd) {
+            case "get_settings":    return s;
+            case "update_settings": return null;
+            default:                return null;
+          }
+        },
+      },
+    };
+  }, settings);
+}
+
+// ── Fixture types ──────────────────────────────────────────
+
+type Fixtures = {
   notePage: Page;
   openNote: (overrides?: Record<string, unknown>) => Promise<Page>;
+  settingsPage: Page;
+  openSettings: (overrides?: Record<string, unknown>) => Promise<Page>;
 };
 
-export const test = base.extend<NoteFixtures>({
+export const test = base.extend<Fixtures>({
+  // note.html — default yellow, empty
   notePage: async ({ page }, use) => {
-    await injectTauriMock(page);
+    await injectNoteMock(page);
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
     await use(page);
   },
 
+  // note.html — custom note data, own browser context
   openNote: async ({ browser }, use) => {
     const pages: Page[] = [];
-
     const open = async (overrides: Record<string, unknown> = {}) => {
-      const context = await browser.newContext({
-        viewport: { width: 300, height: 350 },
-      });
-      const page = await context.newPage();
-      await injectTauriMock(page, overrides);
+      const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+      const page = await ctx.newPage();
+      await injectNoteMock(page, overrides);
       await page.goto("/note.html?id=test-note-id");
       await page.waitForLoadState("networkidle");
       pages.push(page);
       return page;
     };
-
     await use(open);
+    for (const p of pages) await p.context().close();
+  },
 
-    for (const p of pages) {
-      await p.context().close();
-    }
+  // settings.html — default settings
+  settingsPage: async ({ page }, use) => {
+    await page.setViewportSize({ width: 420, height: 520 });
+    await injectSettingsMock(page);
+    await page.goto("/settings.html");
+    await page.waitForLoadState("networkidle");
+    await use(page);
+  },
+
+  // settings.html — custom settings, own browser context (420x520)
+  openSettings: async ({ browser }, use) => {
+    const pages: Page[] = [];
+    const open = async (overrides: Record<string, unknown> = {}) => {
+      const ctx = await browser.newContext({ viewport: { width: 420, height: 520 } });
+      const page = await ctx.newPage();
+      await injectSettingsMock(page, overrides);
+      await page.goto("/settings.html");
+      await page.waitForLoadState("networkidle");
+      pages.push(page);
+      return page;
+    };
+    await use(open);
+    for (const p of pages) await p.context().close();
   },
 });
 
