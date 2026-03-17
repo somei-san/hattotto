@@ -342,6 +342,17 @@
   </div>
 
   <div class="section">
+    <div class="section-title">表示倍率</div>
+    <div class="font-size-row" id="zoom-picker">
+      <button class="size-btn" data-zoom="75">75%</button>
+      <button class="size-btn active" data-zoom="100">100%</button>
+      <button class="size-btn" data-zoom="125">125%</button>
+      <button class="size-btn" data-zoom="150">150%</button>
+    </div>
+    <div style="margin-top:8px; font-size:11px; color:var(--text-muted);">⌘+ / ⌘− で変更、⌘0 でリセット</div>
+  </div>
+
+  <div class="section">
     <div class="section-title">システム</div>
     <div class="toggle-row">
       <span class="toggle-label">ログイン時に自動起動</span>
@@ -395,6 +406,7 @@
 
   let currentColor = 'yellow';
   let currentSize  = 14;
+  let currentZoom  = 100;
 
   // ── Tabs ────────────────────────────────────────────
   document.querySelectorAll('.tab').forEach(tab => {
@@ -424,11 +436,21 @@
     });
   });
 
+  // ── Zoom Picker ──────────────────────────────────────
+  document.querySelectorAll('#zoom-picker .size-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#zoom-picker .size-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentZoom = parseInt(btn.dataset.zoom, 10);
+    });
+  });
+
   // ── Save ─────────────────────────────────────────────
   document.getElementById('save-btn').addEventListener('click', async () => {
     await invoke('update_settings', {
       defaultColor: currentColor,
       fontSize: currentSize,
+      zoom: currentZoom,
     });
     const msg = document.getElementById('save-msg');
     msg.textContent = '保存しました';
@@ -461,6 +483,11 @@
 
     document.querySelectorAll('#font-size-picker .size-btn').forEach(b => {
       b.classList.toggle('active', parseInt(b.dataset.size, 10) === currentSize);
+    });
+
+    currentZoom = s.zoom ?? 100;
+    document.querySelectorAll('#zoom-picker .size-btn').forEach(b => {
+      b.classList.toggle('active', parseInt(b.dataset.zoom, 10) === currentZoom);
     });
 
     autostartToggle.checked = !!autostartEnabled;

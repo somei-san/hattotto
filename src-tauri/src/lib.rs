@@ -41,6 +41,7 @@ impl Note {
 pub struct Settings {
     pub default_color: String,
     pub font_size: u32,
+    pub zoom: u32,
 }
 
 impl Default for Settings {
@@ -48,6 +49,7 @@ impl Default for Settings {
         Self {
             default_color: "yellow".into(),
             font_size: 14,
+            zoom: 100,
         }
     }
 }
@@ -169,10 +171,11 @@ fn get_settings(state: State<AppState>) -> Settings {
 }
 
 #[tauri::command]
-fn update_settings(default_color: String, font_size: u32, state: State<AppState>) {
+fn update_settings(default_color: String, font_size: u32, zoom: u32, state: State<AppState>) {
     let mut settings = state.settings.lock().unwrap();
     settings.default_color = default_color;
     settings.font_size = font_size;
+    settings.zoom = zoom.clamp(75, 150);
     save_settings(&settings);
 }
 

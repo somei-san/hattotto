@@ -311,7 +311,30 @@
       editor.style.lineHeight = `${fs * 2}px`;
       document.querySelector('.lines').style.backgroundImage =
         `repeating-linear-gradient(to bottom, transparent, transparent ${fs * 2 - 1}px, var(--text-muted) ${fs * 2 - 1}px, var(--text-muted) ${fs * 2}px)`;
+      applyZoom(settings.zoom);
     }
+  }
+
+  // ── Zoom ──────────────────────────────────────────
+  const ZOOM_STEPS = [75, 100, 125, 150];
+
+  function applyZoom(zoom) {
+    document.body.style.zoom = zoom / 100;
+  }
+
+  async function changeZoom(delta) {
+    const settings = await invoke('get_settings');
+    const current = settings.zoom ?? 100;
+    const idx = ZOOM_STEPS.indexOf(current);
+    const nextIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + delta));
+    const next = ZOOM_STEPS[nextIdx];
+    if (next === current) return;
+    applyZoom(next);
+    invoke('update_settings', {
+      defaultColor: settings.default_color,
+      fontSize: settings.font_size,
+      zoom: next,
+    });
   }
 
   // ── Auto-Save Content ─────────────────────────────
@@ -392,6 +415,20 @@
     if (!e.target.closest('#color-picker') && !e.target.closest('#btn-color')) {
       picker.classList.remove('open');
     }
+  });
+
+  // ── Zoom Shortcuts (⌘+ / ⌘- / ⌘0) ───────────────
+  async function resetZoom() {
+    applyZoom(100);
+    const s = await invoke('get_settings');
+    invoke('update_settings', { defaultColor: s.default_color, fontSize: s.font_size, zoom: 100 });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (!e.metaKey) return;
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); changeZoom(+1); }
+    else if (e.key === '-')             { e.preventDefault(); changeZoom(-1); }
+    else if (e.key === '0')             { e.preventDefault(); resetZoom(); }
   });
 
   // ── Init ──────────────────────────────────────────
