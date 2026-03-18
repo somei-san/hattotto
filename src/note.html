@@ -235,6 +235,40 @@
   }
   .md-check.checked span { text-decoration: line-through; opacity: 0.45; }
 
+  .md-blockquote {
+    border-left: 3px solid var(--text-muted);
+    padding-left: 10px;
+    color: var(--text-muted);
+    min-height: 21px;
+    word-break: break-word;
+  }
+
+  .md-hr {
+    border: none;
+    border-top: 1px solid var(--text-muted);
+    margin: 6px 0;
+  }
+
+  .md-ordered {
+    min-height: 21px;
+    word-break: break-word;
+  }
+  .md-order-num {
+    display: inline-block;
+    min-width: 1.5em;
+    text-align: right;
+    margin-right: 4px;
+    color: var(--text-muted);
+  }
+
+  .markdown-view code {
+    background: rgba(0,0,0,0.06);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+
   .markdown-view a {
     color: #1565C0;
     text-decoration: underline;
@@ -375,12 +409,31 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // Note: inlineMarkdown receives escapeHtml-processed strings.
+  // This is intentional — HTML entities (e.g. &amp;) are treated as plain text
+  // within Markdown syntax, and code blocks store the escaped form as-is,
+  // avoiding double-escaping when placed inside <code> tags.
   function inlineMarkdown(escaped) {
+    // `code` → placeholder (protect from bold/italic/strikethrough)
+    const codeBlocks = [];
+    escaped = escaped.replace(/`([^`]+)`/g, (_, c) => {
+      codeBlocks.push(c);
+      return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
+    });
+    // **bold** → <strong>
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // *italic* → <em> (after bold to avoid conflict)
+    escaped = escaped.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // ~~strikethrough~~ → <del>
+    escaped = escaped.replace(/~~([^~]+)~~/g, '<del>$1</del>');
     // [text](url) → <a>
-    return escaped.replace(
+    escaped = escaped.replace(
       /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
       '<a href="$2" data-url="$2">$1</a>'
     );
+    // Restore code blocks
+    escaped = escaped.replace(/\x00CODE(\d+)\x00/g, (_, i) => '<code>' + codeBlocks[i] + '</code>');
+    return escaped;
   }
 
   function renderMarkdown(text) {
@@ -393,7 +446,13 @@
       if (line.startsWith('### ')) return `<div class="md-h3">${inlineMarkdown(escapeHtml(line.slice(4)))}</div>`;
       if (line.startsWith('## '))  return `<div class="md-h2">${inlineMarkdown(escapeHtml(line.slice(3)))}</div>`;
       if (line.startsWith('# '))   return `<div class="md-h1">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
+      if (/^([-*_])\s*(?:\1\s*){2,}$/.test(line)) return '<hr class="md-hr">';
       if (/^[-*] /.test(line))     return `<div class="md-bullet">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
+      if (/^> /.test(line))         return `<div class="md-blockquote">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
+      if (/^\d+\. /.test(line)) {
+        const m = line.match(/^(\d+)\. (.*)/);
+        return `<div class="md-ordered"><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`;
+      }
       if (line === '')              return '<div class="md-empty"></div>';
       return `<div class="md-line">${inlineMarkdown(escapeHtml(line))}</div>`;
     }).join('');
