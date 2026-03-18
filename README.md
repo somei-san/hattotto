@@ -93,8 +93,6 @@ cargo tauri build
 
 # 2. GitHub Releases にアップロード
 gh release create v0.1.0 ./src-tauri/target/release/bundle/dmg/*.dmg
-
-# 3. Homebrew Tap は GitHub Actions が自動更新
 ```
 
 ## アイコンについて
