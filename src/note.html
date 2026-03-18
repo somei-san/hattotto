@@ -471,15 +471,20 @@
     editor.focus();
   }
 
-  // Click on preview → edit mode (but not for links or checkboxes)
+  // Click on preview: links open in browser, checkboxes toggle
   mdView.addEventListener('click', (e) => {
     const link = e.target.closest('a[data-url]');
     if (link) {
       e.preventDefault();
       window.__TAURI__.shell.open(link.dataset.url);
-      return;
     }
-    if (!e.target.closest('input[type="checkbox"]')) showEditor();
+  });
+
+  // Double-click on preview → edit mode
+  mdView.addEventListener('dblclick', (e) => {
+    if (!e.target.closest('input[type="checkbox"]') && !e.target.closest('a[data-url]')) {
+      showEditor();
+    }
   });
 
   // Blur textarea → preview mode
