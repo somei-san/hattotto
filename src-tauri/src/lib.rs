@@ -21,6 +21,12 @@ pub struct Note {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default = "default_zoom")]
+    pub zoom: u32,
+}
+
+fn default_zoom() -> u32 {
+    100
 }
 
 impl Note {
@@ -33,6 +39,7 @@ impl Note {
             y: 120.0,
             width: 280.0,
             height: 320.0,
+            zoom: 100,
         }
     }
 }
@@ -158,6 +165,15 @@ fn update_note_geometry(
         note.y = y;
         note.width = width;
         note.height = height;
+    }
+    save_notes(&notes);
+}
+
+#[tauri::command]
+fn update_note_zoom(id: String, zoom: u32, state: State<AppState>) {
+    let mut notes = state.notes.lock().unwrap();
+    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
+        note.zoom = zoom.clamp(50, 200);
     }
     save_notes(&notes);
 }
@@ -433,6 +449,7 @@ pub fn run() {
             update_note_content,
             update_note_color,
             update_note_geometry,
+            update_note_zoom,
             delete_note,
             create_note,
             get_settings,
