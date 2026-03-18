@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
-    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::MacosLauncher;
 use uuid::Uuid;
@@ -265,6 +265,7 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+,"),
     )?;
+    let new_note_item = MenuItem::with_id(app, "new_note", "New Note", true, Some("CmdOrCtrl+N"))?;
 
     let app_submenu = Submenu::with_items(
         app,
@@ -283,6 +284,8 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
+    let file_submenu = Submenu::with_items(app, "File", true, &[&new_note_item])?;
+
     let edit_submenu = Submenu::with_items(
         app,
         "Edit",
@@ -298,13 +301,50 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    let menu = Menu::with_items(app, &[&app_submenu, &edit_submenu])?;
+    let zoom_in_item = MenuItem::with_id(app, "zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?;
+    let zoom_out_item = MenuItem::with_id(app, "zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?;
+    let zoom_reset_item =
+        MenuItem::with_id(app, "zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?;
+    let view_submenu = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&zoom_in_item, &zoom_out_item, &zoom_reset_item],
+    )?;
+
+    let menu = Menu::with_items(
+        app,
+        &[&app_submenu, &file_submenu, &edit_submenu, &view_submenu],
+    )?;
     app.set_menu(menu)?;
 
-    app.on_menu_event(|app, event| {
-        if event.id() == "open_settings" {
+    app.on_menu_event(|app, event| match event.id().as_ref() {
+        "open_settings" => {
             open_settings_window(app);
         }
+        "new_note" => {
+            let state: State<AppState> = app.state();
+            let default_color = state.settings.lock().unwrap().default_color.clone();
+            let note = Note::new(&default_color);
+            let mut notes = state.notes.lock().unwrap();
+            let offset = (notes.len() as f64) * 30.0;
+            let mut n = note;
+            n.x += offset;
+            n.y += offset;
+            open_note_window(app, &n);
+            notes.push(n);
+            save_notes(&notes);
+        }
+        "zoom_in" => {
+            let _ = app.emit("zoom", "in");
+        }
+        "zoom_out" => {
+            let _ = app.emit("zoom", "out");
+        }
+        "zoom_reset" => {
+            let _ = app.emit("zoom", "reset");
+        }
+        _ => {}
     });
 
     Ok(())
@@ -313,7 +353,7 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 // ── System Tray ─────────────────────────────────────────────
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let new_note = MenuItem::with_id(app, "new_note", "New Note", true, Some("CmdOrCtrl+N"))?;
+    let new_note = MenuItem::with_id(app, "tray_new_note", "New Note", true, None::<&str>)?;
     let settings = MenuItem::with_id(
         app,
         "settings",
@@ -332,7 +372,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .tooltip("Hatto-to")
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "new_note" => {
+            "tray_new_note" => {
                 let state: State<AppState> = app.state();
                 let default_color = state.settings.lock().unwrap().default_color.clone();
                 let note = Note::new(&default_color);
