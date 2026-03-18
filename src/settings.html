@@ -397,6 +397,18 @@
   </div>
 
   <div class="section">
+    <div class="section-title">編集</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Markdown付箋をシングルクリックで編集</span>
+      <label class="toggle">
+        <input type="checkbox" id="single-click-toggle" />
+        <div class="toggle-track"></div>
+      </label>
+    </div>
+    <div style="margin-top:4px; font-size:11px; color:var(--text-muted);">OFFの場合はダブルクリックで編集モード</div>
+  </div>
+
+  <div class="section">
     <div class="section-title">システム</div>
     <div class="toggle-row">
       <span class="toggle-label">ログイン時に自動起動</span>
@@ -453,6 +465,7 @@
   let currentSize    = 14;
   let currentZoom    = 100;
   let currentOpacity = 100;
+  let currentSingleClick = false;
 
   // ── Tabs ────────────────────────────────────────────
   document.querySelectorAll('.tab').forEach(tab => {
@@ -498,12 +511,14 @@
       fontSize: currentSize,
       zoom: currentZoom,
       opacity: currentOpacity,
+      editOnSingleClick: currentSingleClick,
     });
     emit('settings-changed', {
       default_color: currentColor,
       font_size: currentSize,
       zoom: currentZoom,
       opacity: currentOpacity,
+      edit_on_single_click: currentSingleClick,
     });
     const msg = document.getElementById('save-msg');
     msg.textContent = '保存しました';
@@ -517,6 +532,12 @@
   opacitySlider.addEventListener('input', () => {
     currentOpacity = parseInt(opacitySlider.value, 10);
     opacityValue.textContent = `${currentOpacity}%`;
+  });
+
+  // ── Single Click Toggle ─────────────────────────────
+  const singleClickToggle = document.getElementById('single-click-toggle');
+  singleClickToggle.addEventListener('change', () => {
+    currentSingleClick = singleClickToggle.checked;
   });
 
   // ── Autostart Toggle ─────────────────────────────────
@@ -555,6 +576,9 @@
     currentOpacity = s.opacity ?? 100;
     opacitySlider.value = currentOpacity;
     opacityValue.textContent = `${currentOpacity}%`;
+
+    currentSingleClick = !!s.edit_on_single_click;
+    singleClickToggle.checked = currentSingleClick;
 
     autostartToggle.checked = !!autostartEnabled;
   }

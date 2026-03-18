@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   font_size: 14,
   zoom: 100,
   opacity: 100,
+  edit_on_single_click: false,
 };
 
 // ── Note mock ──────────────────────────────────────────────

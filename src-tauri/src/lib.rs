@@ -50,6 +50,8 @@ pub struct Settings {
     pub font_size: u32,
     pub zoom: u32,
     pub opacity: u32,
+    #[serde(default)]
+    pub edit_on_single_click: bool,
 }
 
 impl Default for Settings {
@@ -59,6 +61,7 @@ impl Default for Settings {
             font_size: 14,
             zoom: 100,
             opacity: 100,
+            edit_on_single_click: false,
         }
     }
 }
@@ -271,6 +274,7 @@ fn update_settings(
     font_size: u32,
     zoom: u32,
     opacity: u32,
+    edit_on_single_click: bool,
     state: State<AppState>,
 ) {
     let mut settings = state.settings.lock().unwrap();
@@ -278,6 +282,7 @@ fn update_settings(
     settings.font_size = font_size;
     settings.zoom = zoom.clamp(50, 200);
     settings.opacity = opacity.clamp(20, 100);
+    settings.edit_on_single_click = edit_on_single_click;
     save_settings(&settings);
 }
 

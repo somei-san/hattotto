@@ -525,7 +525,7 @@
     return offset;
   }
 
-  // Click on preview: links open in browser; plain text → edit on single click
+  // Click on preview: links/checkboxes handled, then edit mode logic
   mdView.addEventListener('click', (e) => {
     const link = e.target.closest('a[data-url]');
     if (link) {
@@ -533,12 +533,19 @@
       window.__TAURI__.shell.open(link.dataset.url);
       return;
     }
+    if (e.target.closest('input[type="checkbox"]')) return;
+    // Always single-click for empty/plain text notes
     if (!rawContent || !hasMarkdownSyntax(rawContent)) {
+      showEditor(getCaretOffsetFromEvent(e));
+      return;
+    }
+    // Markdown notes: single-click if setting enabled
+    if (currentSettings?.edit_on_single_click) {
       showEditor(getCaretOffsetFromEvent(e));
     }
   });
 
-  // Double-click on preview → edit mode
+  // Double-click on preview → edit mode (always works)
   mdView.addEventListener('dblclick', (e) => {
     if (!e.target.closest('input[type="checkbox"]') && !e.target.closest('a[data-url]')) {
       showEditor(getCaretOffsetFromEvent(e));
