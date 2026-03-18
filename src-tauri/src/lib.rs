@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{
     menu::{IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem, Submenu},
@@ -92,10 +92,9 @@ fn settings_file() -> PathBuf {
     data_dir().join("settings.json")
 }
 
-fn load_notes() -> Vec<Note> {
-    let path = data_file();
+fn load_notes_from(path: &Path) -> Vec<Note> {
     if path.exists() {
-        fs::read_to_string(&path)
+        fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
@@ -104,17 +103,23 @@ fn load_notes() -> Vec<Note> {
     }
 }
 
-fn save_notes(notes: &[Note]) {
-    let path = data_file();
+fn load_notes() -> Vec<Note> {
+    load_notes_from(&data_file())
+}
+
+fn save_notes_to(notes: &[Note], path: &Path) {
     if let Ok(json) = serde_json::to_string_pretty(notes) {
         let _ = fs::write(path, json);
     }
 }
 
-fn load_settings() -> Settings {
-    let path = settings_file();
+fn save_notes(notes: &[Note]) {
+    save_notes_to(notes, &data_file());
+}
+
+fn load_settings_from(path: &Path) -> Settings {
     if path.exists() {
-        fs::read_to_string(&path)
+        fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
@@ -123,21 +128,27 @@ fn load_settings() -> Settings {
     }
 }
 
-fn save_settings(settings: &Settings) {
-    let path = settings_file();
+fn load_settings() -> Settings {
+    load_settings_from(&settings_file())
+}
+
+fn save_settings_to(settings: &Settings, path: &Path) {
     if let Ok(json) = serde_json::to_string_pretty(settings) {
         let _ = fs::write(path, json);
     }
+}
+
+fn save_settings(settings: &Settings) {
+    save_settings_to(settings, &settings_file());
 }
 
 fn trash_file() -> PathBuf {
     data_dir().join("trash.json")
 }
 
-fn load_trash() -> Vec<Note> {
-    let path = trash_file();
+fn load_trash_from(path: &Path) -> Vec<Note> {
     if path.exists() {
-        fs::read_to_string(&path)
+        fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
@@ -146,10 +157,25 @@ fn load_trash() -> Vec<Note> {
     }
 }
 
-fn save_trash(trash: &[Note]) {
-    let path = trash_file();
+fn load_trash() -> Vec<Note> {
+    load_trash_from(&trash_file())
+}
+
+fn save_trash_to(trash: &[Note], path: &Path) {
     if let Ok(json) = serde_json::to_string_pretty(trash) {
         let _ = fs::write(path, json);
+    }
+}
+
+fn save_trash(trash: &[Note]) {
+    save_trash_to(trash, &trash_file());
+}
+
+/// ゴミ箱のFIFO制限: TRASH_MAXを超えた分を先頭から削除
+fn enforce_trash_limit(trash: &mut Vec<Note>) {
+    let overflow = trash.len().saturating_sub(TRASH_MAX);
+    if overflow > 0 {
+        trash.drain(0..overflow);
     }
 }
 
@@ -216,10 +242,7 @@ fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
             save_notes(&notes);
             let mut trash = state.trash.lock().unwrap();
             trash.push(note);
-            let overflow = trash.len().saturating_sub(TRASH_MAX);
-            if overflow > 0 {
-                trash.drain(0..overflow);
-            }
+            enforce_trash_limit(&mut trash);
             save_trash(&trash);
         }
     }
@@ -622,4 +645,197 @@ pub fn run() {
                 bring_all_to_front(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_note(id: &str, color: &str, content: &str) -> Note {
+        Note {
+            id: id.to_string(),
+            content: content.to_string(),
+            color: color.to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 280.0,
+            height: 320.0,
+            zoom: 100,
+        }
+    }
+
+    // ── Note::new() ──
+
+    #[test]
+    fn note_new_has_uuid_format() {
+        let note = Note::new("yellow");
+        assert!(uuid::Uuid::parse_str(&note.id).is_ok());
+    }
+
+    #[test]
+    fn note_new_defaults() {
+        let note = Note::new("blue");
+        assert_eq!(note.content, "");
+        assert_eq!(note.color, "blue");
+        assert_eq!(note.x, 120.0);
+        assert_eq!(note.y, 120.0);
+        assert_eq!(note.width, 280.0);
+        assert_eq!(note.height, 320.0);
+        assert_eq!(note.zoom, 100);
+    }
+
+    #[test]
+    fn note_new_color_reflected() {
+        assert_eq!(Note::new("pink").color, "pink");
+        assert_eq!(Note::new("green").color, "green");
+    }
+
+    // ── Settings::default() ──
+
+    #[test]
+    fn settings_default_values() {
+        let s = Settings::default();
+        assert_eq!(s.default_color, "yellow");
+        assert_eq!(s.font_size, 14);
+        assert_eq!(s.zoom, 100);
+        assert_eq!(s.opacity, 100);
+        assert!(!s.edit_on_single_click);
+    }
+
+    // ── Trash FIFO ──
+
+    #[test]
+    fn trash_fifo_within_limit() {
+        let mut trash: Vec<Note> = (0..20).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        enforce_trash_limit(&mut trash);
+        assert_eq!(trash.len(), 20);
+    }
+
+    #[test]
+    fn trash_fifo_overflow_by_one() {
+        let mut trash: Vec<Note> = (0..21).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        enforce_trash_limit(&mut trash);
+        assert_eq!(trash.len(), 20);
+        // oldest (id "0") should be removed
+        assert_eq!(trash[0].id, "1");
+    }
+
+    #[test]
+    fn trash_fifo_overflow_by_five() {
+        let mut trash: Vec<Note> = (0..25).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        enforce_trash_limit(&mut trash);
+        assert_eq!(trash.len(), 20);
+        assert_eq!(trash[0].id, "5");
+        assert_eq!(trash[19].id, "24");
+    }
+
+    // ── Zoom clamp ──
+
+    #[test]
+    fn zoom_clamp_below_min() {
+        assert_eq!(30_u32.clamp(50, 200), 50);
+    }
+
+    #[test]
+    fn zoom_clamp_above_max() {
+        assert_eq!(250_u32.clamp(50, 200), 200);
+    }
+
+    #[test]
+    fn zoom_clamp_within_range() {
+        assert_eq!(120_u32.clamp(50, 200), 120);
+    }
+
+    // ── Opacity clamp ──
+
+    #[test]
+    fn opacity_clamp_below_min() {
+        assert_eq!(10_u32.clamp(20, 100), 20);
+    }
+
+    #[test]
+    fn opacity_clamp_above_max() {
+        assert_eq!(150_u32.clamp(20, 100), 100);
+    }
+
+    #[test]
+    fn opacity_clamp_within_range() {
+        assert_eq!(75_u32.clamp(20, 100), 75);
+    }
+
+    // ── JSON persistence roundtrip ──
+
+    #[test]
+    fn notes_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("notes.json");
+        let notes = vec![
+            make_note("a", "yellow", "hello"),
+            make_note("b", "blue", "world"),
+        ];
+        save_notes_to(&notes, &path);
+        let loaded = load_notes_from(&path);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "a");
+        assert_eq!(loaded[0].content, "hello");
+        assert_eq!(loaded[1].id, "b");
+        assert_eq!(loaded[1].color, "blue");
+    }
+
+    #[test]
+    fn settings_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            default_color: "pink".into(),
+            font_size: 18,
+            zoom: 150,
+            opacity: 80,
+            edit_on_single_click: true,
+        };
+        save_settings_to(&settings, &path);
+        let loaded = load_settings_from(&path);
+        assert_eq!(loaded.default_color, "pink");
+        assert_eq!(loaded.font_size, 18);
+        assert_eq!(loaded.zoom, 150);
+        assert_eq!(loaded.opacity, 80);
+        assert!(loaded.edit_on_single_click);
+    }
+
+    #[test]
+    fn trash_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("trash.json");
+        let trash = vec![make_note("t1", "green", "deleted")];
+        save_trash_to(&trash, &path);
+        let loaded = load_trash_from(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "t1");
+        assert_eq!(loaded[0].content, "deleted");
+    }
+
+    #[test]
+    fn load_notes_nonexistent_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent.json");
+        assert!(load_notes_from(&path).is_empty());
+    }
+
+    #[test]
+    fn load_settings_nonexistent_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent.json");
+        let s = load_settings_from(&path);
+        assert_eq!(s.default_color, "yellow");
+    }
+
+    // ── Note serde backward compat (missing zoom field) ──
+
+    #[test]
+    fn note_deserialize_without_zoom_defaults_to_100() {
+        let json = r#"{"id":"old","content":"text","color":"yellow","x":0,"y":0,"width":280,"height":320}"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.zoom, 100);
+    }
 }

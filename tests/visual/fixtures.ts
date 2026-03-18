@@ -100,6 +100,28 @@ async function injectSettingsMock(
   }, { settings, autostart: autostartEnabled });
 }
 
+// ── Trash mock ────────────────────────────────────────────
+
+async function injectTrashMock(
+  page: Page,
+  trashItems: Record<string, unknown>[] = [],
+) {
+  await page.addInitScript((data) => {
+    (window as any).__TAURI__ = {
+      core: {
+        invoke: async (cmd: string) => {
+          switch (cmd) {
+            case "get_trash":     return data.items;
+            case "restore_note":  return null;
+            case "empty_trash":   return null;
+            default:              return null;
+          }
+        },
+      },
+    };
+  }, { items: trashItems });
+}
+
 // ── Fixture types ──────────────────────────────────────────
 
 type Fixtures = {
@@ -107,6 +129,8 @@ type Fixtures = {
   openNote: (overrides?: Record<string, unknown>, settings?: Record<string, unknown>) => Promise<Page>;
   settingsPage: Page;
   openSettings: (overrides?: Record<string, unknown>, autostart?: boolean) => Promise<Page>;
+  trashPage: Page;
+  openTrash: (items?: Record<string, unknown>[]) => Promise<Page>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -151,6 +175,31 @@ export const test = base.extend<Fixtures>({
       const page = await ctx.newPage();
       await injectSettingsMock(page, overrides, autostart);
       await page.goto("/settings.html");
+      await page.waitForLoadState("networkidle");
+      pages.push(page);
+      return page;
+    };
+    await use(open);
+    for (const p of pages) await p.context().close();
+  },
+
+  // trash.html — default empty trash
+  trashPage: async ({ page }, use) => {
+    await page.setViewportSize({ width: 360, height: 480 });
+    await injectTrashMock(page);
+    await page.goto("/trash.html");
+    await page.waitForLoadState("networkidle");
+    await use(page);
+  },
+
+  // trash.html — custom trash data, own browser context (360x480)
+  openTrash: async ({ browser }, use) => {
+    const pages: Page[] = [];
+    const open = async (items: Record<string, unknown>[] = []) => {
+      const ctx = await browser.newContext({ viewport: { width: 360, height: 480 } });
+      const page = await ctx.newPage();
+      await injectTrashMock(page, items);
+      await page.goto("/trash.html");
       await page.waitForLoadState("networkidle");
       pages.push(page);
       return page;
