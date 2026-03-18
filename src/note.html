@@ -179,13 +179,12 @@
     opacity: 0.3;
   }
 
-  textarea {
+  .editor {
     width: 100%;
     height: 100%;
     padding: 12px 16px;
     border: none;
     outline: none;
-    resize: none;
     background: transparent;
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -193,10 +192,15 @@
     line-height: 28px;
     user-select: text;
     -webkit-user-select: text;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-y: auto;
   }
 
-  textarea::placeholder {
+  .editor:empty::before {
+    content: 'メモを入力…';
     color: var(--text-muted);
+    pointer-events: none;
   }
 
   /* ── Markdown Preview ─────────────────────────────── */
@@ -307,7 +311,7 @@
     <div class="content">
       <div class="lines" id="lines"></div>
       <div class="markdown-view" id="markdown-view"></div>
-      <textarea id="editor" placeholder="メモを入力…"></textarea>
+      <div class="editor" id="editor" contenteditable="true"></div>
     </div>
   </div>
 
@@ -348,7 +352,7 @@
     ]);
     if (!note) return;
 
-    editor.value = note.content;
+    editor.innerText = note.content;
     applyColor(note.color);
 
     if (settings) {
@@ -386,7 +390,7 @@
   }
 
   function showPreview() {
-    mdView.innerHTML = renderMarkdown(editor.value);
+    mdView.innerHTML = renderMarkdown(editor.innerText);
     mdView.classList.add('active');
     editor.style.display = 'none';
     linesEl.style.display = 'none';
@@ -415,15 +419,15 @@
   mdView.addEventListener('change', (e) => {
     if (e.target.type !== 'checkbox') return;
     const lineIdx = parseInt(e.target.dataset.line, 10);
-    const lines = editor.value.split('\n');
+    const lines = editor.innerText.split('\n');
     if (e.target.checked) {
       lines[lineIdx] = lines[lineIdx].replace(/^([-*] )\[ \] /, '$1[x] ');
     } else {
       lines[lineIdx] = lines[lineIdx].replace(/^([-*] )\[x\] /i, '$1[ ] ');
     }
-    editor.value = lines.join('\n');
-    invoke('update_note_content', { id: noteId, content: editor.value });
-    mdView.innerHTML = renderMarkdown(editor.value);
+    editor.innerText = lines.join('\n');
+    invoke('update_note_content', { id: noteId, content: editor.innerText });
+    mdView.innerHTML = renderMarkdown(editor.innerText);
   });
 
   // ── Zoom ──────────────────────────────────────────
@@ -445,11 +449,18 @@
     });
   }
 
+  // ── Paste as plain text ──────────────────────────
+  editor.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+
   // ── Auto-Save Content ─────────────────────────────
   editor.addEventListener('input', () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      invoke('update_note_content', { id: noteId, content: editor.value });
+      invoke('update_note_content', { id: noteId, content: editor.innerText });
     }, 300);
   });
 
