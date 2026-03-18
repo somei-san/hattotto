@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri_plugin_autostart::MacosLauncher;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_autostart::MacosLauncher;
 use uuid::Uuid;
 
 // ── Data Model ──────────────────────────────────────────────
@@ -144,7 +144,14 @@ fn update_note_color(id: String, color: String, state: State<AppState>) {
 }
 
 #[tauri::command]
-fn update_note_geometry(id: String, x: f64, y: f64, width: f64, height: f64, state: State<AppState>) {
+fn update_note_geometry(
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    state: State<AppState>,
+) {
     let mut notes = state.notes.lock().unwrap();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.x = x;
@@ -173,7 +180,13 @@ fn get_settings(state: State<AppState>) -> Settings {
 }
 
 #[tauri::command]
-fn update_settings(default_color: String, font_size: u32, zoom: u32, opacity: u32, state: State<AppState>) {
+fn update_settings(
+    default_color: String,
+    font_size: u32,
+    zoom: u32,
+    opacity: u32,
+    state: State<AppState>,
+) {
     let mut settings = state.settings.lock().unwrap();
     settings.default_color = default_color;
     settings.font_size = font_size;
@@ -245,7 +258,13 @@ fn open_settings_window(app: &AppHandle) {
 // ── App Menu ────────────────────────────────────────────────
 
 fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
-    let settings_item = MenuItem::with_id(app, "open_settings", "Settings...", true, Some("CmdOrCtrl+,"))?;
+    let settings_item = MenuItem::with_id(
+        app,
+        "open_settings",
+        "Settings...",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
 
     let app_submenu = Submenu::with_items(
         app,
@@ -295,7 +314,13 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let new_note = MenuItem::with_id(app, "new_note", "New Note", true, Some("CmdOrCtrl+N"))?;
-    let settings = MenuItem::with_id(app, "settings", "Settings / Help", true, Some("CmdOrCtrl+,"))?;
+    let settings = MenuItem::with_id(
+        app,
+        "settings",
+        "Settings / Help",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
     let menu = Menu::with_items(app, &[&new_note, &settings, &quit])?;
 
@@ -333,6 +358,19 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+// ── Bring All Notes to Front ────────────────────────────────
+
+fn bring_all_to_front(app: &AppHandle) {
+    let state: State<AppState> = app.state();
+    let notes = state.notes.lock().unwrap();
+    for note in notes.iter() {
+        if let Some(win) = app.get_webview_window(&format!("note-{}", note.id)) {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+}
+
 // ── App Entry ───────────────────────────────────────────────
 
 pub fn run() {
@@ -344,7 +382,10 @@ pub fn run() {
     };
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_shell::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -389,6 +430,11 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Hatto-to");
+        .build(tauri::generate_context!())
+        .expect("error while building Hatto-to")
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                bring_all_to_front(app);
+            }
+        });
 }
