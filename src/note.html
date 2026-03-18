@@ -280,6 +280,56 @@
     text-decoration-color: rgba(21, 101, 192, 0.8);
   }
 
+  /* ── Context Menu ──────────────────────────────────── */
+  .context-menu {
+    display: none;
+    position: fixed;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 8px;
+    padding: 4px 0;
+    min-width: 180px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15), 0 0 0 0.5px rgba(0,0,0,0.1);
+    z-index: 200;
+    font-size: 13px;
+    color: #222;
+    -webkit-app-region: no-drag;
+  }
+
+  .context-menu.open { display: block; }
+
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    cursor: default;
+    border-radius: 4px;
+    margin: 0 4px;
+    gap: 8px;
+  }
+
+  .context-menu-item:hover {
+    background: #007AFF;
+    color: #fff;
+  }
+
+  .context-menu-item .cm-icon {
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    opacity: 0.7;
+  }
+
+  .context-menu-item:hover .cm-icon { opacity: 1; }
+
+  .context-menu-separator {
+    height: 1px;
+    background: rgba(0,0,0,0.1);
+    margin: 4px 0;
+  }
+
   /* ── Resize Handle ────────────────────────────────── */
   .resize-handle {
     position: absolute;
@@ -340,6 +390,22 @@
       <div class="color-dot" data-color="pink"></div>
       <div class="color-dot" data-color="purple"></div>
       <div class="color-dot" data-color="gray"></div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu" id="context-menu">
+      <div class="context-menu-item" data-action="cut"><span class="cm-icon">✂</span>切り取り</div>
+      <div class="context-menu-item" data-action="copy"><span class="cm-icon">⎘</span>コピー</div>
+      <div class="context-menu-item" data-action="paste"><span class="cm-icon">⎗</span>貼り付け</div>
+      <div class="context-menu-item" data-action="selectAll"><span class="cm-icon">⌃A</span>全選択</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item" data-action="newNote"><span class="cm-icon">＋</span>新しい付箋を作成</div>
+      <div class="context-menu-item" data-action="deleteNote"><span class="cm-icon">✕</span>この付箋を削除</div>
+      <div class="context-menu-item" data-action="openTrash"><span class="cm-icon">🗑</span>ゴミ箱を開く</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item" data-action="zoomIn"><span class="cm-icon">＋</span>ズームイン</div>
+      <div class="context-menu-item" data-action="zoomOut"><span class="cm-icon">−</span>ズームアウト</div>
+      <div class="context-menu-item" data-action="zoomReset"><span class="cm-icon">1:1</span>ズームリセット</div>
     </div>
 
     <!-- Content -->
@@ -554,8 +620,9 @@
 
   // Blur textarea → preview mode
   editor.addEventListener('blur', (e) => {
-    // Don't switch if focus moves to a button (color picker, etc.)
+    // Don't switch if focus moves to a button (color picker, etc.) or context menu is open
     if (e.relatedTarget && e.relatedTarget.closest('.note')) return;
+    if (ctxMenu.classList.contains('open')) return;
     showPreview();
   });
 
@@ -836,6 +903,128 @@
     const fs = s.font_size;
     editor.style.fontSize = `${fs}px`;
     noteEl.style.opacity = (s.opacity ?? 100) / 100;
+  });
+
+  // ── Context Menu ─────────────────────────────────────
+  const ctxMenu = document.getElementById('context-menu');
+  let savedActiveElement = null;
+  let savedSelection = null;
+
+  function showContextMenu(x, y) {
+    savedActiveElement = document.activeElement;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedSelection = sel.getRangeAt(0).cloneRange();
+    } else {
+      savedSelection = null;
+    }
+    ctxMenu.classList.add('open');
+    // Position first, then adjust for screen edges
+    ctxMenu.style.left = `${x}px`;
+    ctxMenu.style.top = `${y}px`;
+    // Adjust if menu overflows viewport
+    const rect = ctxMenu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (rect.right > vw) ctxMenu.style.left = `${Math.max(0, x - rect.width)}px`;
+    if (rect.bottom > vh) ctxMenu.style.top = `${Math.max(0, y - rect.height)}px`;
+  }
+
+  function hideContextMenu() {
+    ctxMenu.classList.remove('open');
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    if (e.shiftKey) return;
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#context-menu')) {
+      hideContextMenu();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideContextMenu();
+  });
+
+  function restoreFocusAndSelection() {
+    if (savedActiveElement && savedActiveElement.isConnected) {
+      savedActiveElement.focus();
+    }
+    if (savedSelection) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelection);
+    }
+  }
+
+  ctxMenu.addEventListener('click', async (e) => {
+    const item = e.target.closest('.context-menu-item');
+    if (!item) return;
+    const action = item.dataset.action;
+    hideContextMenu();
+
+    switch (action) {
+      case 'cut': {
+        restoreFocusAndSelection();
+        const cutSel = window.getSelection();
+        if (cutSel && cutSel.toString()) {
+          try {
+            await navigator.clipboard.writeText(cutSel.toString());
+            cutSel.deleteFromDocument();
+          } catch (_) {
+            document.execCommand('cut');
+          }
+        }
+        break;
+      }
+      case 'copy': {
+        restoreFocusAndSelection();
+        const copySel = window.getSelection();
+        if (copySel && copySel.toString()) {
+          try {
+            await navigator.clipboard.writeText(copySel.toString());
+          } catch (_) {
+            document.execCommand('copy');
+          }
+        }
+        break;
+      }
+      case 'paste':
+        restoreFocusAndSelection();
+        try {
+          const text = await navigator.clipboard.readText();
+          document.execCommand('insertText', false, text);
+        } catch (_) {
+          document.execCommand('paste');
+        }
+        break;
+      case 'selectAll':
+        restoreFocusAndSelection();
+        document.execCommand('selectAll');
+        break;
+      case 'newNote':
+        invoke('create_note');
+        break;
+      case 'deleteNote':
+        invoke('delete_note', { id: noteId });
+        break;
+      case 'openTrash':
+        invoke('open_trash');
+        break;
+      case 'zoomIn':
+        changeZoom(+1);
+        break;
+      case 'zoomOut':
+        changeZoom(-1);
+        break;
+      case 'zoomReset':
+        resetZoom();
+        break;
+    }
   });
 
   // ── Expose for testing ──────────────────────────────
