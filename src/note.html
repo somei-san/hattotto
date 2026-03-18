@@ -465,10 +465,30 @@
     editor.style.display = 'none';
   }
 
-  function showEditor() {
+  function showEditor(caretOffset) {
     mdView.classList.remove('active');
     editor.style.display = '';
     editor.focus();
+    if (caretOffset != null) {
+      try {
+        // Walk text nodes to find the right position
+        let remaining = caretOffset;
+        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (remaining <= node.textContent.length) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.setStart(node, remaining);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return;
+          }
+          remaining -= node.textContent.length;
+        }
+      } catch (e) { /* fallback: cursor at start */ }
+    }
   }
 
   const MD_PATTERNS = [
@@ -490,6 +510,21 @@
     return MD_PATTERNS.some(r => r.test(text));
   }
 
+  function getCaretOffsetFromEvent(e) {
+    // Find which top-level child of mdView was clicked
+    const children = Array.from(mdView.children);
+    const target = e.target.closest('.markdown-view > *') || e.target;
+    const lineIdx = children.indexOf(target);
+    if (lineIdx < 0) return 0;
+    // Sum lengths of rawContent lines up to lineIdx
+    const lines = rawContent.split('\n');
+    let offset = 0;
+    for (let i = 0; i < Math.min(lineIdx, lines.length); i++) {
+      offset += lines[i].length + 1; // +1 for \n
+    }
+    return offset;
+  }
+
   // Click on preview: links open in browser; plain text → edit on single click
   mdView.addEventListener('click', (e) => {
     const link = e.target.closest('a[data-url]');
@@ -498,13 +533,15 @@
       window.__TAURI__.shell.open(link.dataset.url);
       return;
     }
-    if (!rawContent || !hasMarkdownSyntax(rawContent)) showEditor();
+    if (!rawContent || !hasMarkdownSyntax(rawContent)) {
+      showEditor(getCaretOffsetFromEvent(e));
+    }
   });
 
   // Double-click on preview → edit mode
   mdView.addEventListener('dblclick', (e) => {
     if (!e.target.closest('input[type="checkbox"]') && !e.target.closest('a[data-url]')) {
-      showEditor();
+      showEditor(getCaretOffsetFromEvent(e));
     }
   });
 
