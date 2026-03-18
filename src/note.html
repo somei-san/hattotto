@@ -519,17 +519,74 @@
     invoke('update_note_zoom', { id: noteId, zoom: next });
   }
 
-  // ── Paste as plain text / auto-link ─────────────
+  // ── Paste: rich text links → markdown, otherwise plain ──
+  function htmlToMarkdown(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    let result = '';
+    for (const node of doc.body.childNodes) {
+      result += nodeToMd(node);
+    }
+    return result;
+  }
+
+  function nodeToMd(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const tag = node.tagName.toLowerCase();
+    // Strip script/style tags entirely — their text content is never useful
+    if (tag === 'script' || tag === 'style') return '';
+    const inner = Array.from(node.childNodes).map(nodeToMd).join('');
+    switch (tag) {
+      case 'a': {
+        const href = node.getAttribute('href') || '';
+        if (!href || /^javascript:/i.test(href)) return inner;
+        return `[${inner.trim() || href}](${href})`;
+      }
+      case 'strong': case 'b':  return inner ? `**${inner}**` : '';
+      case 'em': case 'i':      return inner ? `*${inner}*` : '';
+      case 'del': case 's':     return inner ? `~~${inner}~~` : '';
+      case 'code':               return inner ? `\`${inner}\`` : '';
+      case 'h1':                 return inner ? `# ${inner}\n` : '';
+      case 'h2':                 return inner ? `## ${inner}\n` : '';
+      case 'h3':                 return inner ? `### ${inner}\n` : '';
+      case 'blockquote':         return inner ? inner.split('\n').filter(l => l).map(l => `> ${l}`).join('\n') + '\n' : '';
+      case 'ul': case 'ol':     return inner;
+      case 'li': {
+        const parent = node.parentElement?.tagName.toLowerCase();
+        if (parent === 'ol') {
+          const idx = Array.from(node.parentElement.children).indexOf(node) + 1;
+          return `${idx}. ${inner}\n`;
+        }
+        return `- ${inner}\n`;
+      }
+      case 'br':                 return '\n';
+      case 'p': case 'div':     return inner + '\n';
+      default:                   return inner;
+    }
+  }
+
   editor.addEventListener('paste', (e) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
+    const html = e.clipboardData.getData('text/html');
     const sel = window.getSelection();
     const selected = sel.toString();
+
+    // 選択テキスト + URL → markdown link
     if (selected && /^https?:\/\/\S+$/.test(text.trim())) {
       document.execCommand('insertText', false, `[${selected}](${text.trim()})`);
-    } else {
-      document.execCommand('insertText', false, text);
+      return;
     }
+
+    // リッチテキストが含まれていれば markdown 変換
+    if (html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)) {
+      const md = htmlToMarkdown(html);
+      document.execCommand('insertText', false, md);
+      return;
+    }
+
+    // それ以外はプレーンテキスト
+    document.execCommand('insertText', false, text);
   });
 
   // ── Auto-Save Content ─────────────────────────────
@@ -636,6 +693,9 @@
     editor.style.fontSize = `${fs}px`;
     noteEl.style.opacity = (s.opacity ?? 100) / 100;
   });
+
+  // ── Expose for testing ──────────────────────────────
+  window.htmlToMarkdown = htmlToMarkdown;
 
   // ── Init ──────────────────────────────────────────
   loadNote();

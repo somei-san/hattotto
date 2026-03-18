@@ -28,7 +28,14 @@
       "Bash(sips -z 44 44 --out /Users/somei.tanoue/Repos/SomeiRepos/hatto-to/src-tauri/icons/tray.png \"$SRC\")",
       "Read(//Applications/**)",
       "Read(//Users/somei.tanoue/Applications/**)",
-      "Bash(cargo fmt:*)"
+      "Bash(cargo fmt:*)",
+      "Bash(cargo tauri:*)",
+      "Bash(find src-tauri/target -path */muda*/native_icon* -name *.rs)",
+      "Bash(find ~/.cargo/registry/src -name *.rs -exec grep -l 'enum NativeIcon' {})",
+      "Bash(2)",
+      "Bash(bash .dojo/run_dojo.sh 2>&1)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)"
     ]
   }
 }
