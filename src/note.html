@@ -270,6 +270,24 @@
     font-size: 0.9em;
   }
 
+  .md-codeblock {
+    background: rgba(0,0,0,0.06);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 4px 0;
+    overflow-x: auto;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    white-space: pre;
+  }
+  .md-codeblock code {
+    background: none;
+    border-radius: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+
   .markdown-view a {
     color: #1565C0;
     text-decoration: underline;
@@ -505,24 +523,75 @@
 
   function renderMarkdown(text) {
     if (!text) return '<div class="md-placeholder">メモを入力…</div>';
-    return text.split('\n').map((line, i) => {
-      if (/^[-*] \[x\] /i.test(line))
-        return `<div class="md-check checked"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`;
-      if (/^[-*] \[ \] /.test(line))
-        return `<div class="md-check"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`;
-      if (line.startsWith('### ')) return `<div class="md-h3">${inlineMarkdown(escapeHtml(line.slice(4)))}</div>`;
-      if (line.startsWith('## '))  return `<div class="md-h2">${inlineMarkdown(escapeHtml(line.slice(3)))}</div>`;
-      if (line.startsWith('# '))   return `<div class="md-h1">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
-      if (/^([-*_])\s*(?:\1\s*){2,}$/.test(line)) return '<hr class="md-hr">';
-      if (/^[-*] /.test(line))     return `<div class="md-bullet">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
-      if (/^> /.test(line))         return `<div class="md-blockquote">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`;
+    const lines = text.split('\n');
+    const result = [];
+    let inCodeBlock = false;
+    let codeLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!inCodeBlock && /^```\S*\s*$/.test(line)) {
+        inCodeBlock = true;
+        codeLines = [];
+        continue;
+      }
+      if (inCodeBlock && /^```\s*$/.test(line)) {
+        result.push('<pre class="md-codeblock"><code>' + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
+        inCodeBlock = false;
+        codeLines = [];
+        continue;
+      }
+      if (inCodeBlock) {
+        codeLines.push(line);
+        continue;
+      }
+      if (/^[-*] \[x\] /i.test(line)) {
+        result.push(`<div class="md-check checked"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`);
+        continue;
+      }
+      if (/^[-*] \[ \] /.test(line)) {
+        result.push(`<div class="md-check"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`);
+        continue;
+      }
+      if (line.startsWith('### ')) {
+        result.push(`<div class="md-h3">${inlineMarkdown(escapeHtml(line.slice(4)))}</div>`);
+        continue;
+      }
+      if (line.startsWith('## ')) {
+        result.push(`<div class="md-h2">${inlineMarkdown(escapeHtml(line.slice(3)))}</div>`);
+        continue;
+      }
+      if (line.startsWith('# ')) {
+        result.push(`<div class="md-h1">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+        continue;
+      }
+      if (/^([-*_])\s*(?:\1\s*){2,}$/.test(line)) {
+        result.push('<hr class="md-hr">');
+        continue;
+      }
+      if (/^[-*] /.test(line)) {
+        result.push(`<div class="md-bullet">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+        continue;
+      }
+      if (/^> /.test(line)) {
+        result.push(`<div class="md-blockquote">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+        continue;
+      }
       if (/^\d+\. /.test(line)) {
         const m = line.match(/^(\d+)\. (.*)/);
-        return `<div class="md-ordered"><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`;
+        result.push(`<div class="md-ordered"><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+        continue;
       }
-      if (line === '')              return '<div class="md-empty"></div>';
-      return `<div class="md-line">${inlineMarkdown(escapeHtml(line))}</div>`;
-    }).join('');
+      if (line === '') {
+        result.push('<div class="md-empty"></div>');
+        continue;
+      }
+      result.push(`<div class="md-line">${inlineMarkdown(escapeHtml(line))}</div>`);
+    }
+    // Handle unclosed code block
+    if (inCodeBlock) {
+      result.push('<pre class="md-codeblock"><code>' + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
+    }
+    return result.join('');
   }
 
   function showPreview() {
@@ -1032,6 +1101,7 @@
   window.hasMarkdownSyntax = hasMarkdownSyntax;
   window.getAutoPrefix = getAutoPrefix;
   window.isEmptyListItem = isEmptyListItem;
+  window.renderMarkdown = renderMarkdown;
 
   // ── Init ──────────────────────────────────────────
   loadNote();

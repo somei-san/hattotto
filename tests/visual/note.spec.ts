@@ -33,6 +33,14 @@ test("note — markdown extended", async ({ openNote }) => {
   await expect(page).toHaveScreenshot("note-markdown-extended.png");
 });
 
+test("note — markdown fenced code block", async ({ openNote }) => {
+  const page = await openNote({
+    color: "yellow",
+    content: "# コードブロック\n\n```js\nconst x = 1;\nif (x > 0) {\n  console.log(\"hello\");\n}\n```\n\n通常テキスト\n\n```\n# これは見出しではない\n**太字ではない**\n```",
+  });
+  await expect(page).toHaveScreenshot("note-markdown-codeblock.png");
+});
+
 test("color picker open", async ({ notePage }) => {
   await notePage.click("#btn-color");
   await notePage.waitForSelector(".color-picker.open");
