@@ -447,6 +447,7 @@
 
 <script>
   const { invoke } = window.__TAURI__.core;
+  const { emit } = window.__TAURI__.event;
 
   let currentColor   = 'yellow';
   let currentSize    = 14;
@@ -495,6 +496,12 @@
     await invoke('update_settings', {
       defaultColor: currentColor,
       fontSize: currentSize,
+      zoom: currentZoom,
+      opacity: currentOpacity,
+    });
+    emit('settings-changed', {
+      default_color: currentColor,
+      font_size: currentSize,
       zoom: currentZoom,
       opacity: currentOpacity,
     });

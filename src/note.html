@@ -551,6 +551,19 @@
     else if (e.payload === 'reset') resetZoom();
   });
 
+  // ── Listen for settings changes ──────────────────
+  listen('settings-changed', (e) => {
+    const s = e.payload;
+    currentSettings = s;
+    const fs = s.font_size;
+    editor.style.fontSize = `${fs}px`;
+    editor.style.lineHeight = `${fs * 2}px`;
+    linesEl.style.backgroundImage =
+      `repeating-linear-gradient(to bottom, transparent, transparent ${fs * 2 - 1}px, var(--text-muted) ${fs * 2 - 1}px, var(--text-muted) ${fs * 2}px)`;
+    applyZoom(s.zoom);
+    noteEl.style.opacity = (s.opacity ?? 100) / 100;
+  });
+
   // ── Init ──────────────────────────────────────────
   loadNote();
 </script>

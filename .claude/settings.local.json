@@ -7,7 +7,28 @@
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(wait)",
-      "Bash(cargo clippy:*)"
+      "Bash(cargo clippy:*)",
+      "Bash(open:*)",
+      "Bash(qlmanage:*)",
+      "Read(//private/tmp/**)",
+      "Bash(sips -g pixelWidth -g pixelHeight /tmp/app-icon.svg.png)",
+      "Bash(ICONS=/Users/somei.tanoue/Repos/SomeiRepos/hatto-to/src-tauri/icons)",
+      "Bash(SRC=/tmp/app-icon.svg.png)",
+      "Bash(sips -z 32 32 --out \"$ICONS/32x32.png\" \"$SRC\")",
+      "Bash(sips -z 128 128 --out \"$ICONS/128x128.png\" \"$SRC\")",
+      "Bash(sips -z 256 256 --out \"$ICONS/128x128@2x.png\" \"$SRC\")",
+      "Bash(ICONSET=/tmp/hatto-to.iconset)",
+      "Bash(mkdir -p \"$ICONSET\")",
+      "Bash(sips -z 16 16 --out \"$ICONSET/icon_16x16.png\" \"$SRC\")",
+      "Bash(sips -z 32 32 --out \"$ICONSET/icon_16x16@2x.png\" \"$SRC\")",
+      "Bash(sips -z 32 32 --out \"$ICONSET/icon_32x32.png\" \"$SRC\")",
+      "Bash(iconutil:*)",
+      "Bash(sips -s format png -z 256 256 --out /tmp/icon256.png \"$SRC\")",
+      "Bash(sips -s format ico --out \"$ICONS/icon.ico\" /tmp/icon256.png)",
+      "Bash(sips -z 44 44 --out /Users/somei.tanoue/Repos/SomeiRepos/hatto-to/src-tauri/icons/tray.png \"$SRC\")",
+      "Read(//Applications/**)",
+      "Read(//Users/somei.tanoue/Applications/**)",
+      "Bash(cargo fmt:*)"
     ]
   }
 }
