@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{
     menu::{IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem, Submenu},
@@ -72,6 +73,7 @@ pub struct AppState {
     notes: Mutex<Vec<Note>>,
     settings: Mutex<Settings>,
     trash: Mutex<Vec<Note>>,
+    bringing_to_front: AtomicBool,
 }
 
 // ── Persistence ─────────────────────────────────────────────
@@ -572,6 +574,42 @@ fn bring_all_to_front(app: &AppHandle) {
     }
 }
 
+/// AtomicBool を RAII で管理し、パニック時にも確実にフラグをリセットする
+struct BringToFrontGuard<'a>(&'a AtomicBool);
+impl Drop for BringToFrontGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// 1つの付箋がフォーカスされたとき、他の全付箋ウィンドウも前面に表示する（フォーカスは奪わない）
+fn show_all_note_windows(app: &AppHandle, focused_label: &str) {
+    let state: State<AppState> = app.state();
+
+    // 再入防止: 他ウィンドウの show が再度 focus イベントを発火した場合のガード
+    if state.bringing_to_front.swap(true, Ordering::Acquire) {
+        return;
+    }
+    let _guard = BringToFrontGuard(&state.bringing_to_front);
+
+    // ロック内でラベル一覧だけ収集し、ロックを解放してから show() を呼ぶ
+    let labels: Vec<String> = {
+        let notes = state
+            .notes
+            .lock()
+            .expect("notes lock poisoned in show_all_note_windows");
+        notes.iter().map(|n| format!("note-{}", n.id)).collect()
+    };
+    for label in labels {
+        if label == focused_label {
+            continue;
+        }
+        if let Some(win) = app.get_webview_window(&label) {
+            let _ = win.show();
+        }
+    }
+}
+
 // ── App Entry ───────────────────────────────────────────────
 
 pub fn run() {
@@ -582,6 +620,7 @@ pub fn run() {
         notes: Mutex::new(notes),
         settings: Mutex::new(settings),
         trash: Mutex::new(trash),
+        bringing_to_front: AtomicBool::new(false),
     };
 
     tauri::Builder::default()
@@ -640,10 +679,18 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Hatto-to")
-        .run(|app, event| {
-            if let tauri::RunEvent::Reopen { .. } = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::Reopen { .. } => {
                 bring_all_to_front(app);
             }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Focused(true),
+                ..
+            } if label.starts_with("note-") => {
+                show_all_note_windows(app, &label);
+            }
+            _ => {}
         });
 }
 
@@ -707,14 +754,18 @@ mod tests {
 
     #[test]
     fn trash_fifo_within_limit() {
-        let mut trash: Vec<Note> = (0..20).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        let mut trash: Vec<Note> = (0..20)
+            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
     }
 
     #[test]
     fn trash_fifo_overflow_by_one() {
-        let mut trash: Vec<Note> = (0..21).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        let mut trash: Vec<Note> = (0..21)
+            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
         // oldest (id "0") should be removed
@@ -723,7 +774,9 @@ mod tests {
 
     #[test]
     fn trash_fifo_overflow_by_five() {
-        let mut trash: Vec<Note> = (0..25).map(|i| make_note(&i.to_string(), "yellow", "")).collect();
+        let mut trash: Vec<Note> = (0..25)
+            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
         assert_eq!(trash[0].id, "5");
