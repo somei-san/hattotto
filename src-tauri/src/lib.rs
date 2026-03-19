@@ -659,7 +659,8 @@ pub fn run() {
                     let color = state.settings.lock().unwrap().default_color.clone();
                     color
                 };
-                let note = Note::new(&default_color);
+                let mut note = Note::new(&default_color);
+                note.content = String::from("# Hatto-toへようこそ！\n\n- ダブルクリックで編集、外クリックでプレビュー\n- **太字** や *斜体* が使えます\n- [x] チェックボックスも\n- [ ] クリックで切替\n\n> 右クリックでメニュー、⌘N で新しい付箋");
                 open_note_window(app.handle(), &note);
                 let state: State<AppState> = app.state();
                 let mut notes = state.notes.lock().unwrap();
