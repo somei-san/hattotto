@@ -370,6 +370,41 @@
     margin: 4px 0;
   }
 
+  .context-menu-colors {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin: 0 4px;
+    gap: 6px;
+  }
+
+  .context-menu-colors .cm-color-label {
+    font-size: 13px;
+    color: #222;
+    margin-right: 2px;
+    white-space: nowrap;
+  }
+
+  .context-menu-colors .cm-color-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .context-menu-colors .cm-color-dot:hover { transform: scale(1.15); }
+  .context-menu-colors .cm-color-dot.active { border-color: rgba(0,0,0,0.4); }
+
+  .context-menu-colors .cm-color-dot[data-color="yellow"]  { background: var(--yellow-bar); }
+  .context-menu-colors .cm-color-dot[data-color="blue"]    { background: var(--blue-bar); }
+  .context-menu-colors .cm-color-dot[data-color="green"]   { background: var(--green-bar); }
+  .context-menu-colors .cm-color-dot[data-color="pink"]    { background: var(--pink-bar); }
+  .context-menu-colors .cm-color-dot[data-color="purple"]  { background: var(--purple-bar); }
+  .context-menu-colors .cm-color-dot[data-color="gray"]    { background: var(--gray-bar); }
+
   /* ── Resize Handle ────────────────────────────────── */
   .resize-handle {
     position: absolute;
@@ -449,6 +484,15 @@
       <div class="context-menu-item" data-action="zoomIn"><span class="cm-icon">＋</span>ズームイン</div>
       <div class="context-menu-item" data-action="zoomOut"><span class="cm-icon">−</span>ズームアウト</div>
       <div class="context-menu-item" data-action="zoomReset"><span class="cm-icon">1:1</span>ズームリセット</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-colors" id="context-menu-colors">
+        <div class="cm-color-dot" data-color="yellow"></div>
+        <div class="cm-color-dot" data-color="blue"></div>
+        <div class="cm-color-dot" data-color="green"></div>
+        <div class="cm-color-dot" data-color="pink"></div>
+        <div class="cm-color-dot" data-color="purple"></div>
+        <div class="cm-color-dot" data-color="gray"></div>
+      </div>
     </div>
 
     <!-- Content -->
@@ -481,11 +525,17 @@
   let rawContent = '';
 
   // ── Apply Color Theme ─────────────────────────────
+  let currentColor = 'yellow';
+
   function applyColor(color) {
+    currentColor = color;
     noteEl.style.setProperty('--bg',  `var(--${color})`);
     noteEl.style.setProperty('--bar', `var(--${color}-bar)`);
 
     document.querySelectorAll('.color-dot').forEach(d => {
+      d.classList.toggle('active', d.dataset.color === color);
+    });
+    document.querySelectorAll('.cm-color-dot').forEach(d => {
       d.classList.toggle('active', d.dataset.color === color);
     });
   }
@@ -1087,6 +1137,20 @@
       sel.addRange(savedSelection);
     }
   }
+
+  // ── Context Menu Color Dots ─────────────────────────
+  document.getElementById('context-menu-colors').addEventListener('click', (e) => {
+    const dot = e.target.closest('.cm-color-dot');
+    if (!dot) return;
+    const color = dot.dataset.color;
+    const previousColor = currentColor;
+    applyColor(color);
+    invoke('update_note_color', { id: noteId, color }).catch((err) => {
+      console.error('Failed to update note color:', err);
+      applyColor(previousColor);
+    });
+    hideContextMenu();
+  });
 
   ctxMenu.addEventListener('click', async (e) => {
     const item = e.target.closest('.context-menu-item');
