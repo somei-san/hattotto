@@ -37,7 +37,8 @@
       "Bash(npm run:*)",
       "Bash(npm test:*)",
       "Bash(grep -l -i \"homebrew\\\\|tap\\\\|cask\" .github/workflows/*.yml)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(chmod:*)"
     ]
   }
 }

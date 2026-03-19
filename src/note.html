@@ -764,39 +764,44 @@
     const sel = window.getSelection();
     if (!sel.rangeCount) return null;
     const range = sel.getRangeAt(0);
-    // Get text before cursor in the current text node
     const node = range.startContainer;
     if (node.nodeType !== Node.TEXT_NODE) return null;
     const full = node.textContent;
     const pos = range.startOffset;
     const before = full.slice(0, pos);
+    const after = full.slice(pos);
     const lastNl = before.lastIndexOf('\n');
-    return { text: before.slice(lastNl + 1), node, pos };
+    const nextNl = after.indexOf('\n');
+    const atEnd = nextNl === 0 || (nextNl === -1 && pos === full.length);
+    return { text: before.slice(lastNl + 1), node, pos, atEnd };
   }
 
-  editor.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  let autoInsertGuard = false;
+  editor.addEventListener('beforeinput', (e) => {
+    if (e.inputType !== 'insertParagraph' || autoInsertGuard) return;
 
     const cur = getCurrentLine();
-    if (!cur) return;
+    if (!cur || !cur.atEnd) return;
 
     const prefix = getAutoPrefix(cur.text);
     if (prefix === null) return;
 
     e.preventDefault();
+    autoInsertGuard = true;
 
-    // Empty list item → remove the prefix (exit list)
-    if (isEmptyListItem(cur.text)) {
-      const sel = window.getSelection();
-      const range = sel.getRangeAt(0);
-      range.setStart(cur.node, cur.pos - cur.text.length);
-      range.deleteContents();
-      document.execCommand('insertText', false, '\n');
-      return;
+    try {
+      if (isEmptyListItem(cur.text)) {
+        const sel = window.getSelection();
+        const range = sel.getRangeAt(0);
+        range.setStart(cur.node, cur.pos - cur.text.length);
+        range.deleteContents();
+        document.execCommand('insertText', false, '\n');
+      } else {
+        document.execCommand('insertText', false, '\n' + prefix);
+      }
+    } finally {
+      autoInsertGuard = false;
     }
-
-    // Insert newline + prefix
-    document.execCommand('insertText', false, '\n' + prefix);
   });
 
   // ── Paste: rich text links → markdown, otherwise plain ──
