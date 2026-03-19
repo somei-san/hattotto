@@ -965,6 +965,35 @@
     document.execCommand('insertText', false, text);
   });
 
+  // ── Checkbox autocomplete ────────────────────────
+  const CHECKBOX_RE = /^([-*])\s?\[([xX]?)\]$/;
+
+  function autocompleteCheckbox() {
+    const cur = getCurrentLine();
+    if (!cur) return;
+    const m = cur.text.match(CHECKBOX_RE);
+    if (!m) return;
+    const bullet = m[1];
+    const inner = m[2].toLowerCase();
+    const replacement = inner === 'x' ? `${bullet} [x] ` : `${bullet} [ ] `;
+
+    // Replace current line text in the text node
+    const lineStart = cur.pos - cur.text.length;
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(cur.node, lineStart);
+    range.setEnd(cur.node, cur.pos);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('insertText', false, replacement);
+  }
+
+  editor.addEventListener('input', (e) => {
+    if (!e.isComposing && e.data === ']') {
+      autocompleteCheckbox();
+    }
+  });
+
   // ── Auto-Save Content ─────────────────────────────
   editor.addEventListener('input', () => {
     rawContent = editor.innerText;
@@ -1248,6 +1277,7 @@
   window.getAutoPrefix = getAutoPrefix;
   window.isEmptyListItem = isEmptyListItem;
   window.renderMarkdown = renderMarkdown;
+  window.CHECKBOX_RE = CHECKBOX_RE;
 
   // ── Bring all notes to front on focus ──────────
   let bringTimer = null;
