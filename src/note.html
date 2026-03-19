@@ -634,48 +634,57 @@
         codeLines.push(line);
         continue;
       }
-      if (/^[-*] \[x\] /i.test(line)) {
-        result.push(`<div class="md-check checked"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`);
+      // Measure and strip indent for nested lists
+      // Indent level is based on 2-space units; odd spaces are truncated (e.g. 3 spaces = level 1)
+      // Note: only spaces are considered; tab characters are not supported and will be ignored
+      const indentMatch = line.match(/^( +)/);
+      const spaces = indentMatch ? indentMatch[1].length : 0;
+      const level = Math.floor(spaces / 2);
+      const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
+      const indentStyle = level > 0 ? ` style="margin-left: ${level * 20}px"` : '';
+
+      if (/^[-*] \[x\] /i.test(trimmedLine)) {
+        result.push(`<div class="md-check checked"${indentStyle}><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
         continue;
       }
-      if (/^[-*] \[ \] /.test(line)) {
-        result.push(`<div class="md-check"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(line.slice(6)))}</span></div>`);
+      if (/^[-*] \[ \] /.test(trimmedLine)) {
+        result.push(`<div class="md-check"${indentStyle}><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
         continue;
       }
-      if (line.startsWith('### ')) {
-        result.push(`<div class="md-h3">${inlineMarkdown(escapeHtml(line.slice(4)))}</div>`);
+      if (level === 0 && trimmedLine.startsWith('### ')) {
+        result.push(`<div class="md-h3">${inlineMarkdown(escapeHtml(trimmedLine.slice(4)))}</div>`);
         continue;
       }
-      if (line.startsWith('## ')) {
-        result.push(`<div class="md-h2">${inlineMarkdown(escapeHtml(line.slice(3)))}</div>`);
+      if (level === 0 && trimmedLine.startsWith('## ')) {
+        result.push(`<div class="md-h2">${inlineMarkdown(escapeHtml(trimmedLine.slice(3)))}</div>`);
         continue;
       }
-      if (line.startsWith('# ')) {
-        result.push(`<div class="md-h1">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+      if (level === 0 && trimmedLine.startsWith('# ')) {
+        result.push(`<div class="md-h1">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
         continue;
       }
-      if (/^([-*_])\s*(?:\1\s*){2,}$/.test(line)) {
+      if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) {
         result.push('<hr class="md-hr">');
         continue;
       }
-      if (/^[-*] /.test(line)) {
-        result.push(`<div class="md-bullet">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+      if (/^[-*] /.test(trimmedLine)) {
+        result.push(`<div class="md-bullet"${indentStyle}>${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
         continue;
       }
-      if (/^> /.test(line)) {
-        result.push(`<div class="md-blockquote">${inlineMarkdown(escapeHtml(line.slice(2)))}</div>`);
+      if (/^> /.test(trimmedLine)) {
+        result.push(`<div class="md-blockquote"${indentStyle}>${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
         continue;
       }
-      if (/^\d+\. /.test(line)) {
-        const m = line.match(/^(\d+)\. (.*)/);
-        result.push(`<div class="md-ordered"><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+      if (/^\d+\. /.test(trimmedLine)) {
+        const m = trimmedLine.match(/^(\d+)\. (.*)/);
+        result.push(`<div class="md-ordered"${indentStyle}><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
         continue;
       }
       if (line === '') {
         result.push('<div class="md-empty"></div>');
         continue;
       }
-      result.push(`<div class="md-line">${inlineMarkdown(escapeHtml(line))}</div>`);
+      result.push(`<div class="md-line"${indentStyle}>${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
     }
     // Handle unclosed code block
     if (inCodeBlock) {
@@ -791,9 +800,9 @@
     const lineIdx = parseInt(e.target.dataset.line, 10);
     const lines = rawContent.split('\n');
     if (e.target.checked) {
-      lines[lineIdx] = lines[lineIdx].replace(/^([-*] )\[ \] /, '$1[x] ');
+      lines[lineIdx] = lines[lineIdx].replace(/^(\s*)([-*] )\[ \] /, '$1$2[x] ');
     } else {
-      lines[lineIdx] = lines[lineIdx].replace(/^([-*] )\[x\] /i, '$1[ ] ');
+      lines[lineIdx] = lines[lineIdx].replace(/^(\s*)([-*] )\[x\] /i, '$1$2[ ] ');
     }
     rawContent = lines.join('\n');
     editor.innerText = rawContent;
@@ -891,6 +900,67 @@
       }
     } finally {
       autoInsertGuard = false;
+    }
+  });
+
+  // ── Tab / Shift+Tab indent ──────────────────────
+  editor.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const cur = getCurrentLine();
+    if (!cur) return;
+    const sel = window.getSelection();
+    const nodeLen = cur.node.textContent.length;
+    // getCurrentLine().pos is the caret offset within the text node,
+    // and .text is the substring from the last newline to pos (i.e. current line before caret).
+    // lineStart = pos - text.length gives the offset of the current line's first character.
+    const lineStart = Math.min(Math.max(0, cur.pos - cur.text.length), nodeLen);
+
+    // Guard: lineStart must be a valid offset within the text node
+    if (lineStart < 0 || lineStart > nodeLen) return;
+
+    if (e.shiftKey) {
+      // Remove up to 2 spaces from line start
+      const full = cur.node.textContent;
+      let removeCount = 0;
+      if (lineStart + 1 <= full.length && full[lineStart] === ' ' && full[lineStart + 1] === ' ') removeCount = 2;
+      else if (lineStart < full.length && full[lineStart] === ' ') removeCount = 1;
+      if (removeCount > 0 && lineStart + removeCount <= nodeLen) {
+        try {
+          const range = document.createRange();
+          range.setStart(cur.node, lineStart);
+          range.setEnd(cur.node, lineStart + removeCount);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand('delete');
+          // Restore cursor position
+          const updatedLen = cur.node.textContent.length;
+          const newPos = Math.min(Math.max(lineStart, cur.pos - removeCount), updatedLen);
+          const r = document.createRange();
+          r.setStart(cur.node, newPos);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch (err) { console.warn('Tab indent: range operation failed', err); }
+      }
+    } else {
+      // Insert 2 spaces at line start
+      try {
+        const range = document.createRange();
+        range.setStart(cur.node, lineStart);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, '  ');
+        // Restore cursor position (shifted by 2)
+        const updatedLen = cur.node.textContent.length;
+        const newPos = Math.min(cur.pos + 2, updatedLen);
+        const r = document.createRange();
+        r.setStart(cur.node, newPos);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } catch (err) { console.warn('Tab indent: range operation failed', err); }
     }
   });
 
