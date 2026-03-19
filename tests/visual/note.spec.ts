@@ -75,3 +75,11 @@ test("note — bullet vs checkbox comparison", async ({ openNote }) => {
   });
   await expect(page).toHaveScreenshot("note-bullet-vs-checkbox.png");
 });
+
+test("note — bullet vs ordered list comparison", async ({ openNote }) => {
+  const page = await openNote({
+    color: "yellow",
+    content: "- 箇条書きテキスト\n1. 番号リストテキスト",
+  });
+  await expect(page).toHaveScreenshot("note-bullet-vs-ordered.png");
+});
