@@ -224,15 +224,29 @@
   .md-bullet::before { content: '•'; position: absolute; left: 2px; }
 
   .md-check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    position: relative;
     min-height: 21px;
+    padding-left: 18px;
+    word-break: break-word;
+  }
+  .md-check::before {
+    content: '☐';
+    position: absolute;
+    left: 0;
+    font-size: 1em;
+  }
+  .md-check.checked::before {
+    content: '☑';
   }
   .md-check input[type="checkbox"] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 16px;
+    height: 16px;
+    opacity: 0;
     cursor: pointer;
-    flex-shrink: 0;
-    accent-color: var(--text);
+    z-index: 1;
   }
   .md-check.checked span { text-decoration: line-through; opacity: 0.45; }
 

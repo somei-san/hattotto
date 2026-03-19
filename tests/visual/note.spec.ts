@@ -51,3 +51,27 @@ test("note — opacity 50%", async ({ openNote }) => {
   const page = await openNote({}, { opacity: 50 });
   await expect(page).toHaveScreenshot("note-opacity-50.png");
 });
+
+test("note — checkbox short text", async ({ openNote }) => {
+  const page = await openNote({
+    color: "yellow",
+    content: "- [ ] 短いタスク\n- [x] 完了タスク",
+  });
+  await expect(page).toHaveScreenshot("note-checkbox-short.png");
+});
+
+test("note — checkbox long text", async ({ openNote }) => {
+  const page = await openNote({
+    color: "yellow",
+    content: "- [ ] 長いチェックボックス長いチェックボックス長いチェックボックス長いチェックボックス長いチェックボックス",
+  });
+  await expect(page).toHaveScreenshot("note-checkbox-long.png");
+});
+
+test("note — bullet vs checkbox comparison", async ({ openNote }) => {
+  const page = await openNote({
+    color: "yellow",
+    content: "- 箇条書きテキスト\n- [ ] チェックボックステキスト",
+  });
+  await expect(page).toHaveScreenshot("note-bullet-vs-checkbox.png");
+});
