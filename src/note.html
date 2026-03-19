@@ -1131,12 +1131,17 @@
 
   // ── Bring all notes to front on focus ──────────
   let bringTimer = null;
-  window.addEventListener('focus', () => {
+  function scheduleBringToFront() {
     clearTimeout(bringTimer);
     bringTimer = setTimeout(() => {
       if (dragging) return;
       invoke('bring_other_notes_to_front', { callerId: noteId });
     }, 500);
+  }
+  window.addEventListener('focus', scheduleBringToFront);
+  noteEl.addEventListener('mousedown', () => {
+    if (document.hasFocus()) return;
+    scheduleBringToFront();
   });
 
 
