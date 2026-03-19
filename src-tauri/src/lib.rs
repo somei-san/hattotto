@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
@@ -26,14 +26,26 @@ pub struct Note {
     pub zoom: u32,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default = "now_unix")]
+    pub created_at: u64,
+    #[serde(default = "now_unix")]
+    pub updated_at: u64,
 }
 
 fn default_zoom() -> u32 {
     100
 }
 
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 impl Note {
     fn new(color: &str) -> Self {
+        let now = now_unix();
         Self {
             id: Uuid::new_v4().to_string(),
             content: String::new(),
@@ -44,6 +56,8 @@ impl Note {
             height: 320.0,
             zoom: 100,
             pinned: false,
+            created_at: now,
+            updated_at: now,
         }
     }
 }
@@ -221,6 +235,7 @@ fn update_note_content(id: String, content: String, state: State<AppState>) {
     let mut notes = state.notes.lock().unwrap();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.content = content;
+        note.updated_at = now_unix();
     }
     save_notes(&notes);
 }

@@ -756,7 +756,8 @@
     const link = e.target.closest('a[data-url]');
     if (link) {
       e.preventDefault();
-      window.__TAURI__.shell.open(link.dataset.url);
+      const url = link.dataset.url;
+      if (/^https?:\/\//i.test(url)) window.__TAURI__.shell.open(url);
       return;
     }
     if (e.target.closest('input[type="checkbox"]')) return;
@@ -1008,19 +1009,8 @@
     }, 500);
   }
 
-  // Poll for geometry changes (Tauri v2 doesn't expose move/resize events easily)
-  let lastPos = '', lastSize = '';
-  setInterval(async () => {
-    try {
-      const pos  = await appWindow.outerPosition();
-      const size = await appWindow.outerSize();
-      const key = `${pos.x},${pos.y},${size.width},${size.height}`;
-      if (key !== lastPos) {
-        lastPos = key;
-        saveGeometry();
-      }
-    } catch (e) {}
-  }, 1000);
+  appWindow.onMoved(() => saveGeometry());
+  appWindow.onResized(() => saveGeometry());
 
   // ── Buttons ───────────────────────────────────────
   document.getElementById('btn-new').addEventListener('click', () => {
