@@ -92,6 +92,7 @@ async function injectSettingsMock(
       },
       event: {
         emit: async () => {},
+        listen: async () => () => {},
       },
       webviewWindow: {
         getCurrentWebviewWindow: () => ({

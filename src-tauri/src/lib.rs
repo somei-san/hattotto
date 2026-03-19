@@ -322,7 +322,7 @@ fn update_settings(
 
 #[tauri::command]
 fn open_settings(app: AppHandle) {
-    open_settings_window(&app);
+    open_settings_window(&app, None);
 }
 
 #[tauri::command]
@@ -371,12 +371,19 @@ fn open_note_window(app: &AppHandle, note: &Note) {
 
 // ── Window Management (Settings) ────────────────────────────
 
-fn open_settings_window(app: &AppHandle) {
+fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
     if let Some(win) = app.get_webview_window("settings") {
+        if let Some(t) = tab {
+            let _ = win.emit("switch-tab", t);
+        }
         let _ = win.set_focus();
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    let url = match tab {
+        Some(t) => format!("settings.html?tab={}", t),
+        None => "settings.html".to_string(),
+    };
+    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
         .title("Hatto-to — 設定 / ヘルプ")
         .inner_size(420.0, 520.0)
         .min_inner_size(380.0, 460.0)
@@ -481,15 +488,24 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         &[&zoom_in_item, &zoom_out_item, &zoom_reset_item],
     )?;
 
+    let help_item = MenuItem::with_id(app, "open_help", "Hatto-to Help", true, None::<&str>)?;
+    let help_submenu = Submenu::with_items(app, "Help", true, &[&help_item])?;
+
     let menu = Menu::with_items(
         app,
-        &[&app_submenu, &file_submenu, &edit_submenu, &view_submenu],
+        &[
+            &app_submenu,
+            &file_submenu,
+            &edit_submenu,
+            &view_submenu,
+            &help_submenu,
+        ],
     )?;
     app.set_menu(menu)?;
 
     app.on_menu_event(|app, event| match event.id().as_ref() {
         "open_settings" => {
-            open_settings_window(app);
+            open_settings_window(app, None);
         }
         "new_note" => {
             let state: State<AppState> = app.state();
@@ -515,6 +531,9 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         }
         "zoom_reset" => {
             let _ = app.emit("zoom", "reset");
+        }
+        "open_help" => {
+            open_settings_window(app, Some("help"));
         }
         _ => {}
     });
@@ -558,7 +577,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 save_notes(&notes);
             }
             "settings" => {
-                open_settings_window(app);
+                open_settings_window(app, None);
             }
             "quit" => {
                 app.exit(0);
