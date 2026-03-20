@@ -326,31 +326,42 @@
     border-radius: 10px;
     border: 1px solid var(--border);
   }
+
+  /* ── Focus Indicator ──────────────────────────────── */
+  .color-dot:focus-visible,
+  .size-btn:focus-visible,
+  .tab:focus-visible,
+  .save-btn:focus-visible,
+  .toggle-track:focus-visible,
+  .opacity-slider:focus-visible {
+    outline: 2px solid rgba(0, 102, 204, 0.6);
+    outline-offset: 2px;
+  }
 </style>
 </head>
 <body>
 
-<div class="tab-bar">
-  <div class="tab active" data-tab="settings">設定</div>
-  <div class="tab" data-tab="help">ヘルプ</div>
+<div class="tab-bar" role="tablist">
+  <div class="tab active" id="tab-settings" data-tab="settings" role="tab" aria-selected="true" aria-controls="panel-settings" tabindex="0">設定</div>
+  <div class="tab" id="tab-help" data-tab="help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">ヘルプ</div>
 </div>
 
 <!-- ── Settings Panel ─────────────────────────────── -->
-<div class="panel active" id="panel-settings">
+<div class="panel active" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
 
   <div class="section">
     <div class="section-title">新規ノートのデフォルトカラー</div>
-    <div class="color-row" id="color-picker">
-      <div class="color-dot active" data-color="yellow" tabindex="0" title="イエロー"></div>
-      <div class="color-dot" data-color="blue"   tabindex="0" title="ブルー"></div>
-      <div class="color-dot" data-color="green"  tabindex="0" title="グリーン"></div>
-      <div class="color-dot" data-color="pink"   tabindex="0" title="ピンク"></div>
-      <div class="color-dot" data-color="purple" tabindex="0" title="パープル"></div>
-      <div class="color-dot" data-color="gray"   tabindex="0" title="グレー"></div>
+    <div class="color-row" id="color-picker" role="radiogroup" aria-label="デフォルトカラー">
+      <div class="color-dot active" data-color="yellow" tabindex="0" title="イエロー" role="radio" aria-label="イエロー" aria-checked="true"></div>
+      <div class="color-dot" data-color="blue"   tabindex="-1" title="ブルー" role="radio" aria-label="ブルー" aria-checked="false"></div>
+      <div class="color-dot" data-color="green"  tabindex="-1" title="グリーン" role="radio" aria-label="グリーン" aria-checked="false"></div>
+      <div class="color-dot" data-color="pink"   tabindex="-1" title="ピンク" role="radio" aria-label="ピンク" aria-checked="false"></div>
+      <div class="color-dot" data-color="purple" tabindex="-1" title="パープル" role="radio" aria-label="パープル" aria-checked="false"></div>
+      <div class="color-dot" data-color="gray"   tabindex="-1" title="グレー" role="radio" aria-label="グレー" aria-checked="false"></div>
     </div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="文字サイズ">
     <div class="section-title">文字サイズ</div>
     <div class="font-size-row" id="font-size-picker">
       <button class="size-btn" data-size="12">
@@ -368,7 +379,7 @@
     </div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="表示倍率">
     <div class="section-title">表示倍率</div>
     <div class="font-size-row" id="zoom-picker">
       <button class="size-btn" data-zoom="75">75%</button>
@@ -379,64 +390,64 @@
     <div style="margin-top:8px; font-size:11px; color:var(--text-muted);">⌘+ / ⌘− で変更、⌘0 でリセット</div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="透過度">
     <div class="section-title">透過度</div>
     <div class="opacity-row">
-      <input type="range" class="opacity-slider" id="opacity-slider" min="20" max="100" step="5" value="100" />
+      <input type="range" class="opacity-slider" id="opacity-slider" min="20" max="100" step="5" value="100" aria-label="透過度" />
       <span class="opacity-value" id="opacity-value">100%</span>
     </div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="編集">
     <div class="section-title">編集</div>
     <div class="toggle-row">
       <span class="toggle-label">Markdown付箋をシングルクリックで編集</span>
       <label class="toggle">
-        <input type="checkbox" id="single-click-toggle" />
+        <input type="checkbox" id="single-click-toggle" aria-label="Markdown付箋をシングルクリックで編集" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div style="margin-top:4px; font-size:11px; color:var(--text-muted);">OFFの場合はダブルクリックで編集モード</div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="表示">
     <div class="section-title">表示</div>
     <div class="toggle-row">
       <span class="toggle-label">付箋をクリックしたら全付箋を前面に表示</span>
       <label class="toggle">
-        <input type="checkbox" id="bring-all-toggle" checked />
+        <input type="checkbox" id="bring-all-toggle" checked aria-label="付箋をクリックしたら全付箋を前面に表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row" style="margin-top:12px;">
       <span class="toggle-label">ピン留めボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-pin-toggle" checked />
+        <input type="checkbox" id="show-pin-toggle" checked aria-label="ピン留めボタンを表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row" style="margin-top:12px;">
       <span class="toggle-label">新規ノートボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-new-toggle" checked />
+        <input type="checkbox" id="show-new-toggle" checked aria-label="新規ノートボタンを表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row" style="margin-top:12px;">
       <span class="toggle-label">カラーボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-color-toggle" checked />
+        <input type="checkbox" id="show-color-toggle" checked aria-label="カラーボタンを表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
   </div>
 
-  <div class="section">
+  <div class="section" role="group" aria-label="システム">
     <div class="section-title">システム</div>
     <div class="toggle-row">
       <span class="toggle-label">ログイン時に自動起動</span>
       <label class="toggle">
-        <input type="checkbox" id="autostart-toggle" />
+        <input type="checkbox" id="autostart-toggle" aria-label="ログイン時に自動起動" />
         <div class="toggle-track"></div>
       </label>
     </div>
@@ -446,7 +457,7 @@
 </div>
 
 <!-- ── Help Panel ─────────────────────────────────── -->
-<div class="panel" id="panel-help">
+<div class="panel" id="panel-help" role="tabpanel" aria-labelledby="tab-help">
 
   <div class="section">
     <div class="section-title">基本操作</div>
@@ -522,21 +533,53 @@
   let currentShowColor = true;
 
   // ── Tabs ────────────────────────────────────────────
+  function activateTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); t.setAttribute('tabindex', '-1'); });
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+    tab.setAttribute('tabindex', '0');
+    document.getElementById(`panel-${tab.dataset.tab}`).classList.add('active');
+  }
+
   document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById(`panel-${tab.dataset.tab}`).classList.add('active');
+    tab.addEventListener('click', () => activateTab(tab));
+    tab.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const tabs = [...document.querySelectorAll('.tab')];
+        const idx = tabs.indexOf(tab);
+        const next = e.key === 'ArrowRight'
+          ? tabs[(idx + 1) % tabs.length]
+          : tabs[(idx - 1 + tabs.length) % tabs.length];
+        activateTab(next);
+        next.focus();
+      }
     });
   });
 
   // ── Color Picker ────────────────────────────────────
   document.querySelectorAll('#color-picker .color-dot').forEach(dot => {
     dot.addEventListener('click', () => {
-      document.querySelectorAll('#color-picker .color-dot').forEach(d => d.classList.remove('active'));
+      document.querySelectorAll('#color-picker .color-dot').forEach(d => { d.classList.remove('active'); d.setAttribute('aria-checked', 'false'); d.setAttribute('tabindex', '-1'); });
       dot.classList.add('active');
+      dot.setAttribute('aria-checked', 'true');
+      dot.setAttribute('tabindex', '0');
       currentColor = dot.dataset.color;
+    });
+    dot.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dot.click(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const group = [...document.querySelectorAll('#color-picker .color-dot')];
+        const idx = group.indexOf(dot);
+        const next = e.key === 'ArrowRight'
+          ? group[(idx + 1) % group.length]
+          : group[(idx - 1 + group.length) % group.length];
+        dot.setAttribute('tabindex', '-1');
+        next.setAttribute('tabindex', '0');
+        next.focus();
+      }
     });
   });
 
@@ -688,16 +731,11 @@
   function switchToTab(name) {
     if (!/^[a-z]+$/.test(name)) return;
     const tab = document.querySelector(`.tab[data-tab="${name}"]`);
-    const panel = document.getElementById(`panel-${name}`);
-    if (!tab || !panel) {
-      // Fallback to settings tab if target tab not found
+    if (!tab || !document.getElementById(`panel-${name}`)) {
       switchToTab('settings');
       return;
     }
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    panel.classList.add('active');
+    activateTab(tab);
   }
 
   // Listen for switch-tab event from Rust

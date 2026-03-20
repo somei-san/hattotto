@@ -146,14 +146,21 @@
   .btn-restore:hover {
     opacity: 0.85;
   }
+
+  /* ── Focus Indicator ──────────────────────────────── */
+  .btn-empty:focus-visible,
+  .btn-restore:focus-visible {
+    outline: 2px solid rgba(0, 102, 204, 0.6);
+    outline-offset: 2px;
+  }
 </style>
 </head>
 <body>
   <div class="header">
     <h1>ゴミ箱</h1>
-    <button class="btn-empty" id="btn-empty">すべて削除</button>
+    <button class="btn-empty" id="btn-empty" aria-label="すべて削除">すべて削除</button>
   </div>
-  <div class="list" id="list"></div>
+  <div class="list" id="list" role="list" aria-label="削除した付箋"></div>
 
 <script>
   const { invoke } = window.__TAURI__.core;
@@ -180,13 +187,13 @@
     // Show newest first
     listEl.innerHTML = items.slice().reverse().map(note => {
       const preview = note.content.slice(0, 120) || '(空の付箋)';
-      return `<div class="item">
+      return `<div class="item" role="listitem">
         <div class="item-color" style="background:${colorVar(note.color)}"></div>
         <div class="item-body">
           <div class="item-preview">${escapeHtml(preview)}</div>
         </div>
         <div class="item-actions">
-          <button class="btn-restore" data-id="${note.id}">復元</button>
+          <button class="btn-restore" data-id="${note.id}" aria-label="復元">復元</button>
         </div>
       </div>`;
     }).join('');
