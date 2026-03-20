@@ -8,7 +8,12 @@ use crate::persistence::save_notes;
 /// Create a new note with offset positioning and open its window.
 /// Shared by create_note command, app menu, and tray menu.
 pub(crate) fn create_note_with_window(app: &AppHandle, state: &AppState) -> Note {
-    let default_color = state.settings.lock().unwrap_or_else(|e| e.into_inner()).default_color.clone();
+    let default_color = state
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .default_color
+        .clone();
     let note = Note::new(&default_color);
     let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
     let offset = ((notes.len() % 20) as f64) * 30.0;
@@ -92,4 +97,3 @@ pub(crate) fn bring_all_to_front(app: &AppHandle) {
         }
     }
 }
-

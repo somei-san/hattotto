@@ -7,7 +7,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::model::{AppState, Note, Settings, TRASH_MAX};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
-use crate::window::{create_note_with_window, open_note_window, open_settings_window, open_trash_window};
+use crate::window::{
+    create_note_with_window, open_note_window, open_settings_window, open_trash_window,
+};
 
 // ── Tauri Commands ──────────────────────────────────────────
 
@@ -74,14 +76,21 @@ pub(crate) fn update_note_pinned(id: String, pinned: bool, state: State<AppState
 
 /// Confirm deletion if setting is enabled. Returns false if user cancelled.
 fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
-    let confirm = state.settings.lock().unwrap_or_else(|e| e.into_inner()).confirm_before_delete;
+    let confirm = state
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .confirm_before_delete;
     if !confirm {
         return true;
     }
     app.dialog()
         .message("この付箋を削除しますか？")
         .title("貼っとーと")
-        .buttons(MessageDialogButtons::OkCancelCustom("削除".into(), "キャンセル".into()))
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "削除".into(),
+            "キャンセル".into(),
+        ))
         .blocking_show()
 }
 
@@ -113,7 +122,11 @@ pub(crate) fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
 
 #[tauri::command]
 pub(crate) fn get_trash(state: State<AppState>) -> Vec<Note> {
-    state.trash.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    state
+        .trash
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 #[tauri::command]
@@ -153,7 +166,11 @@ pub(crate) fn empty_trash(state: State<AppState>) {
 
 #[tauri::command]
 pub(crate) fn get_settings(state: State<AppState>) -> Settings {
-    state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    state
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 #[tauri::command]
@@ -200,10 +217,17 @@ pub(crate) fn create_note(app: AppHandle, state: State<AppState>) -> Note {
 }
 
 #[tauri::command]
-pub(crate) fn bring_other_notes_to_front(caller_id: String, app: AppHandle, state: State<AppState>) {
+pub(crate) fn bring_other_notes_to_front(
+    caller_id: String,
+    app: AppHandle,
+    state: State<AppState>,
+) {
     // Cooldown: skip if triggered within last 1 second
     {
-        let mut last = state.last_bring_to_front.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = state
+            .last_bring_to_front
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if last.elapsed() < std::time::Duration::from_secs(1) {
             return;
         }
@@ -244,7 +268,10 @@ pub(crate) fn show_context_menu(
     };
 
     // Store note ID so on_menu_event knows which note to target
-    *state.context_menu_note_id.lock().unwrap_or_else(|e| e.into_inner()) = id;
+    *state
+        .context_menu_note_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = id;
 
     let build = || -> tauri::Result<()> {
         // Generate a colored circle icon (16x16 RGBA)
@@ -269,18 +296,22 @@ pub(crate) fn show_context_menu(
         }
 
         let colors: &[(&str, &str, u8, u8, u8)] = &[
-            ("yellow",  "イエロー", 0xF9, 0xE9, 0x7A),
-            ("blue",    "ブルー",   0x7F, 0xB3, 0xE0),
-            ("green",   "グリーン", 0x8C, 0xC9, 0x8F),
-            ("pink",    "ピンク",   0xE8, 0x8F, 0xAB),
-            ("purple",  "パープル", 0xC4, 0x8D, 0xD0),
-            ("gray",    "グレー",   0xB8, 0xB8, 0xB8),
+            ("yellow", "イエロー", 0xF9, 0xE9, 0x7A),
+            ("blue", "ブルー", 0x7F, 0xB3, 0xE0),
+            ("green", "グリーン", 0x8C, 0xC9, 0x8F),
+            ("pink", "ピンク", 0xE8, 0x8F, 0xAB),
+            ("purple", "パープル", 0xC4, 0x8D, 0xD0),
+            ("gray", "グレー", 0xB8, 0xB8, 0xB8),
         ];
 
         let color_items: Vec<IconMenuItem<tauri::Wry>> = colors
             .iter()
             .map(|(key, label, r, g, b)| {
-                let check = if *key == current_color.as_str() { "✓ " } else { "    " };
+                let check = if *key == current_color.as_str() {
+                    "✓ "
+                } else {
+                    "    "
+                };
                 IconMenuItem::with_id(
                     &app,
                     format!("ctx_color_{}", key),
@@ -297,34 +328,77 @@ pub(crate) fn show_context_menu(
         let copy = PredefinedMenuItem::copy(&app, None)?;
         let paste = PredefinedMenuItem::paste(&app, None)?;
         let sep0 = PredefinedMenuItem::separator(&app)?;
-        let pin_label = if is_pinned { "ピン留め解除" } else { "ピン留め" };
+        let pin_label = if is_pinned {
+            "ピン留め解除"
+        } else {
+            "ピン留め"
+        };
         let pin = MenuItem::with_id(&app, "ctx_pin", pin_label, true, None::<&str>)?;
         let new_note = IconMenuItem::with_id_and_native_icon(
-            &app, "ctx_new", "新しい付箋を作成", true, Some(NativeIcon::Add), Some("CmdOrCtrl+N"),
+            &app,
+            "ctx_new",
+            "新しい付箋を作成",
+            true,
+            Some(NativeIcon::Add),
+            Some("CmdOrCtrl+N"),
         )?;
         let delete = IconMenuItem::with_id_and_native_icon(
-            &app, "ctx_delete", "この付箋を削除", true, Some(NativeIcon::Remove), None::<&str>,
+            &app,
+            "ctx_delete",
+            "この付箋を削除",
+            true,
+            Some(NativeIcon::Remove),
+            None::<&str>,
         )?;
         let trash = IconMenuItem::with_id_and_native_icon(
-            &app, "ctx_trash", "ゴミ箱を開く", true, Some(NativeIcon::TrashEmpty), Some("CmdOrCtrl+Shift+T"),
+            &app,
+            "ctx_trash",
+            "ゴミ箱を開く",
+            true,
+            Some(NativeIcon::TrashEmpty),
+            Some("CmdOrCtrl+Shift+T"),
         )?;
         let sep1 = PredefinedMenuItem::separator(&app)?;
         let sep1b = PredefinedMenuItem::separator(&app)?;
-        let zoom_in = MenuItem::with_id(&app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
-        let zoom_out = MenuItem::with_id(&app, "ctx_zoom_out", "ズームアウト", true, Some("CmdOrCtrl+-"))?;
-        let zoom_reset = MenuItem::with_id(&app, "ctx_zoom_reset", "ズームリセット", true, Some("CmdOrCtrl+0"))?;
+        let zoom_in =
+            MenuItem::with_id(&app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
+        let zoom_out = MenuItem::with_id(
+            &app,
+            "ctx_zoom_out",
+            "ズームアウト",
+            true,
+            Some("CmdOrCtrl+-"),
+        )?;
+        let zoom_reset = MenuItem::with_id(
+            &app,
+            "ctx_zoom_reset",
+            "ズームリセット",
+            true,
+            Some("CmdOrCtrl+0"),
+        )?;
         let sep2 = PredefinedMenuItem::separator(&app)?;
-        let settings = MenuItem::with_id(&app, "ctx_settings", "設定を開く", true, Some("CmdOrCtrl+,"))?;
+        let settings = MenuItem::with_id(
+            &app,
+            "ctx_settings",
+            "設定を開く",
+            true,
+            Some("CmdOrCtrl+,"),
+        )?;
         let sep3 = PredefinedMenuItem::separator(&app)?;
 
         let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-            &copy, &paste,
+            &copy,
+            &paste,
             &sep0,
             &pin,
             &sep1,
-            &new_note, &delete, &trash,
+            &new_note,
+            &delete,
+            &trash,
             &sep1b,
-            &zoom_in, &zoom_out, &zoom_reset,
+            &zoom_in,
+            &zoom_out,
+            &zoom_reset,
             &sep2,
             &settings,
             &sep3,
@@ -350,7 +424,11 @@ pub(crate) fn show_context_menu(
 /// Handle context menu events (called from menu.rs on_menu_event)
 pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
     let state: State<AppState> = app.state();
-    let note_id = state.context_menu_note_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let note_id = state
+        .context_menu_note_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     if note_id.is_empty() {
         return;
     }
@@ -396,7 +474,9 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
         _ if event_id.starts_with("ctx_color_") => {
             let color = event_id.trim_start_matches("ctx_color_");
             let valid = ["yellow", "blue", "green", "pink", "purple", "gray"];
-            if !valid.contains(&color) { return; }
+            if !valid.contains(&color) {
+                return;
+            }
             let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(note) = notes.iter_mut().find(|n| n.id == note_id) {
                 note.color = color.to_string();

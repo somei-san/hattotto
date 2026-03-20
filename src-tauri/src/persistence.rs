@@ -51,7 +51,11 @@ fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
-fn save_json<T: serde::Serialize + ?Sized>(data: &T, path: &Path, label: &str) -> Result<(), String> {
+fn save_json<T: serde::Serialize + ?Sized>(
+    data: &T,
+    path: &Path,
+    label: &str,
+) -> Result<(), String> {
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
     atomic_write(path, &json).map_err(|e| format!("Failed to save {}: {}", label, e))
 }
