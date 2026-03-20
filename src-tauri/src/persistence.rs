@@ -239,4 +239,51 @@ mod tests {
         let s = load_settings_from(&path);
         assert_eq!(s.default_color, "yellow");
     }
+
+    // ── atomic_write tests ──
+
+    #[test]
+    fn atomic_write_creates_file_with_correct_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.json");
+        atomic_write(&path, r#"{"hello":"world"}"#).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, r#"{"hello":"world"}"#);
+    }
+
+    #[test]
+    fn atomic_write_to_nonexistent_dir_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_such_dir").join("file.json");
+        let result = atomic_write(&path, "data");
+        assert!(result.is_err());
+    }
+
+    // ── save_*_to error path tests ──
+
+    #[test]
+    fn save_notes_to_nonexistent_dir_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_such_dir").join("notes.json");
+        let notes = vec![make_note("e1", "yellow", "err")];
+        let result = save_notes_to(&notes, &path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn save_settings_to_nonexistent_dir_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_such_dir").join("settings.json");
+        let result = save_settings_to(&Settings::default(), &path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn save_trash_to_nonexistent_dir_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_such_dir").join("trash.json");
+        let trash = vec![make_note("t1", "green", "err")];
+        let result = save_trash_to(&trash, &path);
+        assert!(result.is_err());
+    }
 }

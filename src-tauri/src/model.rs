@@ -176,4 +176,48 @@ mod tests {
         let note: Note = serde_json::from_str(json).unwrap();
         assert_eq!(note.zoom, 100);
     }
+
+    // ── Note::new() UUID format ──
+
+    #[test]
+    fn note_new_id_is_valid_uuid_v4() {
+        let note = Note::new("blue");
+        let parsed = uuid::Uuid::parse_str(&note.id).expect("should be valid UUID");
+        assert_eq!(parsed.get_version(), Some(uuid::Version::Random));
+    }
+
+    // ── Settings default field-level checks ──
+
+    #[test]
+    fn settings_default_boolean_fields() {
+        let s = Settings::default();
+        assert!(!s.edit_on_single_click);
+        assert!(s.bring_all_to_front);
+        assert!(s.show_pin_button);
+        assert!(s.show_new_button);
+        assert!(s.show_color_button);
+    }
+
+    #[test]
+    fn settings_default_numeric_fields() {
+        let s = Settings::default();
+        assert_eq!(s.font_size, 14);
+        assert_eq!(s.zoom, 100);
+        assert_eq!(s.opacity, 100);
+    }
+
+    // ── pinned field defaults ──
+
+    #[test]
+    fn note_new_pinned_defaults_to_false() {
+        let note = Note::new("pink");
+        assert!(!note.pinned);
+    }
+
+    #[test]
+    fn note_deserialize_without_pinned_defaults_to_false() {
+        let json = r#"{"id":"old","content":"","color":"yellow","x":0,"y":0,"width":280,"height":320,"zoom":100}"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert!(!note.pinned);
+    }
 }
