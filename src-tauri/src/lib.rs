@@ -11,13 +11,32 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use uuid::Uuid;
 
+// ── Color Enum ──────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteColor {
+    Yellow,
+    Blue,
+    Green,
+    Pink,
+    Purple,
+    Gray,
+}
+
+impl Default for NoteColor {
+    fn default() -> Self {
+        NoteColor::Yellow
+    }
+}
+
 // ── Data Model ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Note {
     pub id: String,
     pub content: String,
-    pub color: String,
+    pub color: NoteColor,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -44,12 +63,12 @@ fn now_unix() -> u64 {
 }
 
 impl Note {
-    fn new(color: &str) -> Self {
+    fn new(color: NoteColor) -> Self {
         let now = now_unix();
         Self {
             id: Uuid::new_v4().to_string(),
             content: String::new(),
-            color: color.into(),
+            color,
             x: 120.0,
             y: 120.0,
             width: 280.0,
@@ -64,7 +83,7 @@ impl Note {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
-    pub default_color: String,
+    pub default_color: NoteColor,
     pub font_size: u32,
     pub zoom: u32,
     pub opacity: u32,
@@ -95,7 +114,7 @@ fn default_true() -> bool {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            default_color: "yellow".into(),
+            default_color: NoteColor::Yellow,
             font_size: 14,
             zoom: 100,
             opacity: 100,
@@ -241,7 +260,7 @@ fn update_note_content(id: String, content: String, state: State<AppState>) {
 }
 
 #[tauri::command]
-fn update_note_color(id: String, color: String, state: State<AppState>) {
+fn update_note_color(id: String, color: NoteColor, state: State<AppState>) {
     let mut notes = state.notes.lock().unwrap();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.color = color;
@@ -346,7 +365,7 @@ fn get_settings(state: State<AppState>) -> Settings {
 
 #[tauri::command]
 fn update_settings(
-    default_color: String,
+    default_color: NoteColor,
     font_size: u32,
     zoom: u32,
     opacity: u32,
@@ -386,7 +405,7 @@ fn create_note(app: AppHandle, state: State<AppState>) -> Note {
         let settings = state.settings.lock().unwrap();
         settings.default_color.clone()
     };
-    let note = Note::new(&default_color);
+    let note = Note::new(default_color);
     {
         let mut notes = state.notes.lock().unwrap();
         // Offset new note position so it doesn't stack exactly
@@ -561,7 +580,7 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         "new_note" => {
             let state: State<AppState> = app.state();
             let default_color = state.settings.lock().unwrap().default_color.clone();
-            let note = Note::new(&default_color);
+            let note = Note::new(default_color);
             let mut notes = state.notes.lock().unwrap();
             let offset = (notes.len() as f64) * 30.0;
             let mut n = note;
@@ -617,7 +636,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray_new_note" => {
                 let state: State<AppState> = app.state();
                 let default_color = state.settings.lock().unwrap().default_color.clone();
-                let note = Note::new(&default_color);
+                let note = Note::new(default_color);
                 let mut notes = state.notes.lock().unwrap();
                 let offset = (notes.len() as f64) * 30.0;
                 let mut n = note;
@@ -739,7 +758,7 @@ pub fn run() {
                     let color = state.settings.lock().unwrap().default_color.clone();
                     color
                 };
-                let mut note = Note::new(&default_color);
+                let mut note = Note::new(default_color);
                 note.content = String::from("# Hatto-toへようこそ！\n\n- ダブルクリックで編集、外クリックでプレビュー\n- **太字** や *斜体* が使えます\n- [x] チェックボックスも\n- [ ] クリックで切替\n\n> 右クリックでメニュー、⌘N で新しい付箋");
                 open_note_window(app.handle(), &note);
                 let state: State<AppState> = app.state();
@@ -768,17 +787,19 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn make_note(id: &str, color: &str, content: &str) -> Note {
+    fn make_note(id: &str, color: NoteColor, content: &str) -> Note {
         Note {
             id: id.to_string(),
             content: content.to_string(),
-            color: color.to_string(),
+            color,
             x: 0.0,
             y: 0.0,
             width: 280.0,
             height: 320.0,
             zoom: 100,
             pinned: false,
+            created_at: 0,
+            updated_at: 0,
         }
     }
 
@@ -786,15 +807,15 @@ mod tests {
 
     #[test]
     fn note_new_has_uuid_format() {
-        let note = Note::new("yellow");
+        let note = Note::new(NoteColor::Yellow);
         assert!(uuid::Uuid::parse_str(&note.id).is_ok());
     }
 
     #[test]
     fn note_new_defaults() {
-        let note = Note::new("blue");
+        let note = Note::new(NoteColor::Blue);
         assert_eq!(note.content, "");
-        assert_eq!(note.color, "blue");
+        assert_eq!(note.color, NoteColor::Blue);
         assert_eq!(note.x, 120.0);
         assert_eq!(note.y, 120.0);
         assert_eq!(note.width, 280.0);
@@ -805,8 +826,8 @@ mod tests {
 
     #[test]
     fn note_new_color_reflected() {
-        assert_eq!(Note::new("pink").color, "pink");
-        assert_eq!(Note::new("green").color, "green");
+        assert_eq!(Note::new(NoteColor::Pink).color, NoteColor::Pink);
+        assert_eq!(Note::new(NoteColor::Green).color, NoteColor::Green);
     }
 
     // ── Settings::default() ──
@@ -814,7 +835,7 @@ mod tests {
     #[test]
     fn settings_default_values() {
         let s = Settings::default();
-        assert_eq!(s.default_color, "yellow");
+        assert_eq!(s.default_color, NoteColor::Yellow);
         assert_eq!(s.font_size, 14);
         assert_eq!(s.zoom, 100);
         assert_eq!(s.opacity, 100);
@@ -830,7 +851,7 @@ mod tests {
     #[test]
     fn trash_fifo_within_limit() {
         let mut trash: Vec<Note> = (0..20)
-            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .map(|i| make_note(&i.to_string(), NoteColor::Yellow, ""))
             .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
@@ -839,7 +860,7 @@ mod tests {
     #[test]
     fn trash_fifo_overflow_by_one() {
         let mut trash: Vec<Note> = (0..21)
-            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .map(|i| make_note(&i.to_string(), NoteColor::Yellow, ""))
             .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
@@ -850,7 +871,7 @@ mod tests {
     #[test]
     fn trash_fifo_overflow_by_five() {
         let mut trash: Vec<Note> = (0..25)
-            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .map(|i| make_note(&i.to_string(), NoteColor::Yellow, ""))
             .collect();
         enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), 20);
@@ -899,8 +920,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("notes.json");
         let notes = vec![
-            make_note("a", "yellow", "hello"),
-            make_note("b", "blue", "world"),
+            make_note("a", NoteColor::Yellow, "hello"),
+            make_note("b", NoteColor::Blue, "world"),
         ];
         save_notes_to(&notes, &path);
         let loaded = load_notes_from(&path);
@@ -908,7 +929,7 @@ mod tests {
         assert_eq!(loaded[0].id, "a");
         assert_eq!(loaded[0].content, "hello");
         assert_eq!(loaded[1].id, "b");
-        assert_eq!(loaded[1].color, "blue");
+        assert_eq!(loaded[1].color, NoteColor::Blue);
     }
 
     #[test]
@@ -916,7 +937,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("settings.json");
         let settings = Settings {
-            default_color: "pink".into(),
+            default_color: NoteColor::Pink,
             font_size: 18,
             zoom: 150,
             opacity: 80,
@@ -928,7 +949,7 @@ mod tests {
         };
         save_settings_to(&settings, &path);
         let loaded = load_settings_from(&path);
-        assert_eq!(loaded.default_color, "pink");
+        assert_eq!(loaded.default_color, NoteColor::Pink);
         assert_eq!(loaded.font_size, 18);
         assert_eq!(loaded.zoom, 150);
         assert_eq!(loaded.opacity, 80);
@@ -939,7 +960,7 @@ mod tests {
     fn trash_roundtrip() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("trash.json");
-        let trash = vec![make_note("t1", "green", "deleted")];
+        let trash = vec![make_note("t1", NoteColor::Green, "deleted")];
         save_trash_to(&trash, &path);
         let loaded = load_trash_from(&path);
         assert_eq!(loaded.len(), 1);
@@ -959,7 +980,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.json");
         let s = load_settings_from(&path);
-        assert_eq!(s.default_color, "yellow");
+        assert_eq!(s.default_color, NoteColor::Yellow);
     }
 
     // ── Note serde backward compat (missing zoom field) ──
@@ -969,5 +990,30 @@ mod tests {
         let json = r#"{"id":"old","content":"text","color":"yellow","x":0,"y":0,"width":280,"height":320}"#;
         let note: Note = serde_json::from_str(json).unwrap();
         assert_eq!(note.zoom, 100);
+    }
+
+    // ── NoteColor serde ──
+
+    #[test]
+    fn note_color_roundtrip() {
+        for (variant, label) in [
+            (NoteColor::Yellow, "yellow"),
+            (NoteColor::Blue, "blue"),
+            (NoteColor::Green, "green"),
+            (NoteColor::Pink, "pink"),
+            (NoteColor::Purple, "purple"),
+            (NoteColor::Gray, "gray"),
+        ] {
+            let serialized = serde_json::to_string(&variant).unwrap();
+            assert_eq!(serialized, format!("\"{}\"", label));
+            let deserialized: NoteColor = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn note_color_invalid_rejected() {
+        let result: Result<NoteColor, _> = serde_json::from_str("\"orange\"");
+        assert!(result.is_err());
     }
 }
