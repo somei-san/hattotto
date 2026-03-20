@@ -96,3 +96,59 @@ test.describe("renderMarkdown — inline & block elements", () => {
     expect(html).toContain("<code>");
   });
 });
+
+test.describe("renderMarkdown — ordered list auto-numbering", () => {
+  /** Helper: extract display numbers from md-order-num spans */
+  function extractOrderNums(html: string): string[] {
+    return [...html.matchAll(/<span class="md-order-num">(\d+)\.<\/span>/g)].map(m => m[1]);
+  }
+
+  test("sequential 1. 1. 1. displays as 1. 2. 3.", async ({ notePage }) => {
+    const html = await render(notePage, "1. alpha\n1. bravo\n1. charlie");
+    expect(extractOrderNums(html)).toEqual(["1", "2", "3"]);
+  });
+
+  test("indent change resets counter", async ({ notePage }) => {
+    const html = await render(notePage, "1. top\n  1. sub-a\n  1. sub-b\n1. top2");
+    // top=1, sub-a=1, sub-b=2, top2=1 (level change resets counter)
+    expect(extractOrderNums(html)).toEqual(["1", "1", "2", "1"]);
+  });
+
+  test("non-numbered line resets counter", async ({ notePage }) => {
+    const html = await render(notePage, "1. first\nplain text\n1. second");
+    // plain text resets, so both show 1
+    expect(extractOrderNums(html)).toEqual(["1", "1"]);
+  });
+
+  test("empty line resets counter", async ({ notePage }) => {
+    const html = await render(notePage, "1. a\n1. b\n\n1. c");
+    expect(extractOrderNums(html)).toEqual(["1", "2", "1"]);
+  });
+
+  test("bullet list between ordered lists resets counter", async ({ notePage }) => {
+    const html = await render(notePage, "1. x\n- bullet\n1. y");
+    expect(extractOrderNums(html)).toEqual(["1", "1"]);
+  });
+
+  test("mixed bullet and ordered interleaved", async ({ notePage }) => {
+    const html = await render(notePage, "- bullet1\n1. ord1\n1. ord2\n- bullet2\n1. ord3");
+    // ord1=1, ord2=2, then bullet resets, ord3=1
+    expect(extractOrderNums(html)).toEqual(["1", "2", "1"]);
+  });
+
+  test("deeper indent resets when returning to parent level", async ({ notePage }) => {
+    const html = await render(notePage, "1. a\n1. b\n  1. child1\n  1. child2\n1. c");
+    // a=1, b=2, child1=1, child2=2, c=1 (returning to parent resets counter)
+    expect(extractOrderNums(html)).toEqual(["1", "2", "1", "2", "1"]);
+  });
+
+  test("single ordered item displays as 1.", async ({ notePage }) => {
+    const html = await render(notePage, "1. only");
+    expect(extractOrderNums(html)).toEqual(["1"]);
+  });
+
+  test("source number is ignored — always auto-increments", async ({ notePage }) => {
+    const html = await render(notePage, "5. first\n99. second\n1. third");
+    expect(extractOrderNums(html)).toEqual(["1", "2", "3"]);
+  });
+});

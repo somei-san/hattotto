@@ -623,6 +623,8 @@
     const result = [];
     let inCodeBlock = false;
     let codeLines = [];
+    const orderedCounters = {}; // track counters per indent level
+    let lastOrderedLevel = -1;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!inCodeBlock && /^```\S*\s*$/.test(line)) {
@@ -648,6 +650,11 @@
       const level = Math.floor(spaces / 2);
       const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
       const indentStyle = level > 0 ? ` style="margin-left: ${level * 20}px"` : '';
+
+      // Reset ordered list counter when line is not a numbered list
+      if (!/^\d+\. /.test(trimmedLine)) {
+        lastOrderedLevel = -1;
+      }
 
       if (/^[-*] \[x\] /i.test(trimmedLine)) {
         result.push(`<div class="md-check checked"${indentStyle}><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
@@ -683,7 +690,15 @@
       }
       if (/^\d+\. /.test(trimmedLine)) {
         const m = trimmedLine.match(/^(\d+)\. (.*)/);
-        result.push(`<div class="md-ordered"${indentStyle}><span class="md-order-num">${escapeHtml(m[1])}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+        // Auto-increment: reset counter when level changes or first item at this level
+        if (lastOrderedLevel !== level) {
+          orderedCounters[level] = 1;
+        } else {
+          orderedCounters[level] = (orderedCounters[level] || 0) + 1;
+        }
+        lastOrderedLevel = level;
+        const displayNum = orderedCounters[level];
+        result.push(`<div class="md-ordered"${indentStyle}><span class="md-order-num">${displayNum}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
         continue;
       }
       if (line === '') {
