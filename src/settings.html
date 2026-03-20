@@ -111,6 +111,12 @@
   .color-dot[data-color="pink"]   { background: var(--pink-bar); }
   .color-dot[data-color="purple"] { background: var(--purple-bar); }
   .color-dot[data-color="gray"]   { background: var(--gray-bar); }
+  .color-dot[data-color="random"] {
+    background: conic-gradient(
+      var(--yellow-bar), var(--green-bar), var(--blue-bar),
+      var(--purple-bar), var(--pink-bar), var(--yellow-bar)
+    );
+  }
 
   /* ── Font Size Selector ───────────────────────────── */
   .font-size-row {
@@ -358,6 +364,7 @@
       <div class="color-dot" data-color="pink"   tabindex="-1" title="ピンク" role="radio" aria-label="ピンク" aria-checked="false"></div>
       <div class="color-dot" data-color="purple" tabindex="-1" title="パープル" role="radio" aria-label="パープル" aria-checked="false"></div>
       <div class="color-dot" data-color="gray"   tabindex="-1" title="グレー" role="radio" aria-label="グレー" aria-checked="false"></div>
+      <div class="color-dot" data-color="random" tabindex="-1" title="ランダム" role="radio" aria-label="ランダム" aria-checked="false"></div>
     </div>
   </div>
 

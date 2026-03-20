@@ -1300,6 +1300,7 @@ name = "hatto-to"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "tauri",

@@ -1,7 +1,10 @@
+use rand::seq::SliceRandom;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::model::{AppState, Note};
 use crate::persistence::save_notes;
+
+const COLORS: &[&str] = &["yellow", "blue", "green", "pink", "purple", "gray"];
 
 // ── Note Creation Helper ────────────────────────────────────
 
@@ -14,7 +17,13 @@ pub(crate) fn create_note_with_window(app: &AppHandle, state: &AppState) -> Note
         .unwrap_or_else(|e| e.into_inner())
         .default_color
         .clone();
-    let note = Note::new(&default_color);
+    let color = if default_color == "random" {
+        let mut rng = rand::thread_rng();
+        COLORS.choose(&mut rng).unwrap().to_string()
+    } else {
+        default_color
+    };
+    let note = Note::new(&color);
     let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
     let offset = ((notes.len() % 20) as f64) * 30.0;
     let mut n = note;
