@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   show_pin_button: true,
   show_new_button: true,
   show_color_button: true,
+  confirm_before_delete: true,
 };
 
 // ── Note mock ──────────────────────────────────────────────
@@ -132,6 +133,7 @@ async function injectTrashMock(
         invoke: async (cmd: string) => {
           switch (cmd) {
             case "get_trash":     return data.items;
+            case "get_trash_max": return 200;
             case "restore_note":  return null;
             case "empty_trash":   return null;
             default:              return null;

@@ -50,6 +50,7 @@ pub fn run() {
             commands::update_settings,
             commands::open_settings,
             commands::get_trash,
+            commands::get_trash_max,
             commands::restore_note,
             commands::empty_trash,
             commands::open_trash,

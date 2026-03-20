@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 // ── Data Model ──────────────────────────────────────────────
 
-pub(crate) const TRASH_MAX: usize = 20;
+pub(crate) const TRASH_MAX: usize = 200;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Note {
@@ -137,6 +137,7 @@ mod tests {
         assert!(s.show_pin_button);
         assert!(s.show_new_button);
         assert!(s.show_color_button);
+        assert!(s.confirm_before_delete);
     }
 
     // ── Zoom clamp ──
@@ -224,5 +225,36 @@ mod tests {
         let json = r#"{"id":"old","content":"","color":"yellow","x":0,"y":0,"width":280,"height":320,"zoom":100}"#;
         let note: Note = serde_json::from_str(json).unwrap();
         assert!(!note.pinned);
+    }
+
+    // ── TRASH_MAX ──
+
+    #[test]
+    fn trash_max_is_200() {
+        assert_eq!(TRASH_MAX, 200);
+    }
+
+    // ── confirm_before_delete ──
+
+    #[test]
+    fn settings_default_confirm_before_delete_is_true() {
+        let s = Settings::default();
+        assert!(s.confirm_before_delete);
+    }
+
+    #[test]
+    fn settings_json_roundtrip_with_confirm_before_delete() {
+        let mut s = Settings::default();
+        s.confirm_before_delete = false;
+        let json = serde_json::to_string(&s).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!loaded.confirm_before_delete);
+    }
+
+    #[test]
+    fn settings_deserialize_without_confirm_before_delete_defaults_to_true() {
+        let json = r#"{"default_color":"yellow","font_size":14,"zoom":100,"opacity":100}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.confirm_before_delete);
     }
 }

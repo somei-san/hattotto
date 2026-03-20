@@ -60,6 +60,12 @@
     font-weight: 600;
   }
 
+  .trash-count {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
   .btn-empty {
     background: none;
     border: 1px solid var(--border);
@@ -157,7 +163,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>ゴミ箱</h1>
+    <h1>ゴミ箱 <span id="trash-count" class="trash-count"></span></h1>
     <button class="btn-empty" id="btn-empty" aria-label="すべて削除">すべて削除</button>
   </div>
   <div class="list" id="list" role="list" aria-label="削除した付箋"></div>
@@ -178,8 +184,14 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  const countEl = document.getElementById('trash-count');
+
   async function render() {
-    const items = await invoke('get_trash');
+    const [items, trashMax] = await Promise.all([
+      invoke('get_trash'),
+      invoke('get_trash_max'),
+    ]);
+    countEl.textContent = `(${items.length} / ${trashMax})`;
     if (items.length === 0) {
       listEl.innerHTML = '<div class="empty-msg">ゴミ箱は空です</div>';
       return;

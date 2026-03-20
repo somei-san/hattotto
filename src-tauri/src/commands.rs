@@ -5,7 +5,7 @@ use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, Predefi
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
-use crate::model::{AppState, Note, Settings};
+use crate::model::{AppState, Note, Settings, TRASH_MAX};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{create_note_with_window, open_note_window, open_settings_window, open_trash_window};
 
@@ -114,6 +114,11 @@ pub(crate) fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
 #[tauri::command]
 pub(crate) fn get_trash(state: State<AppState>) -> Vec<Note> {
     state.trash.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+#[tauri::command]
+pub(crate) fn get_trash_max() -> usize {
+    TRASH_MAX
 }
 
 #[tauri::command]

@@ -39,6 +39,16 @@ test("settings tab — save closes window", async ({ settingsPage }) => {
   expect(closeCalled).toBe(true);
 });
 
+// ── 削除確認トグル ─────────────────────────────────────────
+
+test("settings tab — confirm-delete-toggle exists", async ({ settingsPage }) => {
+  await expect(settingsPage.locator("#confirm-delete-toggle")).toBeAttached();
+});
+
+test("settings tab — confirm-delete-toggle default is checked", async ({ settingsPage }) => {
+  await expect(settingsPage.locator("#confirm-delete-toggle")).toBeChecked();
+});
+
 // ── ヘルプタブ ─────────────────────────────────────────────
 
 test("help tab", async ({ settingsPage }) => {

@@ -141,33 +141,33 @@ mod tests {
 
     #[test]
     fn trash_fifo_within_limit() {
-        let mut trash: Vec<Note> = (0..20)
+        let mut trash: Vec<Note> = (0..TRASH_MAX)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
         enforce_trash_limit(&mut trash);
-        assert_eq!(trash.len(), 20);
+        assert_eq!(trash.len(), TRASH_MAX);
     }
 
     #[test]
     fn trash_fifo_overflow_by_one() {
-        let mut trash: Vec<Note> = (0..21)
+        let mut trash: Vec<Note> = (0..TRASH_MAX + 1)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
         enforce_trash_limit(&mut trash);
-        assert_eq!(trash.len(), 20);
+        assert_eq!(trash.len(), TRASH_MAX);
         // oldest (id "0") should be removed
         assert_eq!(trash[0].id, "1");
     }
 
     #[test]
     fn trash_fifo_overflow_by_five() {
-        let mut trash: Vec<Note> = (0..25)
+        let mut trash: Vec<Note> = (0..TRASH_MAX + 5)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
         enforce_trash_limit(&mut trash);
-        assert_eq!(trash.len(), 20);
+        assert_eq!(trash.len(), TRASH_MAX);
         assert_eq!(trash[0].id, "5");
-        assert_eq!(trash[19].id, "24");
+        assert_eq!(trash[TRASH_MAX - 1].id, (TRASH_MAX + 4).to_string());
     }
 
     // ── JSON persistence roundtrip ──
@@ -212,6 +212,7 @@ mod tests {
         assert_eq!(loaded.zoom, 150);
         assert_eq!(loaded.opacity, 80);
         assert!(loaded.edit_on_single_click);
+        assert!(loaded.confirm_before_delete);
     }
 
     #[test]
