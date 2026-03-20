@@ -3,6 +3,7 @@ use std::time::Instant;
 use tauri::image::Image;
 use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::model::{AppState, Note, Settings};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
@@ -71,8 +72,21 @@ pub(crate) fn update_note_pinned(id: String, pinned: bool, state: State<AppState
     }
 }
 
-#[tauri::command]
-pub(crate) fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
+/// Confirm deletion if setting is enabled. Returns false if user cancelled.
+fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
+    let confirm = state.settings.lock().unwrap_or_else(|e| e.into_inner()).confirm_before_delete;
+    if !confirm {
+        return true;
+    }
+    app.dialog()
+        .message("この付箋を削除しますか？")
+        .title("Hatto-to")
+        .buttons(MessageDialogButtons::OkCancelCustom("削除".into(), "キャンセル".into()))
+        .blocking_show()
+}
+
+/// Move a note to trash and close its window.
+fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) {
     {
         let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(pos) = notes.iter().position(|n| n.id == id) {
@@ -87,6 +101,14 @@ pub(crate) fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
     if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
         let _ = win.close();
     }
+}
+
+#[tauri::command]
+pub(crate) fn delete_note(id: String, app: AppHandle, state: State<AppState>) {
+    if !confirm_delete_if_needed(&app, &state) {
+        return;
+    }
+    do_delete_note(&id, &app, &state);
 }
 
 #[tauri::command]
@@ -140,6 +162,7 @@ pub(crate) fn update_settings(
     show_pin_button: bool,
     show_new_button: bool,
     show_color_button: bool,
+    confirm_before_delete: bool,
     state: State<AppState>,
 ) {
     let mut settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
@@ -152,6 +175,7 @@ pub(crate) fn update_settings(
     settings.show_pin_button = show_pin_button;
     settings.show_new_button = show_new_button;
     settings.show_color_button = show_color_button;
+    settings.confirm_before_delete = confirm_before_delete;
     save_settings(&settings);
 }
 
@@ -325,19 +349,8 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             create_note_with_window(app, &state);
         }
         "ctx_delete" => {
-            {
-                let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(pos) = notes.iter().position(|n| n.id == note_id) {
-                    let note = notes.remove(pos);
-                    save_notes(&notes);
-                    let mut trash = state.trash.lock().unwrap_or_else(|e| e.into_inner());
-                    trash.push(note);
-                    enforce_trash_limit(&mut trash);
-                    save_trash(&trash);
-                }
-            }
-            if let Some(w) = &win {
-                let _ = w.close();
+            if confirm_delete_if_needed(app, &state) {
+                do_delete_note(&note_id, app, &state);
             }
         }
         "ctx_trash" => {

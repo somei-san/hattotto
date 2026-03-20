@@ -442,6 +442,17 @@
     </div>
   </div>
 
+  <div class="section" role="group" aria-label="削除確認">
+    <div class="section-title">削除確認</div>
+    <div class="toggle-row">
+      <span class="toggle-label">付箋削除時に確認する</span>
+      <label class="toggle">
+        <input type="checkbox" id="confirm-delete-toggle" checked aria-label="付箋削除時に確認する" />
+        <div class="toggle-track"></div>
+      </label>
+    </div>
+  </div>
+
   <div class="section" role="group" aria-label="システム">
     <div class="section-title">システム</div>
     <div class="toggle-row">
@@ -531,6 +542,7 @@
   let currentShowPin = true;
   let currentShowNew = true;
   let currentShowColor = true;
+  let currentConfirmDelete = true;
 
   // ── Tabs ────────────────────────────────────────────
   function activateTab(tab) {
@@ -613,6 +625,7 @@
       showPinButton: currentShowPin,
       showNewButton: currentShowNew,
       showColorButton: currentShowColor,
+      confirmBeforeDelete: currentConfirmDelete,
     });
     emit('settings-changed', {
       default_color: currentColor,
@@ -624,6 +637,7 @@
       show_pin_button: currentShowPin,
       show_new_button: currentShowNew,
       show_color_button: currentShowColor,
+      confirm_before_delete: currentConfirmDelete,
     });
     getCurrentWebviewWindow().close();
   });
@@ -665,6 +679,12 @@
   const showColorToggle = document.getElementById('show-color-toggle');
   showColorToggle.addEventListener('change', () => {
     currentShowColor = showColorToggle.checked;
+  });
+
+  // ── Confirm Delete Toggle ──────────────────────────────
+  const confirmDeleteToggle = document.getElementById('confirm-delete-toggle');
+  confirmDeleteToggle.addEventListener('change', () => {
+    currentConfirmDelete = confirmDeleteToggle.checked;
   });
 
   // ── Autostart Toggle ─────────────────────────────────
@@ -718,6 +738,9 @@
 
     currentShowColor = s.show_color_button !== false;
     showColorToggle.checked = currentShowColor;
+
+    currentConfirmDelete = s.confirm_before_delete !== false;
+    confirmDeleteToggle.checked = currentConfirmDelete;
 
     autostartToggle.checked = !!autostartEnabled;
 

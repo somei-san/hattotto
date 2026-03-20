@@ -203,6 +203,7 @@ mod tests {
             show_pin_button: true,
             show_new_button: true,
             show_color_button: true,
+            confirm_before_delete: true,
         };
         save_settings_to(&settings, &path).unwrap();
         let loaded = load_settings_from(&path);

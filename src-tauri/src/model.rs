@@ -58,6 +58,8 @@ pub struct Settings {
     pub show_new_button: bool,
     #[serde(default = "default_true")]
     pub show_color_button: bool,
+    #[serde(default = "default_true")]
+    pub confirm_before_delete: bool,
 }
 
 fn default_true() -> bool {
@@ -76,6 +78,7 @@ impl Default for Settings {
             show_pin_button: true,
             show_new_button: true,
             show_color_button: true,
+            confirm_before_delete: true,
         }
     }
 }

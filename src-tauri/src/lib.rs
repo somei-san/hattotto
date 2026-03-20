@@ -35,6 +35,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_note,
