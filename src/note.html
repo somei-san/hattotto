@@ -821,6 +821,17 @@
     const prefix = getAutoPrefix(cur.fullLine);
     if (prefix === null) return;
 
+    // Don't auto-continue if caret is before or inside the prefix portion
+    const { indent, stripped } = stripIndent(cur.fullLine);
+    for (const pat of LIST_PATTERNS) {
+      const m = stripped.match(pat.re);
+      if (m) {
+        const prefixEnd = indent.length + m[1].length;
+        if (cur.text.length < prefixEnd) return;
+        break;
+      }
+    }
+
     e.preventDefault();
     autoInsertGuard = true;
 

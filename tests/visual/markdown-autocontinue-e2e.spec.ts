@@ -141,6 +141,22 @@ test.describe("Markdown autocontinue E2E", () => {
     expect(text).toContain("- \n- item");
   });
 
+  // ── Enter before prefix does NOT auto-continue ─────────
+  test("Enter before '- ' prefix inserts plain newline, no auto-continue", async ({ openNote }) => {
+    const page = await openNote();
+    await enterEditMode(page);
+    await page.keyboard.type("- item");
+    // Move caret to very beginning of line (before "- ")
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Enter");
+    const text = await page.$eval(".editor", (el) => (el as HTMLElement).innerText);
+    // Should NOT insert a "- " prefix: just a plain newline before "- item"
+    expect(text).toContain("\n- item");
+    // Should NOT have two bullet prefixes
+    const bulletCount = (text.match(/^- /gm) || []).length;
+    expect(bulletCount).toBe(1);
+  });
+
   // ── Re-entry guard (no infinite loop) ──────────────────
   test("auto-insert does not freeze (re-entry guard)", async ({ openNote }) => {
     const page = await openNote();
