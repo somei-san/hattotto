@@ -94,6 +94,9 @@ pub(crate) fn bring_all_to_front(app: &AppHandle) {
         if let Some(win) = app.get_webview_window(&format!("note-{}", note.id)) {
             let _ = win.show();
             let _ = win.set_focus();
+        } else {
+            // Window was closed (e.g. via ⌘W) — recreate it
+            open_note_window(app, note);
         }
     }
 }

@@ -223,6 +223,14 @@
     render();
   });
 
+  // ── ⌘W to close window ─────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+      e.preventDefault();
+      window.__TAURI__.webviewWindow.getCurrentWebviewWindow().close();
+    }
+  });
+
   render();
 </script>
 </body>

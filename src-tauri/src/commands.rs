@@ -75,7 +75,7 @@ pub(crate) fn update_note_pinned(id: String, pinned: bool, state: State<AppState
 }
 
 /// Confirm deletion if setting is enabled. Returns false if user cancelled.
-fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
+pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
     let confirm = state
         .settings
         .lock()
@@ -95,7 +95,7 @@ fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
 }
 
 /// Move a note to trash and close its window.
-fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) {
+pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) {
     {
         let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(pos) = notes.iter().position(|n| n.id == id) {

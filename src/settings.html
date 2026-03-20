@@ -761,6 +761,14 @@
     activateTab(tab);
   }
 
+  // ── ⌘W to close window ─────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+      e.preventDefault();
+      getCurrentWebviewWindow().close();
+    }
+  });
+
   // Listen for switch-tab event from Rust
   listen('switch-tab', (event) => {
     switchToTab(event.payload);

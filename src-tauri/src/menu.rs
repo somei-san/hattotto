@@ -3,6 +3,7 @@ use tauri::{
     AppHandle, Emitter, Manager, State,
 };
 
+use crate::commands::{confirm_delete_if_needed, do_delete_note};
 use crate::model::AppState;
 use crate::window::{create_note_with_window, open_settings_window, open_trash_window};
 
@@ -58,6 +59,8 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &new_note_item,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "close_window", "Close Window", true, Some("CmdOrCtrl+W"))?,
+            &PredefinedMenuItem::separator(app)?,
             &trash_item,
         ],
     )?;
@@ -112,6 +115,19 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
             return;
         }
         match eid_str {
+            "close_window" => {
+                if let Some(win) = app.get_focused_window() {
+                    let label = win.label().to_string();
+                    if let Some(note_id) = label.strip_prefix("note-") {
+                        let state: State<AppState> = app.state();
+                        if confirm_delete_if_needed(app, &state) {
+                            do_delete_note(note_id, app, &state);
+                        }
+                    } else {
+                        let _ = win.close();
+                    }
+                }
+            }
             "open_settings" => {
                 open_settings_window(app, None);
             }
