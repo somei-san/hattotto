@@ -1,6 +1,8 @@
 use std::time::Instant;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::image::Image;
+use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, State};
 
 use crate::model::{AppState, Note, Settings};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
@@ -196,5 +198,164 @@ pub(crate) fn bring_other_notes_to_front(caller_id: String, app: AppHandle, stat
     // Re-focus the caller so it stays on top
     if let Some(win) = app.get_webview_window(&format!("note-{}", caller_id)) {
         let _ = win.set_focus();
+    }
+}
+
+#[tauri::command]
+pub(crate) fn show_context_menu(
+    id: String,
+    current_color: String,
+    app: AppHandle,
+    state: State<AppState>,
+) {
+    let window_label = format!("note-{}", id);
+    let Some(webview_win) = app.get_webview_window(&window_label) else {
+        return;
+    };
+
+    // Store note ID so on_menu_event knows which note to target
+    *state.context_menu_note_id.lock().unwrap_or_else(|e| e.into_inner()) = id;
+
+    let build = || -> tauri::Result<()> {
+        // Generate a colored circle icon (16x16 RGBA)
+        fn color_circle(r: u8, g: u8, b: u8) -> Image<'static> {
+            const S: u32 = 16;
+            let mut rgba = vec![0u8; (S * S * 4) as usize];
+            let c = S as f32 / 2.0;
+            let rad = c - 1.0;
+            for y in 0..S {
+                for x in 0..S {
+                    let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
+                    let i = ((y * S + x) * 4) as usize;
+                    if d <= rad {
+                        rgba[i] = r;
+                        rgba[i + 1] = g;
+                        rgba[i + 2] = b;
+                        rgba[i + 3] = 255;
+                    }
+                }
+            }
+            Image::new_owned(rgba, S, S)
+        }
+
+        let colors: &[(&str, &str, u8, u8, u8)] = &[
+            ("yellow",  "イエロー", 0xF9, 0xE9, 0x7A),
+            ("blue",    "ブルー",   0x7F, 0xB3, 0xE0),
+            ("green",   "グリーン", 0x8C, 0xC9, 0x8F),
+            ("pink",    "ピンク",   0xE8, 0x8F, 0xAB),
+            ("purple",  "パープル", 0xC4, 0x8D, 0xD0),
+            ("gray",    "グレー",   0xB8, 0xB8, 0xB8),
+        ];
+
+        let color_items: Vec<IconMenuItem<tauri::Wry>> = colors
+            .iter()
+            .map(|(key, label, r, g, b)| {
+                let check = if *key == current_color.as_str() { "✓ " } else { "    " };
+                IconMenuItem::with_id(
+                    &app,
+                    format!("ctx_color_{}", key),
+                    format!("{}{}", check, label),
+                    true,
+                    Some(color_circle(*r, *g, *b)),
+                    None::<&str>,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        // Build all items with let bindings to satisfy lifetimes
+        let cut = PredefinedMenuItem::cut(&app, None)?;
+        let copy = PredefinedMenuItem::copy(&app, None)?;
+        let paste = PredefinedMenuItem::paste(&app, None)?;
+        let sep1 = PredefinedMenuItem::separator(&app)?;
+        let new_note = IconMenuItem::with_id_and_native_icon(
+            &app, "ctx_new", "新しい付箋を作成", true, Some(NativeIcon::Add), Some("CmdOrCtrl+N"),
+        )?;
+        let delete = IconMenuItem::with_id_and_native_icon(
+            &app, "ctx_delete", "この付箋を削除", true, Some(NativeIcon::Remove), None::<&str>,
+        )?;
+        let trash = IconMenuItem::with_id_and_native_icon(
+            &app, "ctx_trash", "ゴミ箱を開く", true, Some(NativeIcon::TrashEmpty), Some("CmdOrCtrl+Shift+T"),
+        )?;
+        let sep2 = PredefinedMenuItem::separator(&app)?;
+        let zoom_in = MenuItem::with_id(&app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
+        let zoom_out = MenuItem::with_id(&app, "ctx_zoom_out", "ズームアウト", true, Some("CmdOrCtrl+-"))?;
+        let zoom_reset = MenuItem::with_id(&app, "ctx_zoom_reset", "ズームリセット", true, Some("CmdOrCtrl+0"))?;
+        let sep3 = PredefinedMenuItem::separator(&app)?;
+
+        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+            &cut, &copy, &paste,
+            &sep1,
+            &new_note, &delete, &trash,
+            &sep2,
+            &zoom_in, &zoom_out, &zoom_reset,
+            &sep3,
+        ];
+        for ci in &color_items {
+            items.push(ci as &dyn tauri::menu::IsMenuItem<tauri::Wry>);
+        }
+
+        let menu = Menu::with_items(&app, &items)?;
+
+        // popup() is blocking — shows native menu and returns after user selects or dismisses
+        let window = webview_win.as_ref().window();
+        menu.popup(window.clone())?;
+
+        Ok(())
+    };
+
+    if let Err(e) = build() {
+        eprintln!("context menu error: {}", e);
+    }
+}
+
+/// Handle context menu events (called from menu.rs on_menu_event)
+pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
+    let state: State<AppState> = app.state();
+    let note_id = state.context_menu_note_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if note_id.is_empty() {
+        return;
+    }
+    let win_label = format!("note-{}", note_id);
+
+    let target = EventTarget::WebviewWindow { label: win_label.clone() };
+
+    match event_id {
+        "ctx_new" => {
+            create_note_with_window(app, &state);
+        }
+        "ctx_delete" => {
+            {
+                let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(pos) = notes.iter().position(|n| n.id == note_id) {
+                    let note = notes.remove(pos);
+                    save_notes(&notes);
+                    let mut trash = state.trash.lock().unwrap_or_else(|e| e.into_inner());
+                    trash.push(note);
+                    enforce_trash_limit(&mut trash);
+                    save_trash(&trash);
+                }
+            }
+            if let Some(win) = app.get_webview_window(&win_label) {
+                let _ = win.close();
+            }
+        }
+        "ctx_trash" => {
+            open_trash_window(app);
+        }
+        "ctx_zoom_in" => {
+            let _ = app.emit_to(target, "zoom", "in");
+        }
+        "ctx_zoom_out" => {
+            let _ = app.emit_to(target, "zoom", "out");
+        }
+        "ctx_zoom_reset" => {
+            let _ = app.emit_to(target, "zoom", "reset");
+        }
+        _ if event_id.starts_with("ctx_color_") => {
+            let color = event_id.trim_start_matches("ctx_color_");
+            let _ = app.emit_to(target, "ctx-color-change", color);
+        }
+        _ => {}
     }
 }

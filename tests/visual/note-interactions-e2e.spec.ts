@@ -116,9 +116,12 @@ test.describe("カラーピッカー", () => {
   });
 });
 
-// ── 4. コンテキストメニュー ──────────────────────────────
+// ── 4-8. コンテキストメニュー（ネイティブメニュー移行済み — Playwrightでテスト不可）──
 
-test.describe("コンテキストメニュー", () => {
+// コンテキストメニューはTauri Menu::popup()でネイティブ表示されるため、
+// Playwrightからの操作・検証ができない。実機テストで確認する。
+
+test.describe.skip("コンテキストメニュー（ネイティブ）", () => {
   test("右クリック → コンテキストメニューが開く", async ({ openNote }) => {
     const page = await openNote({ content: "テスト" });
     // 編集モードにする
@@ -197,8 +200,8 @@ test.describe("ペースト（URLリンク変換）", () => {
 
 // ── 6. コンテキストメニュー：ズーム ─────────────────────────
 
-test.describe("コンテキストメニュー：ズーム", () => {
-  test("ズームイン → body.style.zoom が増加する", async ({ openNote }) => {
+test.describe.skip("コンテキストメニュー：ズーム", () => {
+  test("ズームイン → #note の zoom が増加する", async ({ openNote }) => {
     const page = await openNote({ content: "テスト", zoom: 100 });
     await page.click(".markdown-view");
     await expect(page.locator(".editor")).toBeVisible();
@@ -207,11 +210,11 @@ test.describe("コンテキストメニュー：ズーム", () => {
     await expect(page.locator(".context-menu.open")).toBeVisible();
     await page.click('[data-action="zoomIn"]');
 
-    const zoom = await page.evaluate(() => document.body.style.zoom);
+    const zoom = await page.evaluate(() => document.getElementById('note').style.zoom);
     expect(parseFloat(zoom)).toBeGreaterThan(1);
   });
 
-  test("ズームアウト → body.style.zoom が減少する", async ({ openNote }) => {
+  test("ズームアウト → #note の zoom が減少する", async ({ openNote }) => {
     const page = await openNote({ content: "テスト", zoom: 100 });
     await page.click(".markdown-view");
     await expect(page.locator(".editor")).toBeVisible();
@@ -220,11 +223,11 @@ test.describe("コンテキストメニュー：ズーム", () => {
     await expect(page.locator(".context-menu.open")).toBeVisible();
     await page.click('[data-action="zoomOut"]');
 
-    const zoom = await page.evaluate(() => document.body.style.zoom);
+    const zoom = await page.evaluate(() => document.getElementById('note').style.zoom);
     expect(parseFloat(zoom)).toBeLessThan(1);
   });
 
-  test("ズームリセット → body.style.zoom が 1 に戻る", async ({ openNote }) => {
+  test("ズームリセット → #note の zoom が 1 に戻る", async ({ openNote }) => {
     const page = await openNote({ content: "テスト", zoom: 100 });
 
     // まずズームインして1より大きくする
@@ -234,7 +237,7 @@ test.describe("コンテキストメニュー：ズーム", () => {
     await expect(page.locator(".context-menu.open")).toBeVisible();
     await page.click('[data-action="zoomIn"]');
 
-    const zoomedIn = await page.evaluate(() => document.body.style.zoom);
+    const zoomedIn = await page.evaluate(() => document.getElementById('note').style.zoom);
     expect(parseFloat(zoomedIn)).toBeGreaterThan(1);
 
     // ズームリセット
@@ -242,14 +245,14 @@ test.describe("コンテキストメニュー：ズーム", () => {
     await expect(page.locator(".context-menu.open")).toBeVisible();
     await page.click('[data-action="zoomReset"]');
 
-    const zoom = await page.evaluate(() => document.body.style.zoom);
+    const zoom = await page.evaluate(() => document.getElementById('note').style.zoom);
     expect(parseFloat(zoom)).toBe(1);
   });
 });
 
 // ── 7. コンテキストメニュー：ピン留めトグル ──────────────────
 
-test.describe("コンテキストメニュー：ピン留めトグル", () => {
+test.describe.skip("コンテキストメニュー：ピン留めトグル", () => {
   test("ピン留め → #btn-pin に .active が付き、ラベルが切り替わる", async ({ openNote }) => {
     const page = await openNote({ content: "テスト" });
     await expect(page.locator("#btn-pin")).not.toHaveClass(/active/);
@@ -289,7 +292,7 @@ test.describe("コンテキストメニュー：ピン留めトグル", () => {
 
 // ── 8. コンテキストメニュー：カラー変更 ──────────────────────
 
-test.describe("コンテキストメニュー：カラー変更", () => {
+test.describe.skip("コンテキストメニュー：カラー変更", () => {
   test("コンテキストメニューから色を変更 → --bg CSS変数が変わる", async ({ openNote }) => {
     const page = await openNote({ content: "テスト", color: "yellow" });
     await page.click(".markdown-view");

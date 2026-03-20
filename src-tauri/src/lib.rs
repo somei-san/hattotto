@@ -26,6 +26,7 @@ pub fn run() {
         settings: Mutex::new(settings),
         trash: Mutex::new(trash),
         last_bring_to_front: Mutex::new(Instant::now() - std::time::Duration::from_secs(10)),
+        context_menu_note_id: Mutex::new(String::new()),
     };
 
     tauri::Builder::default()
@@ -52,6 +53,7 @@ pub fn run() {
             commands::empty_trash,
             commands::open_trash,
             commands::bring_other_notes_to_front,
+            commands::show_context_menu,
         ])
         .setup(|app| {
             // Set up app menu and system tray

@@ -85,6 +85,8 @@ pub struct AppState {
     pub(crate) settings: Mutex<Settings>,
     pub(crate) trash: Mutex<Vec<Note>>,
     pub(crate) last_bring_to_front: Mutex<Instant>,
+    /// Note ID that last opened the context menu (for routing menu events)
+    pub(crate) context_menu_note_id: Mutex<String>,
 }
 
 #[cfg(test)]

@@ -103,30 +103,39 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
     )?;
     app.set_menu(menu)?;
 
-    app.on_menu_event(|app, event| match event.id().as_ref() {
-        "open_settings" => {
-            open_settings_window(app, None);
+    app.on_menu_event(|app, event| {
+        let eid = event.id();
+        let eid_str = eid.as_ref();
+        // Context menu events (ctx_ prefix)
+        if eid_str.starts_with("ctx_") {
+            crate::commands::handle_context_menu_event(app, eid_str);
+            return;
         }
-        "new_note" => {
-            let state: State<AppState> = app.state();
-            create_note_with_window(app, &state);
+        match eid_str {
+            "open_settings" => {
+                open_settings_window(app, None);
+            }
+            "new_note" => {
+                let state: State<AppState> = app.state();
+                create_note_with_window(app, &state);
+            }
+            "open_trash" => {
+                open_trash_window(app);
+            }
+            "zoom_in" => {
+                let _ = app.emit("zoom", "in");
+            }
+            "zoom_out" => {
+                let _ = app.emit("zoom", "out");
+            }
+            "zoom_reset" => {
+                let _ = app.emit("zoom", "reset");
+            }
+            "open_help" => {
+                open_settings_window(app, Some("help"));
+            }
+            _ => {}
         }
-        "open_trash" => {
-            open_trash_window(app);
-        }
-        "zoom_in" => {
-            let _ = app.emit("zoom", "in");
-        }
-        "zoom_out" => {
-            let _ = app.emit("zoom", "out");
-        }
-        "zoom_reset" => {
-            let _ = app.emit("zoom", "reset");
-        }
-        "open_help" => {
-            open_settings_window(app, Some("help"));
-        }
-        _ => {}
     });
 
     Ok(())

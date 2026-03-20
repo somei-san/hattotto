@@ -318,91 +318,6 @@
     text-decoration-color: rgba(21, 101, 192, 0.8);
   }
 
-  /* ── Context Menu ──────────────────────────────────── */
-  .context-menu {
-    display: none;
-    position: fixed;
-    background: rgba(255,255,255,0.95);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-radius: 8px;
-    padding: 4px 0;
-    min-width: 180px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15), 0 0 0 0.5px rgba(0,0,0,0.1);
-    z-index: 200;
-    font-size: 13px;
-    color: #222;
-    -webkit-app-region: no-drag;
-  }
-
-  .context-menu.open { display: block; }
-
-  .context-menu-item {
-    display: flex;
-    align-items: center;
-    padding: 4px 12px;
-    cursor: default;
-    border-radius: 4px;
-    margin: 0 4px;
-    gap: 8px;
-  }
-
-  .context-menu-item:hover {
-    background: #007AFF;
-    color: #fff;
-  }
-
-  .context-menu-item .cm-icon {
-    width: 20px;
-    text-align: center;
-    flex-shrink: 0;
-    font-size: 12px;
-    opacity: 0.7;
-  }
-
-  .context-menu-item:hover .cm-icon { opacity: 1; }
-
-  .context-menu-separator {
-    height: 1px;
-    background: rgba(0,0,0,0.1);
-    margin: 4px 0;
-  }
-
-  .context-menu-colors {
-    display: flex;
-    align-items: center;
-    padding: 4px 12px;
-    margin: 0 4px;
-    gap: 6px;
-  }
-
-  .context-menu-colors .cm-color-label {
-    font-size: 13px;
-    color: #222;
-    margin-right: 2px;
-    white-space: nowrap;
-  }
-
-  .context-menu-colors .cm-color-dot {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: transform 0.15s, border-color 0.15s;
-    flex-shrink: 0;
-  }
-
-  .context-menu-colors .cm-color-dot:hover { transform: scale(1.15); }
-  .context-menu-colors .cm-color-dot.active { border-color: rgba(0,0,0,0.4); }
-
-  .context-menu-colors .cm-color-dot[data-color="yellow"]  { background: var(--yellow-bar); }
-  .context-menu-colors .cm-color-dot[data-color="blue"]    { background: var(--blue-bar); }
-  .context-menu-colors .cm-color-dot[data-color="green"]   { background: var(--green-bar); }
-  .context-menu-colors .cm-color-dot[data-color="pink"]    { background: var(--pink-bar); }
-  .context-menu-colors .cm-color-dot[data-color="purple"]  { background: var(--purple-bar); }
-  .context-menu-colors .cm-color-dot[data-color="gray"]    { background: var(--gray-bar); }
-
   /* ── Resize Handle ────────────────────────────────── */
   .resize-handle {
     position: absolute;
@@ -426,9 +341,7 @@
   }
   /* ── Focus Indicator ──────────────────────────────── */
   .btn:focus-visible,
-  .color-dot:focus-visible,
-  .cm-color-dot:focus-visible,
-  .context-menu-item:focus-visible {
+  .color-dot:focus-visible {
     outline: 2px solid rgba(0, 102, 204, 0.6);
     outline-offset: 2px;
   }
@@ -477,32 +390,6 @@
       <div class="color-dot" data-color="gray" role="radio" aria-label="グレー" aria-checked="false" tabindex="-1"></div>
     </div>
 
-    <!-- Context Menu -->
-    <div class="context-menu" id="context-menu" role="menu" aria-label="操作メニュー">
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="cut"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="3.5" cy="9" r="1.8"/><circle cx="8.5" cy="9" r="1.8"/><line x1="5" y1="7.5" x2="8" y2="2"/><line x1="7" y1="7.5" x2="4" y2="2"/></svg></span>切り取り</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="copy"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="7" rx="1"/><path d="M8 4V2.5A1 1 0 0 0 7 1.5H3A1 1 0 0 0 2 2.5V9a1 1 0 0 0 1 1h1"/></svg></span>コピー</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="paste"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="8" height="9" rx="1"/><path d="M4.5 2.5V2a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v.5"/></svg></span>貼り付け</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="selectAll"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="1.5" width="9" height="9" rx="1" stroke-dasharray="2 1.5"/><text x="6" y="8.5" text-anchor="middle" font-size="6" font-weight="600" fill="currentColor" stroke="none">A</text></svg></span>全選択</div>
-      <div class="context-menu-separator"></div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="togglePin" id="ctx-pin"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 11V7M3.5 7h5l-.7-2.5H4.2L3.5 7ZM4.5 4.5V2.2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5V4.5"/></svg></span><span id="ctx-pin-label">ピン留め</span></div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="newNote"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg></span>新しい付箋を作成</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="deleteNote"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="3" y1="3" x2="9" y2="9"/><line x1="9" y1="3" x2="3" y2="9"/></svg></span>この付箋を削除</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="openTrash"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7.5a1 1 0 0 0 1 .5h3a1 1 0 0 0 1-.5L9 3"/></svg></span>ゴミ箱を開く</div>
-      <div class="context-menu-separator"></div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="zoomIn"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="3.5"/><line x1="8" y1="8" x2="11" y2="11"/><line x1="5.5" y1="3.5" x2="5.5" y2="7.5"/><line x1="3.5" y1="5.5" x2="7.5" y2="5.5"/></svg></span>ズームイン</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="zoomOut"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="3.5"/><line x1="8" y1="8" x2="11" y2="11"/><line x1="3.5" y1="5.5" x2="7.5" y2="5.5"/></svg></span>ズームアウト</div>
-      <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="zoomReset"><span class="cm-icon"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="3.5"/><line x1="8" y1="8" x2="11" y2="11"/></svg></span>ズームリセット</div>
-      <div class="context-menu-separator"></div>
-      <div class="context-menu-colors" id="context-menu-colors" role="radiogroup" aria-label="付箋の色">
-        <div class="cm-color-dot" data-color="yellow" role="radio" aria-label="イエロー" aria-checked="false" tabindex="0"></div>
-        <div class="cm-color-dot" data-color="blue" role="radio" aria-label="ブルー" aria-checked="false" tabindex="-1"></div>
-        <div class="cm-color-dot" data-color="green" role="radio" aria-label="グリーン" aria-checked="false" tabindex="-1"></div>
-        <div class="cm-color-dot" data-color="pink" role="radio" aria-label="ピンク" aria-checked="false" tabindex="-1"></div>
-        <div class="cm-color-dot" data-color="purple" role="radio" aria-label="パープル" aria-checked="false" tabindex="-1"></div>
-        <div class="cm-color-dot" data-color="gray" role="radio" aria-label="グレー" aria-checked="false" tabindex="-1"></div>
-      </div>
-    </div>
-
     <!-- Content -->
     <div class="content">
       <div class="lines" id="lines"></div>
@@ -510,6 +397,7 @@
       <div class="editor" id="editor" contenteditable="true" aria-label="付箋の内容"></div>
     </div>
   </div>
+
 
 <script>
   // ── Globals ───────────────────────────────────────
@@ -829,7 +717,7 @@
   editor.addEventListener('blur', (e) => {
     // Don't switch if focus moves to a button (color picker, etc.) or context menu is open
     if (e.relatedTarget && e.relatedTarget.closest('.note')) return;
-    if (ctxMenu.classList.contains('open')) return;
+    // (native context menu is handled by OS, no check needed)
     showPreview();
   });
 
@@ -851,7 +739,7 @@
 
   // ── Zoom ──────────────────────────────────────────
   function applyZoom(zoom) {
-    document.body.style.zoom = zoom / 100;
+    document.getElementById('note').style.zoom = zoom / 100;
   }
 
   let currentZoom = 100;
@@ -1239,149 +1127,21 @@
     applySettings(e.payload);
   });
 
-  // ── Context Menu ─────────────────────────────────────
-  const ctxMenu = document.getElementById('context-menu');
-  let savedActiveElement = null;
-  let savedSelection = null;
-
-  function showContextMenu(x, y) {
-    savedActiveElement = document.activeElement;
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      savedSelection = sel.getRangeAt(0).cloneRange();
-    } else {
-      savedSelection = null;
-    }
-    // Update pin label
-    const isPinned = pinBtn.classList.contains('active');
-    document.getElementById('ctx-pin-label').textContent = isPinned ? 'ピン留め解除' : 'ピン留め';
-    ctxMenu.classList.add('open');
-    // Position first, then adjust for screen edges
-    ctxMenu.style.left = `${x}px`;
-    ctxMenu.style.top = `${y}px`;
-    // Adjust if menu overflows viewport
-    const rect = ctxMenu.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    if (rect.right > vw) ctxMenu.style.left = `${Math.max(0, x - rect.width)}px`;
-    if (rect.bottom > vh) ctxMenu.style.top = `${Math.max(0, y - rect.height)}px`;
-    // Focus first menu item for keyboard accessibility
-    const firstItem = ctxMenu.querySelector('.context-menu-item');
-    if (firstItem) firstItem.focus();
-  }
-
-  function hideContextMenu() {
-    ctxMenu.classList.remove('open');
-  }
-
+  // ── Context Menu (native via Tauri) ──────────────────
   document.addEventListener('contextmenu', (e) => {
     if (e.shiftKey) return;
     e.preventDefault();
-    showContextMenu(e.clientX, e.clientY);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#context-menu')) {
-      hideContextMenu();
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') hideContextMenu();
-  });
-
-  function restoreFocusAndSelection() {
-    if (savedActiveElement && savedActiveElement.isConnected) {
-      savedActiveElement.focus();
-    }
-    if (savedSelection) {
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(savedSelection);
-    }
-  }
-
-  // ── Context Menu Color Dots ─────────────────────────
-  document.getElementById('context-menu-colors').addEventListener('click', (e) => {
-    const dot = e.target.closest('.cm-color-dot');
-    if (!dot) return;
-    const color = dot.dataset.color;
-    const previousColor = currentColor;
-    applyColor(color);
-    invoke('update_note_color', { id: noteId, color }).catch((err) => {
-      console.error('Failed to update note color:', err);
-      applyColor(previousColor);
+    invoke('show_context_menu', {
+      id: noteId,
+      currentColor: currentColor,
     });
-    hideContextMenu();
   });
 
-  ctxMenu.addEventListener('click', async (e) => {
-    const item = e.target.closest('.context-menu-item');
-    if (!item) return;
-    const action = item.dataset.action;
-    hideContextMenu();
-
-    switch (action) {
-      case 'cut': {
-        restoreFocusAndSelection();
-        const cutSel = window.getSelection();
-        if (cutSel && cutSel.toString()) {
-          try {
-            await navigator.clipboard.writeText(cutSel.toString());
-            cutSel.deleteFromDocument();
-          } catch (_) {
-            document.execCommand('cut');
-          }
-        }
-        break;
-      }
-      case 'copy': {
-        restoreFocusAndSelection();
-        const copySel = window.getSelection();
-        if (copySel && copySel.toString()) {
-          try {
-            await navigator.clipboard.writeText(copySel.toString());
-          } catch (_) {
-            document.execCommand('copy');
-          }
-        }
-        break;
-      }
-      case 'paste':
-        restoreFocusAndSelection();
-        try {
-          const text = await navigator.clipboard.readText();
-          document.execCommand('insertText', false, text);
-        } catch (_) {
-          document.execCommand('paste');
-        }
-        break;
-      case 'selectAll':
-        restoreFocusAndSelection();
-        document.execCommand('selectAll');
-        break;
-      case 'newNote':
-        invoke('create_note');
-        break;
-      case 'deleteNote':
-        invoke('delete_note', { id: noteId });
-        break;
-      case 'openTrash':
-        invoke('open_trash');
-        break;
-      case 'zoomIn':
-        changeZoom(+1);
-        break;
-      case 'zoomOut':
-        changeZoom(-1);
-        break;
-      case 'zoomReset':
-        resetZoom();
-        break;
-      case 'togglePin':
-        togglePin();
-        break;
-    }
+  // Handle events from native context menu
+  listen('ctx-color-change', (event) => {
+    const color = event.payload;
+    applyColor(color);
+    invoke('update_note_color', { id: noteId, color });
   });
 
   // ── Expose for testing ──────────────────────────────
@@ -1408,9 +1168,8 @@
     scheduleBringToFront();
   });
 
-
   // ── Keyboard: color dots (Enter/Space/Arrow) ───────
-  document.querySelectorAll('.color-dot, .cm-color-dot').forEach(dot => {
+  document.querySelectorAll('.color-dot').forEach(dot => {
     dot.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
@@ -1427,34 +1186,6 @@
         next.focus();
       }
     });
-  });
-
-  // ── Keyboard: context menu items (Enter, Arrow, Escape) ──
-  ctxMenu.addEventListener('keydown', (e) => {
-    const item = e.target.closest('.context-menu-item');
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      hideContextMenu();
-      if (savedActiveElement) savedActiveElement.focus();
-      return;
-    }
-    if (item && e.key === 'Enter') {
-      e.preventDefault();
-      item.click();
-      return;
-    }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const items = [...ctxMenu.querySelectorAll('.context-menu-item')];
-      const idx = items.indexOf(item);
-      let next;
-      if (e.key === 'ArrowDown') {
-        next = items[(idx + 1) % items.length];
-      } else {
-        next = items[(idx - 1 + items.length) % items.length];
-      }
-      next.focus();
-    }
   });
 
   // ── Init ──────────────────────────────────────────

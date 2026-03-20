@@ -35,10 +35,7 @@ test.describe("note.html accessibility", () => {
     expect(pressed).toMatch(/^(true|false)$/);
   });
 
-  test("context menu has role=menu", async ({ notePage }) => {
-    const menu = notePage.locator(".context-menu");
-    await expect(menu).toHaveAttribute("role", "menu");
-  });
+  // context menu is now native (Tauri Menu::popup), not testable via Playwright
 });
 
 // ── settings.html accessibility ──────────────────────────
