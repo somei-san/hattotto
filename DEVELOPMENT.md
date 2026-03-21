@@ -57,10 +57,3 @@ npm run test:update
 1. GitHub で Fine-grained PAT を作成（scope: `somei-san/homebrew-tap`, Contents: Read and write）
 2. `somei-san/hatto-to` の Settings > Secrets and variables > Actions に `TAP_GITHUB_TOKEN` として登録
 
-## アイコンについて
-
-プロダクションビルドの際は正式な `.icns` ファイルが必要:
-
-```bash
-cargo tauri icon path/to/your-icon.png
-```
