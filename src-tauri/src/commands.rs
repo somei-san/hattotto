@@ -5,13 +5,22 @@ use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, Predefi
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
-use crate::model::{AppState, Note, RecoverMutex, Settings, COLOR_DEFS, TRASH_MAX};
+use crate::model::{resolve_color, AppState, Note, RecoverMutex, Settings, COLOR_DEFS, TRASH_MAX};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
 };
 
 // ── Tauri Commands ──────────────────────────────────────────
+
+/// 指定 ID の付箋を検索し、クロージャで更新して保存する。
+fn update_note_field(state: &AppState, id: &str, f: impl FnOnce(&mut Note)) {
+    let mut notes = state.notes.recover();
+    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
+        f(note);
+        save_notes(&notes);
+    }
+}
 
 /// 指定 ID の付箋を返す。見つからない場合は `None`。
 #[tauri::command]
@@ -23,21 +32,17 @@ pub(crate) fn get_note(id: String, state: State<AppState>) -> Option<Note> {
 /// 付箋の本文を更新して保存する。
 #[tauri::command]
 pub(crate) fn update_note_content(id: String, content: String, state: State<AppState>) {
-    let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-        note.content = content;
-        save_notes(&notes);
-    }
+    update_note_field(&state, &id, |note| note.content = content);
 }
 
 /// 付箋の色を更新して保存する。
 #[tauri::command]
 pub(crate) fn update_note_color(id: String, color: String, state: State<AppState>) {
-    let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-        note.color = color;
-        save_notes(&notes);
+    let resolved = resolve_color(&color);
+    if !COLOR_DEFS.iter().any(|c| c.key == resolved) {
+        return;
     }
+    update_note_field(&state, &id, |note| note.color = resolved);
 }
 
 /// 付箋のウィンドウ位置・サイズを更新して保存する。
@@ -50,34 +55,24 @@ pub(crate) fn update_note_geometry(
     height: f64,
     state: State<AppState>,
 ) {
-    let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
+    update_note_field(&state, &id, |note| {
         note.x = x;
         note.y = y;
         note.width = width;
         note.height = height;
-        save_notes(&notes);
-    }
+    });
 }
 
 /// 付箋の表示倍率（50〜200%）を更新して保存する。
 #[tauri::command]
 pub(crate) fn update_note_zoom(id: String, zoom: u32, state: State<AppState>) {
-    let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-        note.zoom = zoom.clamp(50, 200);
-        save_notes(&notes);
-    }
+    update_note_field(&state, &id, |note| note.zoom = zoom.clamp(50, 200));
 }
 
 /// 付箋のピン留め状態を更新して保存する。
 #[tauri::command]
 pub(crate) fn update_note_pinned(id: String, pinned: bool, state: State<AppState>) {
-    let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-        note.pinned = pinned;
-        save_notes(&notes);
-    }
+    update_note_field(&state, &id, |note| note.pinned = pinned);
 }
 
 /// Confirm deletion if setting is enabled. Returns false if user cancelled.
@@ -175,7 +170,7 @@ pub(crate) fn get_settings(state: State<AppState>) -> Settings {
 
 /// 設定を更新して保存する。数値は範囲内にクランプされる。
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Tauri コマンドは個別引数が JS キーに対応するため
 pub(crate) fn update_settings(
     default_color: String,
     font_size: u32,

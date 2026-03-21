@@ -59,8 +59,12 @@ pub fn run() {
         ])
         .setup(|app| {
             // Set up app menu and system tray
-            let _ = menu::setup_app_menu(app.handle());
-            let _ = tray::setup_tray(app.handle());
+            if let Err(e) = menu::setup_app_menu(app.handle()) {
+                eprintln!("Failed to setup app menu: {e}");
+            }
+            if let Err(e) = tray::setup_tray(app.handle()) {
+                eprintln!("Failed to setup tray: {e}");
+            }
 
             // Restore saved notes
             let state: State<AppState> = app.state();
