@@ -59,7 +59,7 @@ jobs:
 
       - name: Update Homebrew Tap
         env:
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           SHA256="${{ steps.dmg.outputs.sha256 }}"

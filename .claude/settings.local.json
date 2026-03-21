@@ -42,7 +42,12 @@
       "Bash(command grep:*)",
       "Bash(bash /Users/somei/Repos/hatto-to/.dojo/run_dojo.sh)",
       "Bash(claude --version)",
-      "Bash(bash .dojo/run_dojo.sh)"
+      "Bash(bash .dojo/run_dojo.sh)",
+      "Bash(while read:*)",
+      "Bash(do if:*)",
+      "Bash(then echo:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(cargo test:*)"
     ]
   }
 }
