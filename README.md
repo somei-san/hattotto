@@ -52,9 +52,10 @@ brew install --cask somei-san/tap/hatto-to
 └── trash.json      # ゴミ箱（最大200件）
 ```
 
-### 開発者向け
+## リンク
 
-[開発ガイド](DEVELOPMENT.md) を参照。
+- [開発ガイド](DEVELOPMENT.md)
+- [Homebrew Tap リポジトリ](https://github.com/somei-san/homebrew-tap)
 
 ## 解説
 
