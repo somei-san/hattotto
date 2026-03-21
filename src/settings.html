@@ -345,6 +345,12 @@
     border: 1px solid var(--border);
   }
 
+  .hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
   /* ── Focus Indicator ──────────────────────────────── */
   .color-dot:focus-visible,
   .size-btn:focus-visible,
@@ -406,7 +412,7 @@
       <button class="size-btn" data-zoom="125">125%</button>
       <button class="size-btn" data-zoom="150">150%</button>
     </div>
-    <div style="margin-top:8px; font-size:11px; color:var(--text-muted);">⌘+ / ⌘− で変更、⌘0 でリセット</div>
+    <p class="hint">⌘+ / ⌘− で変更、⌘0 でリセット</p>
   </div>
 
   <div class="section" role="group" aria-label="透過度">
@@ -426,7 +432,7 @@
         <div class="toggle-track"></div>
       </label>
     </div>
-    <div style="margin-top:4px; font-size:11px; color:var(--text-muted);">OFFの場合はダブルクリックで編集モード</div>
+    <p class="hint">OFFの場合はダブルクリックで編集モード</p>
   </div>
 
   <div class="section" role="group" aria-label="表示">
