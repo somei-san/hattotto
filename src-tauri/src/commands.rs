@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use tauri::image::Image;
 use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::model::{AppState, Note, RecoverMutex, Settings, TRASH_MAX, COLOR_DEFS};
@@ -373,7 +373,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         "ctx_pin" => {
             if let Some(w) = &win {
-                let _ = w.eval("togglePin()");
+                let _ = w.emit("ctx-toggle-pin", ());
             }
         }
         "ctx_new" => {
@@ -392,17 +392,17 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
         }
         "ctx_zoom_in" => {
             if let Some(w) = &win {
-                let _ = w.eval("changeZoom(+1)");
+                let _ = w.emit("ctx-zoom", "in");
             }
         }
         "ctx_zoom_out" => {
             if let Some(w) = &win {
-                let _ = w.eval("changeZoom(-1)");
+                let _ = w.emit("ctx-zoom", "out");
             }
         }
         "ctx_zoom_reset" => {
             if let Some(w) = &win {
-                let _ = w.eval("resetZoom()");
+                let _ = w.emit("ctx-zoom", "reset");
             }
         }
         _ if event_id.starts_with("ctx_color_") => {
@@ -417,7 +417,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             }
             drop(notes);
             if let Some(w) = &win {
-                let _ = w.eval(format!("applyColor('{color}')"));
+                let _ = w.emit("ctx-apply-color", color);
             }
         }
         _ => {}
