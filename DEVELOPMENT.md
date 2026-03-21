@@ -55,5 +55,5 @@ npm run test:update
 ### 初回セットアップ（リポジトリ管理者のみ）
 
 1. GitHub で Fine-grained PAT を作成（scope: `somei-san/homebrew-tap`, Contents: Read and write）
-2. `somei-san/hatto-to` の Settings > Secrets and variables > Actions に `TAP_GITHUB_TOKEN` として登録
+2. `somei-san/hatto-to` の Settings > Secrets and variables > Actions に `HOMEBREW_TAP_TOKEN` として登録
 
