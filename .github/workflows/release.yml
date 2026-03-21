@@ -80,6 +80,12 @@ jobs:
 
             app "Hatto-to.app"
 
+            caveats <<~EOS
+              #{token} is not signed with an Apple Developer ID.
+              On first launch, you need to remove the quarantine attribute:
+                xattr -cr /Applications/Hatto-to.app
+            EOS
+
             zap trash: [
               "~/Library/Application Support/com.hatto-to.app",
             ]
