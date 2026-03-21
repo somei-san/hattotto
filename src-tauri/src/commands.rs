@@ -255,6 +255,89 @@ pub(crate) fn bring_other_notes_to_front(
     }
 }
 
+/// Generate a colored circle icon (16×16 RGBA) for context menu color items.
+fn color_circle(r: u8, g: u8, b: u8) -> Image<'static> {
+    const S: u32 = 16;
+    let mut rgba = vec![0u8; (S * S * 4) as usize];
+    let c = S as f32 / 2.0;
+    let rad = c - 1.0;
+    for y in 0..S {
+        for x in 0..S {
+            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
+            let i = ((y * S + x) * 4) as usize;
+            if d <= rad {
+                rgba[i] = r;
+                rgba[i + 1] = g;
+                rgba[i + 2] = b;
+                rgba[i + 3] = 255;
+            }
+        }
+    }
+    Image::new_owned(rgba, S, S)
+}
+
+/// Build and display the note context menu. Returns Err on menu construction failure.
+fn build_context_menu(
+    app: &AppHandle,
+    webview_win: &tauri::WebviewWindow,
+    is_pinned: bool,
+    current_color: &str,
+) -> tauri::Result<()> {
+    let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
+        .iter()
+        .map(|c| {
+            let check = if c.key == current_color { "✓ " } else { "    " };
+            IconMenuItem::with_id(
+                app,
+                format!("ctx_color_{}", c.key),
+                format!("{}{}", check, c.label),
+                true,
+                Some(color_circle(c.r, c.g, c.b)),
+                None::<&str>,
+            )
+            .unwrap()
+        })
+        .collect();
+
+    let copy = PredefinedMenuItem::copy(app, None)?;
+    let paste = PredefinedMenuItem::paste(app, None)?;
+    let sep0 = PredefinedMenuItem::separator(app)?;
+    let pin_label = if is_pinned { "ピン留め解除" } else { "ピン留め" };
+    let pin = MenuItem::with_id(app, "ctx_pin", pin_label, true, None::<&str>)?;
+    let new_note = IconMenuItem::with_id_and_native_icon(
+        app, "ctx_new", "新しい付箋を作成", true, Some(NativeIcon::Add), Some("CmdOrCtrl+N"),
+    )?;
+    let delete = IconMenuItem::with_id_and_native_icon(
+        app, "ctx_delete", "この付箋を削除", true, Some(NativeIcon::Remove), None::<&str>,
+    )?;
+    let trash = IconMenuItem::with_id_and_native_icon(
+        app, "ctx_trash", "ゴミ箱を開く", true, Some(NativeIcon::TrashEmpty), Some("CmdOrCtrl+Shift+T"),
+    )?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let sep1b = PredefinedMenuItem::separator(app)?;
+    let zoom_in = MenuItem::with_id(app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
+    let zoom_out = MenuItem::with_id(app, "ctx_zoom_out", "ズームアウト", true, Some("CmdOrCtrl+-"))?;
+    let zoom_reset = MenuItem::with_id(app, "ctx_zoom_reset", "ズームリセット", true, Some("CmdOrCtrl+0"))?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let settings = MenuItem::with_id(app, "ctx_settings", "設定を開く", true, Some("CmdOrCtrl+,"))?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
+
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+        &copy, &paste, &sep0, &pin, &sep1,
+        &new_note, &delete, &trash, &sep1b,
+        &zoom_in, &zoom_out, &zoom_reset, &sep2,
+        &settings, &sep3,
+    ];
+    for ci in &color_items {
+        items.push(ci as &dyn tauri::menu::IsMenuItem<tauri::Wry>);
+    }
+
+    let menu = Menu::with_items(app, &items)?;
+    // popup() is blocking — shows native menu and returns after user selects or dismisses
+    menu.popup(webview_win.as_ref().window().clone())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn show_context_menu(
     id: String,
@@ -269,142 +352,9 @@ pub(crate) fn show_context_menu(
     };
 
     // Store note ID so on_menu_event knows which note to target
-    *state
-        .context_menu_note_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = id;
+    *state.context_menu_note_id.recover() = id;
 
-    let build = || -> tauri::Result<()> {
-        // Generate a colored circle icon (16x16 RGBA)
-        fn color_circle(r: u8, g: u8, b: u8) -> Image<'static> {
-            const S: u32 = 16;
-            let mut rgba = vec![0u8; (S * S * 4) as usize];
-            let c = S as f32 / 2.0;
-            let rad = c - 1.0;
-            for y in 0..S {
-                for x in 0..S {
-                    let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-                    let i = ((y * S + x) * 4) as usize;
-                    if d <= rad {
-                        rgba[i] = r;
-                        rgba[i + 1] = g;
-                        rgba[i + 2] = b;
-                        rgba[i + 3] = 255;
-                    }
-                }
-            }
-            Image::new_owned(rgba, S, S)
-        }
-
-        let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
-            .iter()
-            .map(|c| {
-                let check = if c.key == current_color.as_str() { "✓ " } else { "    " };
-                IconMenuItem::with_id(
-                    &app,
-                    format!("ctx_color_{}", c.key),
-                    format!("{}{}", check, c.label),
-                    true,
-                    Some(color_circle(c.r, c.g, c.b)),
-                    None::<&str>,
-                )
-                .unwrap()
-            })
-            .collect();
-
-        // Build all items with let bindings to satisfy lifetimes
-        let copy = PredefinedMenuItem::copy(&app, None)?;
-        let paste = PredefinedMenuItem::paste(&app, None)?;
-        let sep0 = PredefinedMenuItem::separator(&app)?;
-        let pin_label = if is_pinned {
-            "ピン留め解除"
-        } else {
-            "ピン留め"
-        };
-        let pin = MenuItem::with_id(&app, "ctx_pin", pin_label, true, None::<&str>)?;
-        let new_note = IconMenuItem::with_id_and_native_icon(
-            &app,
-            "ctx_new",
-            "新しい付箋を作成",
-            true,
-            Some(NativeIcon::Add),
-            Some("CmdOrCtrl+N"),
-        )?;
-        let delete = IconMenuItem::with_id_and_native_icon(
-            &app,
-            "ctx_delete",
-            "この付箋を削除",
-            true,
-            Some(NativeIcon::Remove),
-            None::<&str>,
-        )?;
-        let trash = IconMenuItem::with_id_and_native_icon(
-            &app,
-            "ctx_trash",
-            "ゴミ箱を開く",
-            true,
-            Some(NativeIcon::TrashEmpty),
-            Some("CmdOrCtrl+Shift+T"),
-        )?;
-        let sep1 = PredefinedMenuItem::separator(&app)?;
-        let sep1b = PredefinedMenuItem::separator(&app)?;
-        let zoom_in =
-            MenuItem::with_id(&app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
-        let zoom_out = MenuItem::with_id(
-            &app,
-            "ctx_zoom_out",
-            "ズームアウト",
-            true,
-            Some("CmdOrCtrl+-"),
-        )?;
-        let zoom_reset = MenuItem::with_id(
-            &app,
-            "ctx_zoom_reset",
-            "ズームリセット",
-            true,
-            Some("CmdOrCtrl+0"),
-        )?;
-        let sep2 = PredefinedMenuItem::separator(&app)?;
-        let settings = MenuItem::with_id(
-            &app,
-            "ctx_settings",
-            "設定を開く",
-            true,
-            Some("CmdOrCtrl+,"),
-        )?;
-        let sep3 = PredefinedMenuItem::separator(&app)?;
-
-        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-            &copy,
-            &paste,
-            &sep0,
-            &pin,
-            &sep1,
-            &new_note,
-            &delete,
-            &trash,
-            &sep1b,
-            &zoom_in,
-            &zoom_out,
-            &zoom_reset,
-            &sep2,
-            &settings,
-            &sep3,
-        ];
-        for ci in &color_items {
-            items.push(ci as &dyn tauri::menu::IsMenuItem<tauri::Wry>);
-        }
-
-        let menu = Menu::with_items(&app, &items)?;
-
-        // popup() is blocking — shows native menu and returns after user selects or dismisses
-        let window = webview_win.as_ref().window();
-        menu.popup(window.clone())?;
-
-        Ok(())
-    };
-
-    if let Err(e) = build() {
+    if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color) {
         eprintln!("context menu error: {}", e);
     }
 }
@@ -412,11 +362,7 @@ pub(crate) fn show_context_menu(
 /// Handle context menu events (called from menu.rs on_menu_event)
 pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
     let state: State<AppState> = app.state();
-    let note_id = state
-        .context_menu_note_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let note_id = state.context_menu_note_id.recover().clone();
     if note_id.is_empty() {
         return;
     }
