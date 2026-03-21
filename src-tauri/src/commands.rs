@@ -5,7 +5,7 @@ use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, Predefi
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
-use crate::model::{AppState, Note, Settings, TRASH_MAX};
+use crate::model::{AppState, Note, RecoverMutex, Settings, TRASH_MAX};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
@@ -15,13 +15,13 @@ use crate::window::{
 
 #[tauri::command]
 pub(crate) fn get_note(id: String, state: State<AppState>) -> Option<Note> {
-    let notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let notes = state.notes.recover();
     notes.iter().find(|n| n.id == id).cloned()
 }
 
 #[tauri::command]
 pub(crate) fn update_note_content(id: String, content: String, state: State<AppState>) {
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.content = content;
         save_notes(&notes);
@@ -30,7 +30,7 @@ pub(crate) fn update_note_content(id: String, content: String, state: State<AppS
 
 #[tauri::command]
 pub(crate) fn update_note_color(id: String, color: String, state: State<AppState>) {
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.color = color;
         save_notes(&notes);
@@ -46,7 +46,7 @@ pub(crate) fn update_note_geometry(
     height: f64,
     state: State<AppState>,
 ) {
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.x = x;
         note.y = y;
@@ -58,7 +58,7 @@ pub(crate) fn update_note_geometry(
 
 #[tauri::command]
 pub(crate) fn update_note_zoom(id: String, zoom: u32, state: State<AppState>) {
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.zoom = zoom.clamp(50, 200);
         save_notes(&notes);
@@ -67,7 +67,7 @@ pub(crate) fn update_note_zoom(id: String, zoom: u32, state: State<AppState>) {
 
 #[tauri::command]
 pub(crate) fn update_note_pinned(id: String, pinned: bool, state: State<AppState>) {
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
         note.pinned = pinned;
         save_notes(&notes);
@@ -97,11 +97,11 @@ pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> boo
 /// Move a note to trash and close its window.
 pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) {
     {
-        let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut notes = state.notes.recover();
         if let Some(pos) = notes.iter().position(|n| n.id == id) {
             let note = notes.remove(pos);
             save_notes(&notes);
-            let mut trash = state.trash.lock().unwrap_or_else(|e| e.into_inner());
+            let mut trash = state.trash.recover();
             trash.push(note);
             enforce_trash_limit(&mut trash);
             save_trash(&trash);
@@ -137,7 +137,7 @@ pub(crate) fn get_trash_max() -> usize {
 #[tauri::command]
 pub(crate) fn restore_note(id: String, app: AppHandle, state: State<AppState>) -> Option<Note> {
     let note = {
-        let mut trash = state.trash.lock().unwrap_or_else(|e| e.into_inner());
+        let mut trash = state.trash.recover();
         if let Some(pos) = trash.iter().position(|n| n.id == id) {
             let note = trash.remove(pos);
             save_trash(&trash);
@@ -148,7 +148,7 @@ pub(crate) fn restore_note(id: String, app: AppHandle, state: State<AppState>) -
     };
     if let Some(note) = note {
         open_note_window(&app, &note);
-        let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut notes = state.notes.recover();
         notes.push(note.clone());
         save_notes(&notes);
         Some(note)
@@ -159,7 +159,7 @@ pub(crate) fn restore_note(id: String, app: AppHandle, state: State<AppState>) -
 
 #[tauri::command]
 pub(crate) fn empty_trash(state: State<AppState>) {
-    let mut trash = state.trash.lock().unwrap_or_else(|e| e.into_inner());
+    let mut trash = state.trash.recover();
     trash.clear();
     save_trash(&trash);
 }
@@ -188,7 +188,7 @@ pub(crate) fn update_settings(
     confirm_before_delete: bool,
     state: State<AppState>,
 ) {
-    let mut settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
+    let mut settings = state.settings.recover();
     settings.default_color = default_color;
     settings.font_size = font_size.clamp(8, 72);
     settings.zoom = zoom.clamp(50, 200);
@@ -236,7 +236,7 @@ pub(crate) fn bring_other_notes_to_front(
     }
     // Clone IDs only, release lock before window operations to avoid deadlock
     let ids: Vec<String> = {
-        let notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+        let notes = state.notes.recover();
         notes
             .iter()
             .filter(|n| n.id != caller_id)
@@ -478,7 +478,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             if !valid.contains(&color) {
                 return;
             }
-            let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+            let mut notes = state.notes.recover();
             if let Some(note) = notes.iter_mut().find(|n| n.id == note_id) {
                 note.color = color.to_string();
                 save_notes(&notes);

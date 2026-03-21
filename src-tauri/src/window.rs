@@ -1,7 +1,7 @@
 use rand::seq::SliceRandom;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-use crate::model::{AppState, Note};
+use crate::model::{AppState, Note, RecoverMutex};
 use crate::persistence::save_notes;
 
 const COLORS: &[&str] = &["yellow", "blue", "green", "pink", "purple", "gray"];
@@ -24,7 +24,7 @@ pub(crate) fn create_note_with_window(app: &AppHandle, state: &AppState) -> Note
         default_color
     };
     let note = Note::new(&color);
-    let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut notes = state.notes.recover();
     let offset = ((notes.len() % 20) as f64) * 30.0;
     let mut n = note;
     n.x += offset;
@@ -98,7 +98,7 @@ pub(crate) fn open_trash_window(app: &AppHandle) {
 
 pub(crate) fn bring_all_to_front(app: &AppHandle) {
     let state: State<AppState> = app.state();
-    let notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+    let notes = state.notes.recover();
     for note in notes.iter() {
         if let Some(win) = app.get_webview_window(&format!("note-{}", note.id)) {
             let _ = win.show();

@@ -1,7 +1,20 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 use uuid::Uuid;
+
+// ── Mutex Helper ─────────────────────────────────────────────
+
+/// Recovers a poisoned Mutex instead of panicking.
+pub(crate) trait RecoverMutex<T> {
+    fn recover(&self) -> MutexGuard<'_, T>;
+}
+
+impl<T> RecoverMutex<T> for Mutex<T> {
+    fn recover(&self) -> MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 // ── Data Model ──────────────────────────────────────────────
 
