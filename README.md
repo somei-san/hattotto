@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/app-icon.png" alt="貼っとーと" width="128" />
-  <h1>貼っとーと (Hatto-to)</h1>
+  <h1>🐻 貼っとーと (Hatto-to)</h1>
   <p>デスクトップにぺたぺた貼れる、熊の手つき付箋アプリ<br>軽量・ネイティブ・macOS Stickies ライクな操作感</p>
 </div>
 

@@ -47,7 +47,11 @@
       "Bash(do if:*)",
       "Bash(then echo:*)",
       "Bash(python3 -m json.tool)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(find ~/.cargo/registry/src -name tauri-*.js* -o -name event.ts -o -name event.js)",
+      "Bash(sips:*)",
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:tauri.app)"
     ]
   }
 }

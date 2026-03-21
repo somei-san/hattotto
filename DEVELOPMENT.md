@@ -46,7 +46,7 @@ npm run test:update
 ```bash
 # 1. tauri.conf.json と Cargo.toml のバージョンを更新してコミット
 # 2. リリーススクリプトでタグを push（CI が自動実行）
-./scripts/release.sh 0.2.0
+./scripts/release.sh 0.1.2
 
 # バージョン省略時は tauri.conf.json の現在のバージョンを使用
 ./scripts/release.sh
