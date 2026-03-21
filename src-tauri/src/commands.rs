@@ -421,7 +421,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         "ctx_pin" => {
             if let Some(w) = &win {
-                let _ = w.emit("ctx-toggle-pin", ());
+                let _ = w.emit_to(w.label(), "ctx-toggle-pin", ());
             }
         }
         "ctx_new" => {
@@ -440,17 +440,17 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
         }
         "ctx_zoom_in" => {
             if let Some(w) = &win {
-                let _ = w.emit("ctx-zoom", "in");
+                let _ = w.emit_to(w.label(), "ctx-zoom", "in");
             }
         }
         "ctx_zoom_out" => {
             if let Some(w) = &win {
-                let _ = w.emit("ctx-zoom", "out");
+                let _ = w.emit_to(w.label(), "ctx-zoom", "out");
             }
         }
         "ctx_zoom_reset" => {
             if let Some(w) = &win {
-                let _ = w.emit("ctx-zoom", "reset");
+                let _ = w.emit_to(w.label(), "ctx-zoom", "reset");
             }
         }
         _ if event_id.starts_with("ctx_color_") => {
@@ -465,7 +465,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             }
             drop(notes);
             if let Some(w) = &win {
-                let _ = w.emit("ctx-apply-color", color);
+                let _ = w.emit_to(w.label(), "ctx-apply-color", color);
             }
         }
         _ => {}
