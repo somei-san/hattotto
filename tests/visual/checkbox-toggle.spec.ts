@@ -31,7 +31,9 @@ async function openNoteWithCapture(browser: Browser, content: string): Promise<{
           startDragging: async () => {},
           outerPosition: async () => ({ x: 0, y: 0 }),
           outerSize: async () => ({ width: 300, height: 350 }),
+          setAlwaysOnTop: async () => {},
           isFocused: async () => true,
+          listen: async () => () => {},
         }),
       },
     };
