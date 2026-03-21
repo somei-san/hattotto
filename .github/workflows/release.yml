@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-release-cargo-
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build universal DMG
+        run: cargo tauri build --target universal-apple-darwin
+
+      - name: Find DMG and compute SHA256
+        id: dmg
+        run: |
+          DMG_PATH=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          DMG_NAME=$(basename "$DMG_PATH")
+          SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+          echo "path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.dmg.outputs.path }}" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew Tap
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="${{ steps.dmg.outputs.sha256 }}"
+          DMG_NAME="${{ steps.dmg.outputs.name }}"
+
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/somei-san/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Casks
+
+          cat > /tmp/homebrew-tap/Casks/hatto-to.rb <<CASK_EOF
+          cask "hatto-to" do
+            version "${VERSION}"
+            sha256 "${SHA256}"
+
+            url "https://github.com/somei-san/hatto-to/releases/download/v#{version}/${DMG_NAME}"
+            name "Hatto-to"
+            desc "macOS Stickies-style sticky notes desktop app"
+            homepage "https://github.com/somei-san/hatto-to"
+
+            app "Hatto-to.app"
+
+            zap trash: [
+              "~/Library/Application Support/com.hatto-to.app",
+            ]
+          end
+          CASK_EOF
+
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/hatto-to.rb
+          git commit -m "Update hatto-to to ${VERSION}"
+          git push
