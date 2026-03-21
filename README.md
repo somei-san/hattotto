@@ -25,7 +25,7 @@ macOS Stickiesとの重要な違い
 - 💾 自動保存（テキスト・位置・サイズ・ズーム）
 - 🔄 起動時に前回の付箋を復元
 - ➕ 新規付箋の追加（ボタン / トレイメニュー / ⌘N）
-- 🗑️ ゴミ箱機能（削除した付箋を復元可能・最大20件保持）
+- 🗑️ ゴミ箱機能（削除した付箋を復元可能・最大200件保持）
 - 🔍 付箋ごとのズーム設定（⌘+ / ⌘- / ⌘0）
 - 📋 Markdownプレビュー（見出し・箇条書き・チェックボックス・太字・斜体・取消線・コード・引用・番号リスト・区切り線・リンク）
 - ✏️ Markdown入力補助（箇条書き・番号リスト等のEnter自動継続）
@@ -52,7 +52,7 @@ brew install --cask somei-san/tap/hatto-to
 ~/Library/Application Support/com.hatto-to.app/
 ├── notes.json      # 付箋データ
 ├── settings.json   # 設定
-└── trash.json      # ゴミ箱（最大20件）
+└── trash.json      # ゴミ箱（最大200件）
 ```
 
 ### 開発者向け

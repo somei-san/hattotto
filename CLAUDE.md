@@ -78,7 +78,7 @@ npm run test:report
 - 永続化先: `~/Library/Application Support/com.hatto-to.app/`
   - `notes.json` — 付箋データ
   - `settings.json` — 設定
-  - `trash.json` — ゴミ箱（最大20件）
+  - `trash.json` — ゴミ箱（最大200件）
 
 ### Tauri コマンド一覧
 - 付箋: `get_note`, `update_note_content`, `update_note_color`, `update_note_geometry`, `update_note_zoom`, `delete_note`, `create_note`
