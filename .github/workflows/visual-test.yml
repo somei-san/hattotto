@@ -9,6 +9,9 @@ on:
 jobs:
   visual-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # linux ベースライン初回コミットに必要
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +24,34 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
-      - run: npx playwright test
+      # linux 用ベースラインが未生成の場合は作成してコミット
+      - name: Check for linux snapshots
+        id: snapshot-check
+        run: |
+          if [ -d "tests/visual/__screenshots__/linux" ] && \
+             [ -n "$(ls tests/visual/__screenshots__/linux/ 2>/dev/null)" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate linux baseline snapshots
+        if: steps.snapshot-check.outputs.exists == 'false'
+        run: npx playwright test --update-snapshots
+
+      - name: Commit baseline snapshots
+        if: steps.snapshot-check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/visual/__screenshots__/linux/
+          git commit -m "test: add linux baseline snapshots [skip ci]"
+          git push
+
+      # ベースラインが存在する場合は通常の比較テスト
+      - name: Run tests
+        if: steps.snapshot-check.outputs.exists == 'true'
+        run: npx playwright test
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
