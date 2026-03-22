@@ -165,6 +165,24 @@
     outline: 2px solid rgba(0, 102, 204, 0.6);
     outline-offset: 2px;
   }
+
+  /* ── Toast Notification ──────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: #D32F2F;
+    color: #fff;
+    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 99999;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -177,6 +195,18 @@
 <script>
   const { invoke } = window.__TAURI__.core;
   const listEl = document.getElementById('list');
+
+  function showToast(msg) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.addEventListener('transitionend', () => el.remove());
+    }, 3000);
+  }
 
   function colorVar(color) {
     const map = {
@@ -241,6 +271,7 @@
       render();
     } catch (e) {
       console.error('restore failed:', e);
+      showToast('付箋の復元に失敗しました');
     }
   });
 
@@ -255,6 +286,7 @@
       render();
     } catch (e) {
       console.error('empty trash failed:', e);
+      showToast('ゴミ箱の削除に失敗しました');
     }
   });
 

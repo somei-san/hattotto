@@ -356,6 +356,24 @@
     bottom: 3px; right: 1px;
     transform: rotate(-45deg);
   }
+
+  /* ── Toast Notification ──────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: #D32F2F;
+    color: #fff;
+    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 99999;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -406,6 +424,18 @@
   const { listen } = window.__TAURI__.event;
   const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
   const appWindow = getCurrentWebviewWindow();
+
+  function showToast(msg) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.addEventListener('transitionend', () => el.remove());
+    }, 3000);
+  }
 
   const params = new URLSearchParams(window.location.search);
   const noteId = params.get('id');
@@ -970,11 +1000,11 @@
 
   // ── Buttons ───────────────────────────────────────
   newBtn.addEventListener('click', () => {
-    invoke('create_note').catch(e => console.error('create note failed:', e));
+    invoke('create_note').catch(e => { console.error('create note failed:', e); showToast('付箋の作成に失敗しました'); });
   });
 
   document.getElementById('btn-delete').addEventListener('click', () => {
-    invoke('delete_note', { id: noteId }).catch(e => console.error('delete failed:', e));
+    invoke('delete_note', { id: noteId }).catch(e => { console.error('delete failed:', e); showToast('付箋の削除に失敗しました'); });
   });
 
   colorBtn.addEventListener('click', (e) => {
