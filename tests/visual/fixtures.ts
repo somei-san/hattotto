@@ -65,15 +65,16 @@ export async function injectNoteMock(
     }
 
     // Track which events are registered on global listen vs appWindow.listen
-    const globalListeners: Record<string, Function[]> = {};
-    const appWindowListeners: Record<string, Function[]> = {};
+    type EventHandler = (...args: unknown[]) => void;
+    const globalListeners: Record<string, EventHandler[]> = {};
+    const appWindowListeners: Record<string, EventHandler[]> = {};
     (window as any).__globalListeners = globalListeners;
     (window as any).__appWindowListeners = appWindowListeners;
 
     (window as any).__TAURI__ = {
       core: { invoke },
       event: {
-        listen: async (event: string, handler: Function) => {
+        listen: async (event: string, handler: EventHandler) => {
           if (!globalListeners[event]) globalListeners[event] = [];
           globalListeners[event].push(handler);
           return () => {};
@@ -89,7 +90,9 @@ export async function injectNoteMock(
           outerSize: async () => ({ width: 300, height: 350 }),
           setAlwaysOnTop: async () => {},
           isFocused: async () => true,
-          listen: async (event: string, handler: Function) => {
+          onMoved: async (_handler: EventHandler) => async () => {},
+          onResized: async (_handler: EventHandler) => async () => {},
+          listen: async (event: string, handler: EventHandler) => {
             if (!appWindowListeners[event]) appWindowListeners[event] = [];
             appWindowListeners[event].push(handler);
             return () => {};

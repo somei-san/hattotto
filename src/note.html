@@ -965,9 +965,6 @@
     }, 500);
   }
 
-  unlisteners.push(appWindow.onMoved(() => scheduleGeoSave()));
-  unlisteners.push(appWindow.onResized(() => scheduleGeoSave()));
-
   // ── Buttons ───────────────────────────────────────
   newBtn.addEventListener('click', () => {
     invoke('create_note').catch(e => console.error('create note failed:', e));
@@ -1011,6 +1008,8 @@
 
   // Listen for zoom events from app menu (only apply to focused window)
   const unlisteners = [];
+  unlisteners.push(appWindow.onMoved(() => scheduleGeoSave()));
+  unlisteners.push(appWindow.onResized(() => scheduleGeoSave()));
   unlisteners.push(listen('zoom', (e) => {
     if (!document.hasFocus()) return;
     if (e.payload === 'in') changeZoom(+1);
