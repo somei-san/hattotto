@@ -244,6 +244,7 @@
   });
 
   document.getElementById('btn-empty').addEventListener('click', async () => {
+    if (!window.confirm('ゴミ箱を空にしますか？\nこの操作は元に戻せません。')) return;
     try {
       await invoke('empty_trash');
       render();
