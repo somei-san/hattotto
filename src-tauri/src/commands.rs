@@ -16,11 +16,10 @@ use crate::window::{
 /// 指定 ID の付箋を検索し、クロージャで更新して保存する。
 fn update_note_field(state: &AppState, id: &str, f: impl FnOnce(&mut Note)) -> Result<(), String> {
     let mut notes = state.notes.recover();
-    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-        f(note);
-        save_notes(&notes)?;
-    }
-    Ok(())
+    let note = notes.iter_mut().find(|n| n.id == id)
+        .ok_or_else(|| format!("note not found: {}", id))?;
+    f(note);
+    save_notes(&notes)
 }
 
 /// 指定 ID の付箋を返す。見つからない場合は `None`。
