@@ -244,7 +244,11 @@
   });
 
   document.getElementById('btn-empty').addEventListener('click', async () => {
-    if (!window.confirm('ゴミ箱を空にしますか？\nこの操作は元に戻せません。')) return;
+    const ok = await window.__TAURI__.dialog.confirm(
+      'ゴミ箱を空にしますか？\nこの操作は元に戻せません。',
+      { title: '貼っとっと', okLabel: '削除', cancelLabel: 'キャンセル' }
+    );
+    if (!ok) return;
     try {
       await invoke('empty_trash');
       render();
