@@ -434,10 +434,17 @@
   }
 
   // ── Toggle Pin State ────────────────────────────
-  async function togglePin() {
-    const isPinned = !pinBtn.classList.contains('active');
+  function applyPinState(isPinned) {
     pinBtn.classList.toggle('active', isPinned);
     pinBtn.setAttribute('aria-pressed', String(isPinned));
+    const label = isPinned ? 'ピン留め解除' : 'ピン留め';
+    pinBtn.title = label;
+    pinBtn.setAttribute('aria-label', label);
+  }
+
+  async function togglePin() {
+    const isPinned = !pinBtn.classList.contains('active');
+    applyPinState(isPinned);
     await appWindow.setAlwaysOnTop(isPinned);
     await invoke('update_note_pinned', { id: noteId, pinned: isPinned });
   }
@@ -469,10 +476,16 @@
 
   // ── Load Note Data ────────────────────────────────
   async function loadNote() {
-    const [note, settings] = await Promise.all([
-      invoke('get_note', { id: noteId }),
-      invoke('get_settings'),
-    ]);
+    let note, settings;
+    try {
+      [note, settings] = await Promise.all([
+        invoke('get_note', { id: noteId }),
+        invoke('get_settings'),
+      ]);
+    } catch (e) {
+      console.error('loadNote failed:', e);
+      return;
+    }
     if (!note) return;
 
     rawContent = note.content;
@@ -483,9 +496,8 @@
       applySettings(settings);
     }
     // Apply pinned state
+    applyPinState(!!note.pinned);
     if (note.pinned) {
-      pinBtn.classList.add('active');
-      pinBtn.setAttribute('aria-pressed', 'true');
       appWindow.setAlwaysOnTop(true);
     }
     // Apply per-note zoom

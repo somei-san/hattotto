@@ -187,10 +187,16 @@
   const countEl = document.getElementById('trash-count');
 
   async function render() {
-    const [items, trashMax] = await Promise.all([
-      invoke('get_trash'),
-      invoke('get_trash_max'),
-    ]);
+    let items, trashMax;
+    try {
+      [items, trashMax] = await Promise.all([
+        invoke('get_trash'),
+        invoke('get_trash_max'),
+      ]);
+    } catch (e) {
+      console.error('render trash failed:', e);
+      return;
+    }
     countEl.textContent = `(${items.length} / ${trashMax})`;
     if (items.length === 0) {
       listEl.innerHTML = '<div class="empty-msg">ゴミ箱は空です</div>';

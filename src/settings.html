@@ -866,7 +866,7 @@
     switchToTab(event.payload);
   });
 
-  init();
+  init().catch(e => console.error('settings init failed:', e));
 </script>
 </body>
 </html>
