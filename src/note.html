@@ -659,7 +659,13 @@
     rawContent = lines.join('\n');
     editor.innerText = rawContent;
     invoke('update_note_content', { id: noteId, content: rawContent }).catch(e => console.error('save failed:', e));
-    mdView.innerHTML = renderMarkdown(rawContent);
+    // DOM の該当チェックボックス要素だけ更新（全体再レンダリング不要）
+    const span = e.target.closest('.md-check');
+    if (span) {
+      span.classList.toggle('checked', e.target.checked);
+    } else {
+      mdView.innerHTML = renderMarkdown(rawContent);
+    }
   });
 
   // ── Zoom ──────────────────────────────────────────
