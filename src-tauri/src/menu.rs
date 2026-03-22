@@ -28,7 +28,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 
     let app_submenu = Submenu::with_items(
         app,
-        "貼っとーと",
+        "貼っとっと",
         true,
         &[
             &PredefinedMenuItem::about(app, None, None)?,
@@ -97,7 +97,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         &[&zoom_in_item, &zoom_out_item, &zoom_reset_item],
     )?;
 
-    let help_item = MenuItem::with_id(app, "open_help", "Hatto-to Help", true, None::<&str>)?;
+    let help_item = MenuItem::with_id(app, "open_help", "Hattotto Help", true, None::<&str>)?;
     let help_submenu = Submenu::with_items(app, "Help", true, &[&help_item])?;
 
     let menu = Menu::with_items(

@@ -10,7 +10,7 @@ use crate::model::{Note, Settings, TRASH_MAX};
 fn data_dir() -> PathBuf {
     let dir = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("com.hatto-to.app");
+        .join("com.hattotto.app");
     let _ = fs::create_dir_all(&dir);
     dir
 }

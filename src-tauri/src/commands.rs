@@ -81,7 +81,7 @@ pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> boo
     }
     app.dialog()
         .message("この付箋を削除しますか？")
-        .title("貼っとーと")
+        .title("貼っとっと")
         .buttons(MessageDialogButtons::OkCancelCustom(
             "削除".into(),
             "キャンセル".into(),

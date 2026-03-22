@@ -74,7 +74,7 @@ pub fn run() {
                 drop(notes);
                 let default_color = state.settings.lock().unwrap_or_else(|e| e.into_inner()).default_color.clone();
                 let mut note = Note::new(&resolve_color(&default_color));
-                note.content = String::from("# 貼っとーとへようこそ！\n\n- ダブルクリックで編集、外クリックでプレビュー\n- **太字** や *斜体* が使えます\n- [x] チェックボックスも\n- [ ] クリックで切替\n\n> 右クリックでメニュー、⌘N で新しい付箋");
+                note.content = String::from("# 貼っとっとへようこそ！\n\n- ダブルクリックで編集、外クリックでプレビュー\n- **太字** や *斜体* が使えます\n- [x] チェックボックスも\n- [ ] クリックで切替\n\n> 右クリックでメニュー、⌘N で新しい付箋");
                 open_note_window(app.handle(), &note);
                 let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
                 notes.push(note);
@@ -88,7 +88,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building Hatto-to")
+        .expect("error while building Hattotto")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
                 bring_all_to_front(app);

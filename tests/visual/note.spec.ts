@@ -12,7 +12,7 @@ for (const color of COLORS) {
 test("note with text content", async ({ openNote }) => {
   const page = await openNote({
     color: "yellow",
-    content: "これはテストメモです\nHatto-to 付箋アプリ",
+    content: "これはテストメモです\nHattotto 付箋アプリ",
   });
   await expect(page).toHaveScreenshot("note-with-text.png");
 });

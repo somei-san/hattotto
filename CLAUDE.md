@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-「貼っとーと」— macOS Stickies風の付箋デスクトップアプリ。Tauri v2 + Rust バックエンド、Vanilla HTML/CSS/JS フロントエンド。
+「貼っとっと」— macOS Stickies風の付箋デスクトップアプリ。Tauri v2 + Rust バックエンド、Vanilla HTML/CSS/JS フロントエンド。
 
 ## ビルド・開発コマンド
 
@@ -75,7 +75,7 @@ npm run test:report
 - 各付箋は独立したウィンドウ（`note-{uuid}` ラベル）として開かれる
 - フロントエンドから `window.__TAURI__.core.invoke()` でRust側の Tauri コマンドを呼び出し
 - 状態は `AppState`（notes, settings, trash の3つの `Mutex`）で管理
-- 永続化先: `~/Library/Application Support/com.hatto-to.app/`
+- 永続化先: `~/Library/Application Support/com.hattotto.app/`
   - `notes.json` — 付箋データ
   - `settings.json` — 設定
   - `trash.json` — ゴミ箱（最大200件）

@@ -68,20 +68,20 @@ jobs:
           git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/somei-san/homebrew-tap.git" /tmp/homebrew-tap
           mkdir -p /tmp/homebrew-tap/Casks
 
-          cat > /tmp/homebrew-tap/Casks/hatto-to.rb <<CASK_EOF
-          cask "hatto-to" do
+          cat > /tmp/homebrew-tap/Casks/hattotto.rb <<CASK_EOF
+          cask "hattotto" do
             version "${VERSION}"
             sha256 "${SHA256}"
 
             url "https://github.com/somei-san/hatto-to/releases/download/v#{version}/${DMG_NAME}"
-            name "Hatto-to"
+            name "Hattotto"
             desc "macOS Stickies-style sticky notes desktop app"
             homepage "https://github.com/somei-san/hatto-to"
 
-            app "Hatto-to.app"
+            app "Hattotto.app"
 
             postflight do
-              system_command "/usr/bin/xattr", args: ["-cr", "#{appdir}/Hatto-to.app"]
+              system_command "/usr/bin/xattr", args: ["-cr", "#{appdir}/Hattotto.app"]
             end
 
             caveats <<~EOS
@@ -90,7 +90,7 @@ jobs:
             EOS
 
             zap trash: [
-              "~/Library/Application Support/com.hatto-to.app",
+              "~/Library/Application Support/com.hattotto.app",
             ]
           end
           CASK_EOF
@@ -98,6 +98,6 @@ jobs:
           cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/hatto-to.rb
-          git commit -m "Update hatto-to to ${VERSION}"
+          git add Casks/hattotto.rb
+          git commit -m "Update hattotto to ${VERSION}"
           git push

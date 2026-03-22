@@ -1,11 +1,11 @@
 <div align="center">
-  <img src="assets/app-icon.png" alt="貼っとーと" width="128" />
-  <h1>🐻 貼っとーと (Hatto-to)</h1>
+  <img src="assets/app-icon.png" alt="貼っとっと" width="128" />
+  <h1>🐻 貼っとっと (Hattotto)</h1>
   <p>デスクトップにぺたぺた貼れる、熊の手つき付箋アプリ<br>軽量・ネイティブ・macOS Stickies ライクな操作感</p>
 </div>
 
 <p align="center">
-  <img src="assets/hero.svg" alt="貼っとーと スクリーンショット" width="600" />
+  <img src="assets/hero.svg" alt="貼っとっと スクリーンショット" width="600" />
 </p>
 
 ## こだわりポイント
@@ -38,7 +38,7 @@ macOS Stickiesとの重要な違い
 ### Homebrew (推奨)
 
 ```bash
-brew install --cask somei-san/tap/hatto-to
+brew install --cask somei-san/tap/hattotto
 ```
 
 > **Note:** 現在コード署名がないため、インストール時に quarantine 属性を自動解除します。
@@ -46,7 +46,7 @@ brew install --cask somei-san/tap/hatto-to
 ## データ保存先
 
 ```
-~/Library/Application Support/com.hatto-to.app/
+~/Library/Application Support/com.hattotto.app/
 ├── notes.json      # 付箋データ
 ├── settings.json   # 設定
 └── trash.json      # ゴミ箱（最大200件）
