@@ -946,7 +946,7 @@
 
   // ── Save Position/Size on Move & Resize ───────────
   let geoTimer = null;
-  async function saveGeometry() {
+  function scheduleGeoSave() {
     clearTimeout(geoTimer);
     geoTimer = setTimeout(async () => {
       try {
@@ -965,19 +965,8 @@
     }, 500);
   }
 
-  // Poll for geometry changes (Tauri v2 doesn't expose move/resize events easily)
-  let lastPos = '', lastSize = '';
-  const geoIntervalId = setInterval(async () => {
-    try {
-      const pos  = await appWindow.outerPosition();
-      const size = await appWindow.outerSize();
-      const key = `${pos.x},${pos.y},${size.width},${size.height}`;
-      if (key !== lastPos) {
-        lastPos = key;
-        saveGeometry();
-      }
-    } catch (e) {}
-  }, 1000);
+  unlisteners.push(appWindow.onMoved(() => scheduleGeoSave()));
+  unlisteners.push(appWindow.onResized(() => scheduleGeoSave()));
 
   // ── Buttons ───────────────────────────────────────
   newBtn.addEventListener('click', () => {
@@ -1046,7 +1035,6 @@
 
   // ── Cleanup on window close ──────────────────────
   window.addEventListener('beforeunload', () => {
-    clearInterval(geoIntervalId);
     unlisteners.forEach(p => p.then(fn => fn()));
   });
 
