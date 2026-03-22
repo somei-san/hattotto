@@ -291,6 +291,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding-block: 2px;
+  }
+
+  .toggle-row + .toggle-row {
+    margin-top: 16px;
   }
 
   .toggle-label {
@@ -445,21 +450,21 @@
         <div class="toggle-track"></div>
       </label>
     </div>
-    <div class="toggle-row" style="margin-top:12px;">
+    <div class="toggle-row">
       <span class="toggle-label">ピン留めボタンを表示</span>
       <label class="toggle">
         <input type="checkbox" id="show-pin-toggle" checked aria-label="ピン留めボタンを表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
-    <div class="toggle-row" style="margin-top:12px;">
+    <div class="toggle-row">
       <span class="toggle-label">新しい付箋ボタンを表示</span>
       <label class="toggle">
         <input type="checkbox" id="show-new-toggle" checked aria-label="新しい付箋ボタンを表示" />
         <div class="toggle-track"></div>
       </label>
     </div>
-    <div class="toggle-row" style="margin-top:12px;">
+    <div class="toggle-row">
       <span class="toggle-label">カラーボタンを表示</span>
       <label class="toggle">
         <input type="checkbox" id="show-color-toggle" checked aria-label="カラーボタンを表示" />
