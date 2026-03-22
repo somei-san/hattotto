@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::model::{resolve_color, AppState, Note, RecoverMutex};
@@ -39,7 +41,7 @@ pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
     let label = format!("note-{}", note.id);
     let url = format!("note.html?id={}", note.id);
 
-    let _ = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let Ok(win) = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("") // No title for Stickies-like feel
         .inner_size(note.width, note.height)
         .min_inner_size(200.0, 150.0)
@@ -49,7 +51,59 @@ pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
         .always_on_top(note.pinned)
         .accept_first_mouse(true)
         .visible(true)
-        .build();
+        .build()
+    else {
+        return;
+    };
+
+    // Bring other notes to front when this window receives native focus.
+    // Using WindowEvent::Focused is more reliable than JS focus events, as it
+    // fires after macOS animations complete (e.g. Mission Control, app switching).
+    let app_handle = app.clone();
+    let note_id = note.id.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(true) = event {
+            bring_others_to_front(&app_handle, &note_id);
+        }
+    });
+}
+
+/// Bring all other note windows to the front when one note receives focus.
+/// Includes a 500ms cooldown to prevent cascading calls from programmatic set_focus().
+fn bring_others_to_front(app: &AppHandle, caller_id: &str) {
+    let state: State<AppState> = app.state();
+
+    if !state.settings.recover().bring_all_to_front {
+        return;
+    }
+
+    {
+        let mut last = state.last_bring_to_front.recover();
+        if last.elapsed() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        *last = Instant::now();
+    }
+
+    let ids: Vec<String> = {
+        let notes = state.notes.recover();
+        notes
+            .iter()
+            .filter(|n| n.id != caller_id)
+            .map(|n| n.id.clone())
+            .collect()
+    };
+
+    for id in &ids {
+        if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+    // Re-focus the caller so it stays on top
+    if let Some(win) = app.get_webview_window(&format!("note-{}", caller_id)) {
+        let _ = win.set_focus();
+    }
 }
 
 // ── Window Management (Settings) ────────────────────────────

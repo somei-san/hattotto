@@ -1052,21 +1052,6 @@
   window.resetZoom = resetZoom;
   window.togglePin = togglePin;
 
-  // ── Bring all notes to front on focus ──────────
-  let bringTimer = null;
-  function scheduleBringToFront() {
-    clearTimeout(bringTimer);
-    bringTimer = setTimeout(() => {
-      if (dragging) return;
-      if (currentSettings && !currentSettings.bring_all_to_front) return;
-      invoke('bring_other_notes_to_front', { callerId: noteId });
-    }, 200);
-  }
-  window.addEventListener('focus', scheduleBringToFront);
-  noteEl.addEventListener('mousedown', () => {
-    if (document.hasFocus()) return;
-    scheduleBringToFront();
-  });
 
   // ── Keyboard: color dots (Enter/Space/Arrow) ───────
   document.querySelectorAll('.color-dot').forEach(dot => {

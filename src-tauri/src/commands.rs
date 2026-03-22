@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use tauri::image::Image;
 use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -216,41 +214,6 @@ pub(crate) fn create_note(app: AppHandle, state: State<AppState>) -> Note {
     create_note_with_window(&app, &state)
 }
 
-/// 呼び出し元以外の全付箋ウィンドウを前面に表示する（500ms クールダウン付き）。
-#[tauri::command]
-pub(crate) fn bring_other_notes_to_front(
-    caller_id: String,
-    app: AppHandle,
-    state: State<AppState>,
-) {
-    // Cooldown: skip if triggered within last 1 second
-    {
-        let mut last = state.last_bring_to_front.recover();
-        if last.elapsed() < std::time::Duration::from_millis(500) {
-            return;
-        }
-        *last = Instant::now();
-    }
-    // Clone IDs only, release lock before window operations to avoid deadlock
-    let ids: Vec<String> = {
-        let notes = state.notes.recover();
-        notes
-            .iter()
-            .filter(|n| n.id != caller_id)
-            .map(|n| n.id.clone())
-            .collect()
-    };
-    for id in &ids {
-        if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
-    }
-    // Re-focus the caller so it stays on top
-    if let Some(win) = app.get_webview_window(&format!("note-{}", caller_id)) {
-        let _ = win.set_focus();
-    }
-}
 
 /// Generate a colored circle icon (16×16 RGBA) for context menu color items.
 fn color_circle(r: u8, g: u8, b: u8) -> Image<'static> {

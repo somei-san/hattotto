@@ -54,7 +54,6 @@ pub fn run() {
             commands::restore_note,
             commands::empty_trash,
             commands::open_trash,
-            commands::bring_other_notes_to_front,
             commands::show_context_menu,
         ])
         .setup(|app| {
