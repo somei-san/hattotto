@@ -7,6 +7,36 @@ use crate::persistence::save_notes;
 
 const DEFAULT_POSITION: (f64, f64) = (120.0, 120.0);
 
+// ── Monitor geometry (pure functions for testability) ────────
+
+/// Logical bounds of a monitor: (x, y, width, height).
+pub(crate) struct MonitorRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Check if (x, y) is inside any monitor (with 50px margin).
+/// Returns the original coordinates if inside, or default position
+/// offset from `primary_origin` if outside all monitors.
+pub(crate) fn clamp_position(
+    x: f64,
+    y: f64,
+    monitors: &[MonitorRect],
+    primary_origin: (f64, f64),
+) -> (f64, f64) {
+    for m in monitors {
+        if x >= m.x && x < m.x + m.w - 50.0 && y >= m.y && y < m.y + m.h - 50.0 {
+            return (x, y);
+        }
+    }
+    (
+        primary_origin.0 + DEFAULT_POSITION.0,
+        primary_origin.1 + DEFAULT_POSITION.1,
+    )
+}
+
 // ── Note Creation Helper ────────────────────────────────────
 
 /// Create a new note with offset positioning and open its window.
@@ -47,19 +77,19 @@ fn clamp_to_screen(app: &AppHandle, x: f64, y: f64) -> (f64, f64) {
     if monitors.is_empty() {
         return (x, y);
     }
-    for monitor in &monitors {
-        let sf = monitor.scale_factor();
-        let mx = monitor.position().x as f64 / sf;
-        let my = monitor.position().y as f64 / sf;
-        let mw = monitor.size().width as f64 / sf;
-        let mh = monitor.size().height as f64 / sf;
-        // 付箋の左上コーナーがモニター内にあれば OK（端50px のマージンあり）
-        if x >= mx && x < mx + mw - 50.0 && y >= my && y < my + mh - 50.0 {
-            return (x, y);
-        }
-    }
-    // どのモニターにも収まらない → プライマリモニターの左上付近にリセット
-    let (base_x, base_y) = app
+    let rects: Vec<MonitorRect> = monitors
+        .iter()
+        .map(|m| {
+            let sf = m.scale_factor();
+            MonitorRect {
+                x: m.position().x as f64 / sf,
+                y: m.position().y as f64 / sf,
+                w: m.size().width as f64 / sf,
+                h: m.size().height as f64 / sf,
+            }
+        })
+        .collect();
+    let primary_origin = app
         .primary_monitor()
         .ok()
         .flatten()
@@ -68,7 +98,7 @@ fn clamp_to_screen(app: &AppHandle, x: f64, y: f64) -> (f64, f64) {
             (m.position().x as f64 / sf, m.position().y as f64 / sf)
         })
         .unwrap_or((0.0, 0.0));
-    (base_x + DEFAULT_POSITION.0, base_y + DEFAULT_POSITION.1)
+    clamp_position(x, y, &rects, primary_origin)
 }
 
 pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
@@ -194,5 +224,75 @@ pub(crate) fn bring_all_to_front(app: &AppHandle) {
             // Window was closed (e.g. via ⌘W) — recreate it
             open_note_window(app, note);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn single_monitor() -> Vec<MonitorRect> {
+        vec![MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 }]
+    }
+
+    #[test]
+    fn inside_single_monitor() {
+        assert_eq!(clamp_position(100.0, 200.0, &single_monitor(), (0.0, 0.0)), (100.0, 200.0));
+    }
+
+    #[test]
+    fn outside_single_monitor_resets_to_default() {
+        assert_eq!(
+            clamp_position(5000.0, 5000.0, &single_monitor(), (0.0, 0.0)),
+            (DEFAULT_POSITION.0, DEFAULT_POSITION.1)
+        );
+    }
+
+    #[test]
+    fn negative_coords_outside_monitor() {
+        assert_eq!(
+            clamp_position(-100.0, -100.0, &single_monitor(), (0.0, 0.0)),
+            (DEFAULT_POSITION.0, DEFAULT_POSITION.1)
+        );
+    }
+
+    #[test]
+    fn edge_margin_50px() {
+        // At the very edge (within 50px margin) → should be clamped
+        assert_eq!(
+            clamp_position(1870.5, 1030.5, &single_monitor(), (0.0, 0.0)),
+            (DEFAULT_POSITION.0, DEFAULT_POSITION.1)
+        );
+        // Just inside margin → should pass
+        assert_eq!(clamp_position(1869.0, 1029.0, &single_monitor(), (0.0, 0.0)), (1869.0, 1029.0));
+    }
+
+    #[test]
+    fn dual_monitor_second_screen() {
+        let monitors = vec![
+            MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 },
+            MonitorRect { x: 1920.0, y: 0.0, w: 2560.0, h: 1440.0 },
+        ];
+        // On second monitor
+        assert_eq!(clamp_position(2000.0, 500.0, &monitors, (0.0, 0.0)), (2000.0, 500.0));
+    }
+
+    #[test]
+    fn outside_all_monitors_uses_primary_origin() {
+        let monitors = vec![
+            MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 },
+        ];
+        assert_eq!(
+            clamp_position(9999.0, 9999.0, &monitors, (100.0, 50.0)),
+            (100.0 + DEFAULT_POSITION.0, 50.0 + DEFAULT_POSITION.1)
+        );
+    }
+
+    #[test]
+    fn empty_monitors_returns_default() {
+        assert_eq!(
+            clamp_position(500.0, 500.0, &[], (0.0, 0.0)),
+            (DEFAULT_POSITION.0, DEFAULT_POSITION.1)
+        );
     }
 }

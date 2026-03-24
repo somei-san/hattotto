@@ -31,7 +31,7 @@ fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!(
         "{}.tmp.{}",
         path.file_name().unwrap().to_string_lossy(),
-        uuid::Uuid::new_v4()
+        std::process::id()
     ));
     fs::write(&tmp, data).map_err(|e| format!("{}: {}", tmp.display(), e))?;
     fs::rename(&tmp, path).map_err(|e| {

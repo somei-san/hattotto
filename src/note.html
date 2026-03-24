@@ -1026,7 +1026,9 @@
 
   // ── Cleanup on window close ──────────────────────
   window.addEventListener('beforeunload', () => {
-    unlisteners.forEach(p => p.then(fn => fn()));
+    clearTimeout(saveTimer);
+    clearTimeout(geoTimer);
+    Promise.all(unlisteners).then(fns => fns.forEach(fn => fn()));
   });
 
   // ── Context Menu (native via Tauri) ──────────────────
