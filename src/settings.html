@@ -508,6 +508,7 @@
   let currentShowNew = true;
   let currentShowColor = true;
   let currentConfirmDelete = true;
+  let currentAutostart = false;
 
   // ── Change Detection ──────────────────────────────
   let saved = {
@@ -516,6 +517,7 @@
     bringAll: currentBringAll, showPin: currentShowPin,
     showNew: currentShowNew, showColor: currentShowColor,
     confirmDelete: currentConfirmDelete,
+    autostart: currentAutostart,
   };
   const saveBtn = document.getElementById('save-btn');
   const saveFooter = document.getElementById('save-footer');
@@ -528,7 +530,8 @@
       || currentShowPin !== saved.showPin
       || currentShowNew !== saved.showNew
       || currentShowColor !== saved.showColor
-      || currentConfirmDelete !== saved.confirmDelete;
+      || currentConfirmDelete !== saved.confirmDelete
+      || currentAutostart !== saved.autostart;
     saveBtn.disabled = !dirty;
   }
 
@@ -539,6 +542,7 @@
       bringAll: currentBringAll, showPin: currentShowPin,
       showNew: currentShowNew, showColor: currentShowColor,
       confirmDelete: currentConfirmDelete,
+      autostart: currentAutostart,
     };
   }
 
@@ -608,6 +612,21 @@
         showColorButton: currentShowColor,
         confirmBeforeDelete: currentConfirmDelete,
       });
+      // autostart の状態が変わっていたら反映
+      if (currentAutostart !== saved.autostart) {
+        try {
+          if (currentAutostart) {
+            await invoke('plugin:autostart|enable');
+          } else {
+            await invoke('plugin:autostart|disable');
+          }
+        } catch (e) {
+          console.error('autostart toggle failed:', e);
+          // 失敗したらトグルを元に戻す
+          currentAutostart = saved.autostart;
+          autostartToggle.checked = currentAutostart;
+        }
+      }
       emit('settings-changed', {
         default_color: currentColor,
         opacity: currentOpacity,
@@ -681,18 +700,9 @@
   // ── Autostart Toggle ─────────────────────────────────
   const autostartToggle = document.getElementById('autostart-toggle');
 
-  autostartToggle.addEventListener('change', async () => {
-    try {
-      if (autostartToggle.checked) {
-        await invoke('plugin:autostart|enable');
-      } else {
-        await invoke('plugin:autostart|disable');
-      }
-    } catch (e) {
-      console.error('autostart toggle failed:', e);
-      // 失敗したらトグルを元に戻す
-      autostartToggle.checked = !autostartToggle.checked;
-    }
+  autostartToggle.addEventListener('change', () => {
+    currentAutostart = autostartToggle.checked;
+    checkDirty();
   });
 
   // ── Load current settings ────────────────────────────
@@ -732,7 +742,8 @@
     currentConfirmDelete = s.confirm_before_delete !== false;
     confirmDeleteToggle.checked = currentConfirmDelete;
 
-    autostartToggle.checked = !!autostartEnabled;
+    currentAutostart = !!autostartEnabled;
+    autostartToggle.checked = currentAutostart;
 
     snapshotSaved();
 
