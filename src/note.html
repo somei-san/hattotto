@@ -701,8 +701,9 @@
   }
 
   let autoInsertGuard = false;
+  let pasteGuard = false;
   editor.addEventListener('beforeinput', (e) => {
-    if (e.inputType !== 'insertParagraph' || autoInsertGuard) return;
+    if (e.inputType !== 'insertParagraph' || autoInsertGuard || pasteGuard) return;
 
     const cur = getCurrentLine();
     if (!cur) return;
@@ -877,15 +878,20 @@
       return;
     }
 
-    // リッチテキストが含まれていれば markdown 変換
-    if (html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)) {
-      const md = htmlToMarkdown(html);
-      document.execCommand('insertText', false, md);
-      return;
-    }
+    pasteGuard = true;
+    try {
+      // リッチテキストが含まれていれば markdown 変換
+      if (html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)) {
+        const md = htmlToMarkdown(html);
+        document.execCommand('insertText', false, md);
+        return;
+      }
 
-    // それ以外はプレーンテキスト
-    document.execCommand('insertText', false, text);
+      // それ以外はプレーンテキスト
+      document.execCommand('insertText', false, text);
+    } finally {
+      pasteGuard = false;
+    }
   });
 
   // ── Checkbox autocomplete ────────────────────────

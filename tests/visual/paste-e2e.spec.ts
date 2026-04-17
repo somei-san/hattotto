@@ -97,6 +97,51 @@ test.describe("ペースト処理", () => {
     expect(content).toBe("[multi line text](https://example.com/page)");
   });
 
+  test("複数行の箇条書きペースト → 自動継続が発動せずそのまま挿入", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+
+    await page.click(".markdown-view");
+    await expect(page.locator(".editor")).toBeVisible();
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "- A\n- B\n- C");
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    const content = await page.locator(".editor").innerText();
+    expect(content).toBe("- A\n- B\n- C");
+  });
+
+  test("HTML由来の複数行箇条書きペースト → 自動継続が発動しない", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+
+    await page.click(".markdown-view");
+    await expect(page.locator(".editor")).toBeVisible();
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "A\nB\nC");
+      dt.setData("text/html", "<ul><li>A</li><li>B</li><li>C</li></ul>");
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    const content = await page.locator(".editor").innerText();
+    expect(content.replace(/\n+$/, "")).toBe("- A\n- B\n- C");
+  });
+
   test("リッチテキスト（リンク付き）ペースト → Markdownリンクに変換", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
