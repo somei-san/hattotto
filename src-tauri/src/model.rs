@@ -317,8 +317,10 @@ mod tests {
 
     #[test]
     fn settings_json_roundtrip_with_confirm_before_delete() {
-        let mut s = Settings::default();
-        s.confirm_before_delete = false;
+        let s = Settings {
+            confirm_before_delete: false,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&s).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert!(!loaded.confirm_before_delete);

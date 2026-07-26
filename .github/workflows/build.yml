@@ -27,8 +27,12 @@ jobs:
       - name: Build
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
+      - name: Format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      # --all-targets でテストコードも lint 対象に含める
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml
