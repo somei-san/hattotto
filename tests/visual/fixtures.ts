@@ -5,7 +5,6 @@ import { test as base, type Page } from "@playwright/test";
 const DEFAULT_SETTINGS = {
   default_color: "yellow",
   opacity: 100,
-  edit_on_single_click: false,
   bring_all_to_front: true,
   show_pin_button: true,
   show_new_button: true,
@@ -161,6 +160,40 @@ async function injectTrashMock(
       },
     };
   }, { items: trashItems });
+}
+
+// ── Editor helpers ─────────────────────────────────────────
+
+/**
+ * 指定行をクリックして生表示にする。省略時は最終行。
+ * 生表示中の行だけが `#editor`（`.raw-editor`）になる。
+ */
+export async function enterEdit(page: Page, lineIndex?: number) {
+  if (lineIndex == null) {
+    await page.click("#markdown-view");
+  } else {
+    await page.locator(`#markdown-view [data-line="${lineIndex}"]`).first().click();
+  }
+  await page.waitForSelector("#editor", { state: "visible" });
+}
+
+/**
+ * 指定行の指定列に直接キャレットを置く（col 省略で行末）。
+ * macOS の Chromium では Home/End がキャレットを動かさないため、
+ * 行内の位置を決め打ちしたいテストはこちらを使う。
+ */
+export async function placeCaret(page: Page, line: number, col?: number) {
+  await page.evaluate(
+    ([l, c]) => (window as unknown as { enterLine(l: number, c: number | null): void })
+      .enterLine(l as number, (c ?? null) as number | null),
+    [line, col] as const,
+  );
+  await page.waitForSelector("#editor", { state: "visible" });
+}
+
+/** 生表示中の行を書き戻したうえでの、付箋のソーステキスト全体。 */
+export function getContent(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { getRawContent(): string }).getRawContent());
 }
 
 // ── Fixture types ──────────────────────────────────────────

@@ -1,58 +1,42 @@
-import { test, expect, injectNoteMock } from "./fixtures";
+import { test, expect, injectNoteMock, enterEdit, getContent } from "./fixtures";
 
-// ── 1. 編集モード切替 ────────────────────────────────────
+// ── 1. 行の生表示 ────────────────────────────────────────
 
-test.describe("編集モード切替", () => {
-  test("空の付箋をクリック → 編集モードになる", async ({ openNote }) => {
+test.describe("行の生表示", () => {
+  test("空の付箋をクリック → 生エディタが出る", async ({ openNote }) => {
     const page = await openNote({ content: "" });
-    // 初期状態: プレビューモード
-    await expect(page.locator(".markdown-view")).toBeVisible();
-    await expect(page.locator(".editor")).toBeHidden();
+    await expect(page.locator("#editor")).toHaveCount(0);
 
-    // プレビューをクリック → 編集モードに切替
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
-    await expect(page.locator(".markdown-view")).toBeHidden();
+    await enterEdit(page);
+    await expect(page.locator("#editor")).toBeVisible();
   });
 
-  test("テキスト付き付箋（md記法なし）をクリック → 編集モードになる", async ({ openNote }) => {
+  test("テキスト付き付箋をクリック → その行が生エディタになる", async ({ openNote }) => {
     const page = await openNote({ content: "ただのテキスト" });
-    await expect(page.locator(".markdown-view")).toBeVisible();
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
-    await expect(page.locator(".markdown-view")).toBeHidden();
+    await enterEdit(page);
+    expect(await page.locator("#editor").textContent()).toBe("ただのテキスト");
   });
 
-  test("md記法付き付箋をダブルクリック → 編集モードになる", async ({ openNote }) => {
+  test("md記法付き付箋もシングルクリックで生表示になる", async ({ openNote }) => {
     const page = await openNote({ content: "# Title" });
-    await expect(page.locator(".markdown-view")).toBeVisible();
 
-    // single clickでは編集モードにならない（edit_on_single_clickがfalse）
-    await page.click(".markdown-view");
-    await expect(page.locator(".markdown-view")).toBeVisible();
-
-    // ダブルクリックで編集モードに
-    await page.dblclick(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
-    await expect(page.locator(".markdown-view")).toBeHidden();
+    await enterEdit(page);
+    expect(await page.locator("#editor").textContent()).toBe("# Title");
   });
 
-  test("編集モードでエディタ外をクリック → プレビューモードに戻る", async ({ openNote }) => {
+  test("エディタ外へフォーカスが外れる → 描画に戻る", async ({ openNote }) => {
     const page = await openNote({ content: "テスト" });
 
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
-    // エディタ外（titlebar）をクリックしてblur
-    // dispatchでblurイベントを発火（relatedTargetがnullになるようにする）
+    // relatedTarget が null になるように blur を発火する
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
       editor.dispatchEvent(new FocusEvent("blur", { relatedTarget: null }));
     });
-    await expect(page.locator(".markdown-view")).toBeVisible();
-    await expect(page.locator(".editor")).toBeHidden();
+    await expect(page.locator("#editor")).toHaveCount(0);
+    await expect(page.locator(".md-line")).toHaveText("テスト");
   });
 });
 
@@ -61,7 +45,6 @@ test.describe("編集モード切替", () => {
 test.describe("チェックボックストグル", () => {
   test("未チェックのチェックボックスをクリック → チェックが入る", async ({ openNote }) => {
     const page = await openNote({ content: "- [ ] task" });
-    await expect(page.locator(".markdown-view")).toBeVisible();
 
     const checkbox = page.locator('input[type="checkbox"]');
     await expect(checkbox).not.toBeChecked();
@@ -72,7 +55,6 @@ test.describe("チェックボックストグル", () => {
 
   test("チェック済みのチェックボックスをクリック → チェックが外れる", async ({ openNote }) => {
     const page = await openNote({ content: "- [x] done" });
-    await expect(page.locator(".markdown-view")).toBeVisible();
 
     const checkbox = page.locator('input[type="checkbox"]');
     await expect(checkbox).toBeChecked();
@@ -124,9 +106,7 @@ test.describe("カラーピッカー", () => {
 test.describe.skip("コンテキストメニュー（ネイティブ）", () => {
   test("右クリック → コンテキストメニューが開く", async ({ openNote }) => {
     const page = await openNote({ content: "テスト" });
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.click(".editor", { button: "right" });
     await expect(page.locator(".context-menu.open")).toBeVisible();
@@ -168,12 +148,10 @@ test.describe("ペースト（URLリンク変換）", () => {
   test("選択テキスト + URLペースト → markdownリンクに変換", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     // "hello" と入力
-    await page.locator(".editor").pressSequentially("hello");
+    await page.locator("#editor").pressSequentially("hello");
 
     // "hello" を全選択（macOS: Meta+a, Linux: Control+a）
     const mod = process.platform === "darwin" ? "Meta" : "Control";
@@ -194,8 +172,7 @@ test.describe("ペースト（URLリンク変換）", () => {
     });
 
     // エディタ内容がmarkdownリンク形式になっていることを確認
-    const content = await page.locator(".editor").innerText();
-    expect(content).toBe("[hello](https://example.com)");
+    expect(await getContent(page)).toBe("[hello](https://example.com)");
   });
 });
 
@@ -342,15 +319,13 @@ test.describe("自動保存", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     // キャプチャをリセット
     await page.evaluate(() => { (window as any).__captured_invokes.length = 0; });
 
     // 単一文字入力後すぐにチェック（タイミング信頼性のため1文字のみ）
-    await page.locator(".editor").press("h");
+    await page.locator("#editor").press("h");
 
     // 入力直後はデバウンス中なのでまだ呼ばれない
     const callsBefore = await page.evaluate(() =>

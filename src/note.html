@@ -159,40 +159,8 @@
     overflow: hidden;
   }
 
-  .lines {
-    display: none;
-  }
-
-  .editor {
-    width: 100%;
-    height: 100%;
-    padding: 12px 16px;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-    font-size: 14px;
-    line-height: normal;
-    user-select: text;
-    -webkit-user-select: text;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    overflow-y: auto;
-  }
-
-  .editor div { margin-bottom: 4px; }
-
-
-  .editor:empty::before {
-    content: 'メモを入力…';
-    color: var(--text-muted);
-    pointer-events: none;
-  }
-
-  /* ── Markdown Preview ─────────────────────────────── */
+  /* ── Markdown Surface ─────────────────────────────── */
   .markdown-view {
-    display: none;
     position: absolute;
     inset: 0;
     padding: 12px 16px;
@@ -206,7 +174,26 @@
     -webkit-user-select: text;
   }
 
-  .markdown-view.active { display: block; }
+  /* 生エディタ（`.raw-editor`）— 描画済みの行と差し替えて生 Markdown を出す */
+  .raw-editor {
+    outline: none;
+    background: rgba(0,0,0,0.04);
+    border-radius: 3px;
+    padding: 0 2px;
+    margin: 0 -2px;
+    min-height: 21px;
+    font: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .raw-editor.atomic {
+    white-space: pre;
+    overflow-x: auto;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+  }
 
   .md-placeholder { color: var(--text-muted); }
   .md-line, .md-empty { min-height: 21px; word-break: break-word; }
@@ -387,9 +374,7 @@
 
     <!-- Content -->
     <div class="content">
-      <div class="lines" id="lines"></div>
-      <div class="markdown-view" id="markdown-view" role="document" aria-label="プレビュー"></div>
-      <div class="editor" id="editor" contenteditable="true" aria-label="付箋の内容"></div>
+      <div class="markdown-view" id="markdown-view" role="document" aria-label="付箋の内容"></div>
     </div>
   </div>
 
@@ -406,7 +391,6 @@
   const params = new URLSearchParams(window.location.search);
   const noteId = params.get('id');
 
-  const editor    = document.getElementById('editor');
   const noteEl    = document.getElementById('note');
   const titlebar  = document.getElementById('titlebar');
   const picker    = document.getElementById('color-picker');
@@ -417,7 +401,14 @@
 
   let saveTimer = null;
   let currentSettings = null;
+
+  // ── Editor State ──────────────────────────────────
+  // rawContent が唯一の真実。activeStart/activeEnd は今だけ生 Markdown で
+  // 表示しているブロックの行範囲（通常行では両者が同じ値）。
   let rawContent = '';
+  let activeStart = null;
+  let activeEnd = null;
+  let composing = false;
 
   // ── Apply Settings to UI ─────────────────────────
   function applySettings(s) {
@@ -487,7 +478,7 @@
     }
 
     rawContent = note.content;
-    editor.innerText = rawContent;
+    renderAll();
     applyColor(note.color);
 
     if (settings) {
@@ -501,129 +492,202 @@
     // Apply per-note zoom
     currentZoom = note.zoom ?? 100;
     applyZoom(currentZoom);
-    showPreview();
   }
 
-  function showPreview() {
+  // ── Render / Active Line ──────────────────────────
+  const getLines = () => rawContent.split('\n');
+  const activeEditor = () => mdView.querySelector('.raw-editor');
+  // contenteditable は入力中に NBSP を混ぜてくるので読み出し時に正規化する。
+  // 1 文字 1 文字の置換なので DOM 側のオフセットとはずれない。
+  const editorText = (ed) => ed.textContent.replace(/\u00A0/g, ' ');
+
+  function renderAll() {
     mdView.innerHTML = renderMarkdown(rawContent);
-    mdView.classList.add('active');
-    editor.style.display = 'none';
   }
 
-  function showEditor(caretOffset) {
-    mdView.classList.remove('active');
-    editor.style.display = '';
-    editor.focus();
-    if (caretOffset != null) {
-      try {
-        // Walk text nodes to find the right position
-        let remaining = caretOffset;
-        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) {
-          if (remaining <= node.textContent.length) {
-            const sel = window.getSelection();
-            const range = document.createRange();
-            range.setStart(node, remaining);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            return;
-          }
-          remaining -= node.textContent.length;
-        }
-      } catch (e) { /* fallback: cursor at start */ }
+  /** 行 lineIdx を含む描画済みブロックを返す。フェンスは複数行を 1 ブロックとして持つ。 */
+  function findBlock(lineIdx) {
+    for (const el of mdView.children) {
+      if (el.dataset.line == null) continue;
+      const start = Number(el.dataset.line);
+      const end = el.dataset.lineEnd != null ? Number(el.dataset.lineEnd) : start;
+      if (lineIdx >= start && lineIdx <= end) return { el, start, end };
     }
+    return null;
   }
 
-  const MD_PATTERNS = [
-    /^#{1,3} /m,              // heading
-    /^[-*] /m,                // bullet list
-    /^> /m,                   // blockquote
-    /^\d+\. /m,               // ordered list
-    /^[-*_]{3,}$/m,           // horizontal rule
-    /\*\*/,                   // bold (**)
-    /(?<!\w)__[^\s_].*?__/,   // bold (__)
-    /(?<![*\w])\*(?![\s*])/,  // italic
-    /~~/,                     // strikethrough
-    /`[^`]/,                  // inline code
-    /!\[/,                    // image
-    /\[.+?\]\(.+?\)/,        // link
-  ];
-
-  function hasMarkdownSyntax(text) {
-    return MD_PATTERNS.some(r => r.test(text));
+  /** el 内の文字オフセットを (テキストノード, ノード内オフセット) に解決する。 */
+  function nodeAt(el, offset) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let remaining = offset, node, last = null;
+    while ((node = walker.nextNode())) {
+      last = node;
+      if (remaining <= node.textContent.length) return { node, offset: remaining };
+      remaining -= node.textContent.length;
+    }
+    return last ? { node: last, offset: last.textContent.length } : null;
   }
 
-  function getCaretOffsetFromEvent(e) {
-    // Find which top-level child of mdView was clicked
-    const children = Array.from(mdView.children);
-    const target = e.target.closest('.markdown-view > *') || e.target;
-    const lineIdx = children.indexOf(target);
-    if (lineIdx < 0) return 0;
-    // Sum lengths of rawContent lines up to lineIdx
-    const lines = rawContent.split('\n');
+  function placeCaret(el, offset) {
+    const at = nodeAt(el, offset);
+    const sel = window.getSelection();
+    const range = document.createRange();
+    if (at) range.setStart(at.node, at.offset);
+    else range.setStart(el, 0);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function caretOffset(el) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    const pre = range.cloneRange();
+    pre.selectNodeContents(el);
+    pre.setEnd(range.startContainer, range.startOffset);
+    return pre.toString().length;
+  }
+
+  /** 生エディタ内のキャレット位置を、文書全体での (行番号, 列) に変換する。 */
+  function caretLineCol(ed) {
+    const before = editorText(ed).slice(0, caretOffset(ed)).split('\n');
+    return { line: activeStart + before.length - 1, col: before[before.length - 1].length };
+  }
+
+  /** ブロック内の (行インデックス, 列) をエディタ先頭からのオフセットに変換する。 */
+  function blockOffset(blockLines, idx, col) {
     let offset = 0;
-    for (let i = 0; i < Math.min(lineIdx, lines.length); i++) {
-      offset += lines[i].length + 1; // +1 for \n
-    }
-    return offset;
+    for (let n = 0; n < idx; n++) offset += blockLines[n].length + 1;
+    return offset + col;
   }
 
-  // Click on preview: links/checkboxes handled, then edit mode logic
+  /** 行 lineIdx を生 Markdown に差し替え、col 列にキャレットを置く（col が null なら行末）。 */
+  function enterLine(lineIdx, col) {
+    commitActive();
+    const lines = getLines();
+    const i = Math.max(0, Math.min(lineIdx, lines.length - 1));
+    const block = findBlock(i);
+    activeStart = block ? block.start : i;
+    activeEnd = block ? block.end : i;
+
+    const ed = document.createElement('div');
+    ed.id = 'editor';
+    ed.className = 'raw-editor' + (activeEnd > activeStart ? ' atomic' : '');
+    ed.contentEditable = 'true';
+    ed.setAttribute('aria-label', '付箋の内容');
+    ed.textContent = lines.slice(activeStart, activeEnd + 1).join('\n');
+
+    // 空の付箋はプレースホルダしか無いので、差し替え先が無い
+    if (block) block.el.replaceWith(ed);
+    else { mdView.innerHTML = ''; mdView.appendChild(ed); }
+
+    bindEditor(ed);
+    ed.focus();
+    const blockLines = lines.slice(activeStart, activeEnd + 1);
+    const line = lines[i] ?? '';
+    placeCaret(ed, blockOffset(blockLines, i - activeStart, col == null ? line.length : Math.min(col, line.length)));
+  }
+
+  /** 生エディタの内容を rawContent へ書き戻す。DOM は触らない（入力中に呼ばれる）。 */
+  function snapshotContent() {
+    if (activeStart == null) return;
+    const ed = activeEditor();
+    if (!ed) return;
+    const lines = getLines();
+    const edited = editorText(ed).split("\n");
+    lines.splice(activeStart, activeEnd - activeStart + 1, ...edited);
+    activeEnd = activeStart + edited.length - 1;
+    rawContent = lines.join('\n');
+  }
+
+  /** 書き戻したうえで生表示をやめ、全体を描画し直す。 */
+  function commitActive() {
+    if (activeStart == null) return;
+    snapshotContent();
+    activeStart = activeEnd = null;
+    renderAll();
+  }
+
+  /** 行構成そのものが変わる編集（分割・結合・複数行ペースト）の共通後処理。 */
+  function applyLines(lines, caretLine, caretCol) {
+    activeStart = activeEnd = null;
+    rawContent = lines.join('\n');
+    renderAll();
+    enterLine(caretLine, caretCol);
+    scheduleSave();
+  }
+
+  // ── Click → Enter Line ────────────────────────────
+  /** 行頭マーカー（インデント・見出し・リスト・引用）の文字数。 */
+  function markerLength(line) {
+    const indent = line.match(/^ */)[0].length;
+    const m = line.slice(indent).match(/^(#{1,3} |[-*] \[[ xX]\] |[-*] |> |\d+\. )/);
+    return indent + (m ? m[1].length : 0);
+  }
+
+  /**
+   * クリック位置を生 Markdown の列に戻す。描画テキストには行頭マーカーが
+   * 含まれないぶんを足し戻す。インライン記法（** など）の分だけ列はずれる。
+   */
+  function rawColFromPoint(el, line, e) {
+    const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+    if (!range || !el.contains(range.startContainer)) return null;
+    const pre = range.cloneRange();
+    pre.selectNodeContents(el);
+    pre.setEnd(range.startContainer, range.startOffset);
+    // 番号つきリストは連番が DOM 側のテキストとして出ているぶんを差し引く
+    const num = el.querySelector('.md-order-num');
+    const domPrefix = num ? num.textContent.length + 1 : 0;
+    const visible = Math.max(0, pre.toString().length - domPrefix);
+    return Math.min(markerLength(line) + visible, line.length);
+  }
+
+  // mouseup で拾う（mousedown を潰すとドラッグでの範囲選択ができなくなるため）
+  mdView.addEventListener('mouseup', (e) => {
+    if (e.target.closest('.raw-editor')) return;
+    if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]')) return;
+    // 範囲選択したときは生表示に入らない（コピーの邪魔をしない）
+    if (!window.getSelection().isCollapsed) return;
+
+    const el = e.target.closest('[data-line]');
+    const lines = getLines();
+    if (!el) {
+      enterLine(lines.length - 1, null); // 余白クリックは最終行の行末へ
+      return;
+    }
+    // フェンスは行単位のマッピングを持たないので末尾に置く
+    if (el.dataset.lineEnd != null) { enterLine(Number(el.dataset.lineEnd), null); return; }
+    const lineIdx = Number(el.dataset.line);
+    enterLine(lineIdx, rawColFromPoint(el, lines[lineIdx] ?? '', e));
+  });
+
   mdView.addEventListener('click', (e) => {
     const link = e.target.closest('a[data-url]');
-    if (link) {
-      e.preventDefault();
-      window.__TAURI__.shell.open(link.dataset.url);
-      return;
-    }
-    if (e.target.closest('input[type="checkbox"]')) return;
-    // Always single-click for empty/plain text notes
-    if (!rawContent || !hasMarkdownSyntax(rawContent)) {
-      showEditor(getCaretOffsetFromEvent(e));
-      return;
-    }
-    // Markdown notes: single-click if setting enabled
-    if (currentSettings?.edit_on_single_click) {
-      showEditor(getCaretOffsetFromEvent(e));
-    }
-  });
-
-  // Double-click on preview → edit mode (always works)
-  mdView.addEventListener('dblclick', (e) => {
-    if (!e.target.closest('input[type="checkbox"]') && !e.target.closest('a[data-url]')) {
-      showEditor(getCaretOffsetFromEvent(e));
-    }
-  });
-
-  // Blur textarea → preview mode
-  editor.addEventListener('blur', (e) => {
-    // Don't switch if focus moves to a button (color picker, etc.) or context menu is open
-    if (e.relatedTarget && e.relatedTarget.closest('.note')) return;
-    // (native context menu is handled by OS, no check needed)
-    showPreview();
+    if (!link) return;
+    e.preventDefault();
+    window.__TAURI__.shell.open(link.dataset.url);
   });
 
   // Checkbox toggle
   mdView.addEventListener('change', (e) => {
     if (e.target.type !== 'checkbox') return;
+    snapshotContent(); // 別の行を生表示中でもその編集を落とさない
     const lineIdx = parseInt(e.target.dataset.line, 10);
-    const lines = rawContent.split('\n');
+    const lines = getLines();
     if (e.target.checked) {
       lines[lineIdx] = lines[lineIdx].replace(/^(\s*)([-*] )\[ \] /, '$1$2[x] ');
     } else {
       lines[lineIdx] = lines[lineIdx].replace(/^(\s*)([-*] )\[x\] /i, '$1$2[ ] ');
     }
     rawContent = lines.join('\n');
-    editor.innerText = rawContent;
-    invoke('update_note_content', { id: noteId, content: rawContent }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+    saveNow();
     // DOM の該当チェックボックス要素だけ更新（全体再レンダリング不要）
     const span = e.target.closest('.md-check');
     if (span) {
       span.classList.toggle('checked', e.target.checked);
     } else {
-      mdView.innerHTML = renderMarkdown(rawContent);
+      renderAll();
     }
   });
 
@@ -683,141 +747,93 @@
     return false;
   }
 
-  function getCurrentLine() {
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return null;
-    const range = sel.getRangeAt(0);
-    const node = range.startContainer;
-    if (node.nodeType !== Node.TEXT_NODE) return null;
-    const full = node.textContent;
-    const pos = range.startOffset;
-    const before = full.slice(0, pos);
-    const after = full.slice(pos);
-    const lastNl = before.lastIndexOf('\n');
-    const nextNl = after.indexOf('\n');
-    const lineAfter = nextNl >= 0 ? after.slice(0, nextNl) : after;
-    const fullLine = before.slice(lastNl + 1) + lineAfter;
-    return { text: before.slice(lastNl + 1), fullLine, node, pos };
-  }
+  /** Enter で行を分割する。リスト・引用の途中なら次の行へプレフィックスを引き継ぐ。 */
+  function splitLine(ed) {
+    snapshotContent();
+    const { line, col } = caretLineCol(ed);
+    const lines = getLines();
+    const cur = lines[line];
+    // フェンス内は素の改行だけ入れる
+    let prefix = activeEnd > activeStart ? null : getAutoPrefix(cur);
 
-  let autoInsertGuard = false;
-  let pasteGuard = false;
-  editor.addEventListener('beforeinput', (e) => {
-    if (e.inputType !== 'insertParagraph' || autoInsertGuard || pasteGuard) return;
-
-    const cur = getCurrentLine();
-    if (!cur) return;
-
-    // Use fullLine for pattern matching (works at beginning/middle/end of line)
-    const prefix = getAutoPrefix(cur.fullLine);
-    if (prefix === null) return;
-
-    // Don't auto-continue if caret is before or inside the prefix portion
-    const { indent, stripped } = stripIndent(cur.fullLine);
-    for (const pat of LIST_PATTERNS) {
-      const m = stripped.match(pat.re);
-      if (m) {
-        const prefixEnd = indent.length + m[1].length;
-        if (cur.text.length < prefixEnd) return;
-        break;
-      }
-    }
-
-    e.preventDefault();
-    autoInsertGuard = true;
-
-    try {
-      if (isEmptyListItem(cur.fullLine)) {
-        // Empty list item → remove prefix and insert plain newline
-        const sel = window.getSelection();
-        const range = sel.getRangeAt(0);
-        const lineStart = cur.pos - cur.text.length;
-        const lineEnd = Math.min(lineStart + cur.fullLine.length, cur.node.textContent.length);
-        range.setStart(cur.node, lineStart);
-        range.setEnd(cur.node, lineEnd);
-        range.deleteContents();
-        document.execCommand('insertText', false, '\n');
-      } else {
-        const afterCaret = cur.fullLine.slice(cur.text.length);
-        if (afterCaret.length > 0) {
-          // Select text after caret to end of line, then replace it
-          const sel = window.getSelection();
-          const range = sel.getRangeAt(0);
-          const lineEnd = cur.pos + afterCaret.length;
-          range.setEnd(cur.node, Math.min(lineEnd, cur.node.textContent.length));
-          sel.removeAllRanges();
-          sel.addRange(range);
-          const trimmed = afterCaret.replace(/^ /, '');
-          document.execCommand('insertText', false, '\n' + prefix + trimmed);
-        } else {
-          document.execCommand('insertText', false, '\n' + prefix);
+    if (prefix !== null) {
+      // キャレットがプレフィックスより手前なら自動継続しない
+      const { indent, stripped } = stripIndent(cur);
+      for (const pat of LIST_PATTERNS) {
+        const m = stripped.match(pat.re);
+        if (m) {
+          if (col < indent.length + m[1].length) prefix = null;
+          break;
         }
       }
-    } finally {
-      autoInsertGuard = false;
     }
-  });
+
+    if (prefix !== null && isEmptyListItem(cur)) {
+      // 中身のないリスト項目 → プレフィックスを消して継続を打ち切る
+      lines[line] = '';
+      applyLines(lines, line, 0);
+      return;
+    }
+
+    lines[line] = cur.slice(0, col);
+    const after = cur.slice(col);
+    lines.splice(line + 1, 0, prefix === null ? after : prefix + after.replace(/^ /, ''));
+    applyLines(lines, line + 1, prefix === null ? 0 : prefix.length);
+  }
+
+  /** Backspace / Delete による行の結合。 */
+  function mergeLine(ed, withPrevious) {
+    snapshotContent();
+    const { line, col } = caretLineCol(ed);
+    const lines = getLines();
+    if (withPrevious) {
+      if (col !== 0 || line === 0) return false;
+      const mergeCol = lines[line - 1].length;
+      lines[line - 1] += lines[line];
+      lines.splice(line, 1);
+      applyLines(lines, line - 1, mergeCol);
+    } else {
+      if (col !== lines[line].length || line >= lines.length - 1) return false;
+      lines[line] += lines[line + 1];
+      lines.splice(line + 1, 1);
+      applyLines(lines, line, col);
+    }
+    return true;
+  }
 
   // ── Tab / Shift+Tab indent ──────────────────────
-  editor.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
-    e.preventDefault();
-    const cur = getCurrentLine();
-    if (!cur) return;
+  function indentLine(ed, outdent) {
+    const { line, col } = caretLineCol(ed);
+    const blockLines = editorText(ed).split("\n");
+    const idx = line - activeStart;
+    const lineStart = blockOffset(blockLines, idx, 0);
+    const caret = blockOffset(blockLines, idx, col);
     const sel = window.getSelection();
-    const nodeLen = cur.node.textContent.length;
-    // getCurrentLine().pos is the caret offset within the text node,
-    // and .text is the substring from the last newline to pos (i.e. current line before caret).
-    // lineStart = pos - text.length gives the offset of the current line's first character.
-    const lineStart = Math.min(Math.max(0, cur.pos - cur.text.length), nodeLen);
+    const range = document.createRange();
 
-    // Guard: lineStart must be a valid offset within the text node
-    if (lineStart < 0 || lineStart > nodeLen) return;
-
-    if (e.shiftKey) {
-      // Remove up to 2 spaces from line start
-      const full = cur.node.textContent;
-      let removeCount = 0;
-      if (lineStart + 1 <= full.length && full[lineStart] === ' ' && full[lineStart + 1] === ' ') removeCount = 2;
-      else if (lineStart < full.length && full[lineStart] === ' ') removeCount = 1;
-      if (removeCount > 0 && lineStart + removeCount <= nodeLen) {
-        try {
-          const range = document.createRange();
-          range.setStart(cur.node, lineStart);
-          range.setEnd(cur.node, lineStart + removeCount);
-          sel.removeAllRanges();
-          sel.addRange(range);
-          document.execCommand('delete');
-          // Restore cursor position
-          const updatedLen = cur.node.textContent.length;
-          const newPos = Math.min(Math.max(lineStart, cur.pos - removeCount), updatedLen);
-          const r = document.createRange();
-          r.setStart(cur.node, newPos);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-        } catch (err) { console.warn('Tab indent: range operation failed', err); }
-      }
+    if (outdent) {
+      const spaces = blockLines[idx].startsWith('  ') ? 2 : (blockLines[idx].startsWith(' ') ? 1 : 0);
+      if (!spaces) return;
+      const from = nodeAt(ed, lineStart), to = nodeAt(ed, lineStart + spaces);
+      if (!from || !to) return;
+      range.setStart(from.node, from.offset);
+      range.setEnd(to.node, to.offset);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand('delete');
+      placeCaret(ed, Math.max(lineStart, caret - spaces));
     } else {
-      // Insert 2 spaces at line start
-      try {
-        const range = document.createRange();
-        range.setStart(cur.node, lineStart);
+      const from = nodeAt(ed, lineStart);
+      if (from) {
+        range.setStart(from.node, from.offset);
         range.collapse(true);
         sel.removeAllRanges();
         sel.addRange(range);
-        document.execCommand('insertText', false, '  ');
-        // Restore cursor position (shifted by 2)
-        const updatedLen = cur.node.textContent.length;
-        const newPos = Math.min(cur.pos + 2, updatedLen);
-        const r = document.createRange();
-        r.setStart(cur.node, newPos);
-        r.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      } catch (err) { console.warn('Tab indent: range operation failed', err); }
+      }
+      document.execCommand('insertText', false, '  ');
+      placeCaret(ed, caret + 2);
     }
-  });
+  }
 
   // ── Paste: rich text links → markdown, otherwise plain ──
   function htmlToMarkdown(html) {
@@ -865,8 +881,9 @@
     }
   }
 
-  editor.addEventListener('paste', (e) => {
+  function onEditorPaste(e) {
     e.preventDefault();
+    const ed = e.currentTarget;
     const text = e.clipboardData.getData('text/plain');
     const html = e.clipboardData.getData('text/html');
     const sel = window.getSelection();
@@ -875,62 +892,183 @@
     // 選択テキスト + URL → markdown link
     if (selected && /^https?:\/\/\S+$/.test(text.trim())) {
       document.execCommand('insertText', false, `[${selected}](${text.trim()})`);
+      snapshotContent();
+      scheduleSave();
       return;
     }
 
-    pasteGuard = true;
-    try {
-      // リッチテキストが含まれていれば markdown 変換
-      if (html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)) {
-        const md = htmlToMarkdown(html);
-        document.execCommand('insertText', false, md);
-        return;
-      }
+    // リッチテキストが含まれていれば markdown 変換
+    const inserted = html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)
+      ? htmlToMarkdown(html)
+      : text;
 
-      // それ以外はプレーンテキスト
-      document.execCommand('insertText', false, text);
-    } finally {
-      pasteGuard = false;
+    if (!inserted.includes('\n')) {
+      document.execCommand('insertText', false, inserted);
+      snapshotContent();
+      scheduleSave();
+      return;
     }
-  });
+
+    // 複数行は行配列へ splice する（自動継続は通さない）
+    if (!sel.isCollapsed) document.execCommand('delete');
+    snapshotContent();
+    const { line, col } = caretLineCol(ed);
+    const lines = getLines();
+    const cur = lines[line];
+    const parts = inserted.split('\n');
+    parts[0] = cur.slice(0, col) + parts[0];
+    const tailCol = parts[parts.length - 1].length;
+    parts[parts.length - 1] += cur.slice(col);
+    lines.splice(line, 1, ...parts);
+    applyLines(lines, line + parts.length - 1, tailCol);
+  }
 
   // ── Checkbox autocomplete ────────────────────────
   const CHECKBOX_RE = /^([-*])\s?\[([xX]?)\]$/;
 
-  function autocompleteCheckbox() {
-    const cur = getCurrentLine();
-    if (!cur) return;
-    const m = cur.text.match(CHECKBOX_RE);
+  function autocompleteCheckbox(ed) {
+    const { line, col } = caretLineCol(ed);
+    const blockLines = editorText(ed).split("\n");
+    const idx = line - activeStart;
+    const m = blockLines[idx].slice(0, col).match(CHECKBOX_RE);
     if (!m) return;
-    const bullet = m[1];
-    const inner = m[2].toLowerCase();
-    const replacement = inner === 'x' ? `${bullet} [x] ` : `${bullet} [ ] `;
+    const replacement = m[2].toLowerCase() === 'x' ? `${m[1]} [x] ` : `${m[1]} [ ] `;
 
-    // Replace current line text in the text node
-    const lineStart = cur.pos - cur.text.length;
+    const from = nodeAt(ed, blockOffset(blockLines, idx, 0));
+    const to = nodeAt(ed, blockOffset(blockLines, idx, col));
+    if (!from || !to) return;
     const sel = window.getSelection();
     const range = document.createRange();
-    range.setStart(cur.node, lineStart);
-    range.setEnd(cur.node, cur.pos);
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
     sel.removeAllRanges();
     sel.addRange(range);
     document.execCommand('insertText', false, replacement);
   }
 
-  editor.addEventListener('input', (e) => {
-    if (!e.isComposing && e.data === ']') {
-      autocompleteCheckbox();
-    }
-  });
-
   // ── Auto-Save Content ─────────────────────────────
-  editor.addEventListener('input', () => {
-    rawContent = editor.innerText.replace(/\u00A0/g, ' ');
+  function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      invoke('update_note_content', { id: noteId, content: rawContent }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
-    }, 300);
-  });
+    saveTimer = setTimeout(saveNow, 300);
+  }
+
+  function saveNow() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    invoke('update_note_content', { id: noteId, content: rawContent })
+      .catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+  }
+
+  // ── Raw Editor Bindings ───────────────────────────
+  function bindEditor(ed) {
+    ed.addEventListener('compositionstart', () => { composing = true; });
+    ed.addEventListener('compositionend', () => {
+      composing = false;
+      snapshotContent();
+      scheduleSave();
+    });
+
+    ed.addEventListener('keydown', (e) => {
+      // WebKit は変換確定の Enter より先に compositionend を出すので、composing も
+      // isComposing も false になっている。IME 経由の keydown は keyCode が 229 になる。
+      if (composing || e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        splitLine(ed);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        indentLine(ed, e.shiftKey);
+        snapshotContent();
+        scheduleSave();
+        return;
+      }
+      // 選択が生エディタの外へ広がらないように自前で全選択する
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault();
+        const range = document.createRange();
+        range.selectNodeContents(ed);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      if (e.key === 'ArrowUp' && activeStart > 0) {
+        const { line, col } = caretLineCol(ed);
+        if (line === activeStart) { e.preventDefault(); enterLine(activeStart - 1, col); }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        const { line, col } = caretLineCol(ed);
+        if (line === activeEnd && activeEnd < getLines().length - 1) {
+          e.preventDefault();
+          enterLine(activeEnd + 1, col);
+        }
+        return;
+      }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && window.getSelection().isCollapsed) {
+        if (mergeLine(ed, e.key === 'Backspace')) e.preventDefault();
+      }
+    });
+
+    ed.addEventListener('input', (e) => {
+      if (!e.isComposing && e.data === ']') autocompleteCheckbox(ed);
+      snapshotContent();
+      scheduleSave();
+    });
+
+    ed.addEventListener('paste', onEditorPaste);
+
+    ed.addEventListener('blur', (e) => {
+      // 色ピッカー等のボタンへフォーカスが移っただけなら生表示を保つ
+      if (e.relatedTarget && e.relatedTarget.closest('.note')) return;
+      setTimeout(() => {
+        if (composing) return;
+        // 別の行へ移ったときは enterLine が既に差し替え済みなので何もしない
+        if (!ed.isConnected) return;
+        commitActive();
+      }, 0);
+    });
+  }
+
+  // ── Cross-line Selection Guard ────────────────────
+  // 行をまたぐ選択のまま編集すると管理外の DOM が壊れ、rawContent と
+  // 表示が乖離する。コピーは通し、破壊的な操作だけを止める。
+  const NAV_KEYS = new Set([
+    'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End',
+    'PageUp', 'PageDown', 'Escape', 'Shift', 'Meta', 'Control', 'Alt',
+  ]);
+
+  function blockOf(node) {
+    const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return el ? el.closest('[data-line], .raw-editor') : null;
+  }
+
+  function selectionSpansLines() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    return blockOf(range.startContainer) !== blockOf(range.endContainer);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (!selectionSpansLines()) return;
+    if (e.metaKey || e.ctrlKey) {
+      if (e.key === 'x' || e.key === 'v') e.preventDefault();
+      return;
+    }
+    if (NAV_KEYS.has(e.key)) return;
+    e.preventDefault();
+  }, true);
+
+  for (const type of ['cut', 'paste', 'drop']) {
+    document.addEventListener(type, (e) => {
+      if (!selectionSpansLines()) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
 
   // ── Drag Window ───────────────────────────────────
   let dragging = false;
@@ -1038,6 +1176,11 @@
 
   // ── Cleanup on window close ──────────────────────
   window.addEventListener('beforeunload', () => {
+    // 生表示中の行や保留中のデバウンスを取りこぼさずに保存する
+    if (saveTimer || activeStart != null) {
+      snapshotContent();
+      saveNow();
+    }
     clearTimeout(saveTimer);
     clearTimeout(geoTimer);
     Promise.all(unlisteners).then(fns => fns.forEach(fn => fn()));
@@ -1056,8 +1199,10 @@
 
   // ── Expose for Playwright tests ──────────────────────
   window.htmlToMarkdown = htmlToMarkdown;
-  window.hasMarkdownSyntax = hasMarkdownSyntax;
   window.getAutoPrefix = getAutoPrefix;
+  // 生表示中の行を書き戻したうえでの付箋のソーステキスト
+  window.getRawContent = () => { snapshotContent(); return rawContent; };
+  window.enterLine = enterLine;
   window.isEmptyListItem = isEmptyListItem;
   window.renderMarkdown = renderMarkdown;
   window.CHECKBOX_RE = CHECKBOX_RE;

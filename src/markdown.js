@@ -41,6 +41,7 @@ function renderMarkdown(text) {
   const result = [];
   let inCodeBlock = false;
   let codeLines = [];
+  let codeStart = 0;
   const orderedCounters = {}; // track counters per indent level
   let lastOrderedLevel = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -48,10 +49,11 @@ function renderMarkdown(text) {
     if (!inCodeBlock && /^```\S*\s*$/.test(line)) {
       inCodeBlock = true;
       codeLines = [];
+      codeStart = i;
       continue;
     }
     if (inCodeBlock && /^```\s*$/.test(line)) {
-      result.push('<pre class="md-codeblock"><code>' + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
+      result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${i}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
       inCodeBlock = false;
       codeLines = [];
       continue;
@@ -76,35 +78,35 @@ function renderMarkdown(text) {
     }
 
     if (/^[-*] \[x\] /i.test(trimmedLine)) {
-      result.push(`<div class="md-check checked${indentClass}"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
       continue;
     }
     if (/^[-*] \[ \] /.test(trimmedLine)) {
-      result.push(`<div class="md-check${indentClass}"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('### ')) {
-      result.push(`<div class="md-h3">${inlineMarkdown(escapeHtml(trimmedLine.slice(4)))}</div>`);
+      result.push(`<div class="md-h3" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(4)))}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('## ')) {
-      result.push(`<div class="md-h2">${inlineMarkdown(escapeHtml(trimmedLine.slice(3)))}</div>`);
+      result.push(`<div class="md-h2" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(3)))}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('# ')) {
-      result.push(`<div class="md-h1">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-h1" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
       continue;
     }
     if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) {
-      result.push('<hr class="md-hr">');
+      result.push(`<hr class="md-hr" data-line="${i}">`);
       continue;
     }
     if (/^[-*] /.test(trimmedLine)) {
-      result.push(`<div class="md-bullet${indentClass}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
       continue;
     }
     if (/^> /.test(trimmedLine)) {
-      result.push(`<div class="md-blockquote${indentClass}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
       continue;
     }
     if (/^\d+\. /.test(trimmedLine)) {
@@ -122,18 +124,18 @@ function renderMarkdown(text) {
       }
       lastOrderedLevel = level;
       const displayNum = orderedCounters[level];
-      result.push(`<div class="md-ordered${indentClass}"><span class="md-order-num">${displayNum}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
       continue;
     }
     if (line === '') {
-      result.push('<div class="md-empty"></div>');
+      result.push(`<div class="md-empty" data-line="${i}"></div>`);
       continue;
     }
-    result.push(`<div class="md-line${indentClass}">${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
+    result.push(`<div class="md-line${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
   }
   // Handle unclosed code block
   if (inCodeBlock) {
-    result.push('<pre class="md-codeblock"><code>' + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
+    result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${lines.length - 1}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
   }
   return result.join('');
 }

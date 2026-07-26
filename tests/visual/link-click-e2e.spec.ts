@@ -29,7 +29,7 @@ test.describe("リンククリック", () => {
                 };
               case "get_settings":
                 return {
-                  default_color: "yellow", opacity: 100, edit_on_single_click: false,
+                  default_color: "yellow", opacity: 100,
                   bring_all_to_front: true, show_pin_button: true, show_new_button: true,
                   show_color_button: true, confirm_before_delete: true,
                 };
@@ -84,18 +84,17 @@ test.describe("リンククリック", () => {
     await ctx.close();
   });
 
-  test("リンククリック後 → 編集モードに切り替わらない", async ({ openNote }) => {
+  test("リンククリック後 → その行は生 Markdown にならない", async ({ openNote }) => {
     const page = await openNote({ content: "[Example](https://example.com)" });
 
-    await expect(page.locator(".markdown-view")).toBeVisible();
     const link = page.locator("a[data-url]");
     await expect(link).toBeVisible();
 
     // リンクをクリック
     await link.click();
 
-    // 編集モードにならないことを確認（プレビューのまま）
-    await expect(page.locator(".markdown-view")).toBeVisible();
-    await expect(page.locator(".editor")).toBeHidden();
+    // 描画されたままであることを確認
+    await expect(link).toBeVisible();
+    await expect(page.locator("#editor")).toHaveCount(0);
   });
 });

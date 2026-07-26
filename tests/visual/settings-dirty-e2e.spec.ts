@@ -40,8 +40,8 @@ test.describe("設定画面の dirty チェック", () => {
     const page = await openSettings();
     await expect(page.locator("#save-btn")).toBeDisabled();
 
-    // シングルクリック編集トグルを切り替え（input は display:none なので隣接する .toggle-track をクリック）
-    await page.locator("#single-click-toggle + .toggle-track").click();
+    // 前面表示トグルを切り替え（input は display:none なので隣接する .toggle-track をクリック）
+    await page.locator("#bring-all-toggle + .toggle-track").click();
     await expect(page.locator("#save-btn")).toBeEnabled();
   });
 

@@ -132,8 +132,6 @@ impl Note {
 pub struct Settings {
     pub default_color: String,
     pub opacity: u32,
-    #[serde(default)]
-    pub edit_on_single_click: bool,
     #[serde(default = "default_true")]
     pub bring_all_to_front: bool,
     #[serde(default = "default_true")]
@@ -155,7 +153,6 @@ impl Default for Settings {
         Self {
             default_color: "yellow".into(),
             opacity: 100,
-            edit_on_single_click: false,
             bring_all_to_front: true,
             show_pin_button: true,
             show_new_button: true,
@@ -212,7 +209,6 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.default_color, "yellow");
         assert_eq!(s.opacity, 100);
-        assert!(!s.edit_on_single_click);
         assert!(s.bring_all_to_front);
         assert!(s.show_pin_button);
         assert!(s.show_new_button);
@@ -277,7 +273,6 @@ mod tests {
     #[test]
     fn settings_default_boolean_fields() {
         let s = Settings::default();
-        assert!(!s.edit_on_single_click);
         assert!(s.bring_all_to_front);
         assert!(s.show_pin_button);
         assert!(s.show_new_button);

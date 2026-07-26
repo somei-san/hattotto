@@ -229,7 +229,6 @@ pub(crate) fn get_settings(state: State<AppState>) -> Settings {
 pub(crate) fn update_settings(
     default_color: String,
     opacity: u32,
-    edit_on_single_click: bool,
     bring_all_to_front: bool,
     show_pin_button: bool,
     show_new_button: bool,
@@ -241,7 +240,6 @@ pub(crate) fn update_settings(
         let mut settings = state.settings.recover();
         settings.default_color = default_color;
         settings.opacity = opacity.clamp(20, 100);
-        settings.edit_on_single_click = edit_on_single_click;
         settings.bring_all_to_front = bring_all_to_front;
         settings.show_pin_button = show_pin_button;
         settings.show_new_button = show_new_button;

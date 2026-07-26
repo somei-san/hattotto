@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock } from "./fixtures";
+import { test, expect, injectNoteMock, enterEdit } from "./fixtures";
 
 test.describe("自動保存デバウンス", () => {
   test("高速連続入力 → 最後の入力から300ms後に1回だけinvoke", async ({ browser }) => {
@@ -8,15 +8,13 @@ test.describe("自動保存デバウンス", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     // キャプチャをリセット
     await page.evaluate(() => { (window as any).__captured_invokes.length = 0; });
 
     // 高速で5文字連続入力（各入力間にデバウンスリセットが起こる）
-    await page.locator(".editor").pressSequentially("abcde", { delay: 50 });
+    await page.locator("#editor").pressSequentially("abcde", { delay: 50 });
 
     // 入力直後（50ms * 5 = 250ms程度）はまだデバウンス中
     const callsImmediate = await page.evaluate(() =>
@@ -49,19 +47,18 @@ test.describe("自動保存デバウンス", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => { (window as any).__captured_invokes.length = 0; });
 
     // 1文字入力
-    await page.locator(".editor").press("x");
+    await page.locator("#editor").press("x");
 
     // 200ms待機（300msデバウンス内）
     await page.waitForTimeout(200);
 
     // デバウンスタイマー内にもう1文字入力 → タイマーリセット
-    await page.locator(".editor").press("y");
+    await page.locator("#editor").press("y");
 
     // この時点ではまだinvokeされていない
     const callsMid = await page.evaluate(() =>

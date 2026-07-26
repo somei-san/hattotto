@@ -360,18 +360,6 @@
     </div>
   </div>
 
-  <div class="section" role="group" aria-label="編集">
-    <div class="section-title">編集</div>
-    <div class="toggle-row">
-      <span class="toggle-label">Markdown付箋をシングルクリックで編集</span>
-      <label class="toggle">
-        <input type="checkbox" id="single-click-toggle" aria-label="Markdown付箋をシングルクリックで編集" />
-        <div class="toggle-track"></div>
-      </label>
-    </div>
-    <p class="hint">OFFの場合はダブルクリックで編集モード</p>
-  </div>
-
   <div class="section" role="group" aria-label="表示">
     <div class="section-title">表示</div>
     <div class="toggle-row">
@@ -502,7 +490,6 @@
 
   let currentColor   = 'yellow';
   let currentOpacity = 100;
-  let currentSingleClick = false;
   let currentBringAll = true;
   let currentShowPin = true;
   let currentShowNew = true;
@@ -513,7 +500,7 @@
   // ── Change Detection ──────────────────────────────
   let saved = {
     color: currentColor,
-    opacity: currentOpacity, singleClick: currentSingleClick,
+    opacity: currentOpacity,
     bringAll: currentBringAll, showPin: currentShowPin,
     showNew: currentShowNew, showColor: currentShowColor,
     confirmDelete: currentConfirmDelete,
@@ -525,7 +512,6 @@
   function checkDirty() {
     const dirty = currentColor !== saved.color
       || currentOpacity !== saved.opacity
-      || currentSingleClick !== saved.singleClick
       || currentBringAll !== saved.bringAll
       || currentShowPin !== saved.showPin
       || currentShowNew !== saved.showNew
@@ -538,7 +524,7 @@
   function snapshotSaved() {
     saved = {
       color: currentColor,
-      opacity: currentOpacity, singleClick: currentSingleClick,
+      opacity: currentOpacity,
       bringAll: currentBringAll, showPin: currentShowPin,
       showNew: currentShowNew, showColor: currentShowColor,
       confirmDelete: currentConfirmDelete,
@@ -605,7 +591,6 @@
       await invoke('update_settings', {
         defaultColor: currentColor,
         opacity: currentOpacity,
-        editOnSingleClick: currentSingleClick,
         bringAllToFront: currentBringAll,
         showPinButton: currentShowPin,
         showNewButton: currentShowNew,
@@ -630,7 +615,6 @@
       emit('settings-changed', {
         default_color: currentColor,
         opacity: currentOpacity,
-        edit_on_single_click: currentSingleClick,
         bring_all_to_front: currentBringAll,
         show_pin_button: currentShowPin,
         show_new_button: currentShowNew,
@@ -652,13 +636,6 @@
   opacitySlider.addEventListener('input', () => {
     currentOpacity = parseInt(opacitySlider.value, 10);
     opacityValue.textContent = `${currentOpacity}%`;
-    checkDirty();
-  });
-
-  // ── Single Click Toggle ─────────────────────────────
-  const singleClickToggle = document.getElementById('single-click-toggle');
-  singleClickToggle.addEventListener('change', () => {
-    currentSingleClick = singleClickToggle.checked;
     checkDirty();
   });
 
@@ -723,9 +700,6 @@
     currentOpacity = s.opacity ?? 100;
     opacitySlider.value = currentOpacity;
     opacityValue.textContent = `${currentOpacity}%`;
-
-    currentSingleClick = !!s.edit_on_single_click;
-    singleClickToggle.checked = currentSingleClick;
 
     currentBringAll = s.bring_all_to_front !== false;
     bringAllToggle.checked = currentBringAll;

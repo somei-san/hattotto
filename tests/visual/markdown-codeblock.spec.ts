@@ -7,17 +7,24 @@ async function render(page: any, text: string): Promise<string> {
 test.describe("renderMarkdown — fenced code block", () => {
   test("basic code block", async ({ notePage }) => {
     const html = await render(notePage, "```\nconst x = 1;\n```");
-    expect(html).toContain('<pre class="md-codeblock"><code>const x = 1;</code></pre>');
+    expect(html).toContain('<pre class="md-codeblock"');
+    expect(html).toContain("<code>const x = 1;</code></pre>");
   });
 
   test("code block with language specifier", async ({ notePage }) => {
     const html = await render(notePage, "```js\nlet y = 2;\n```");
-    expect(html).toContain('<pre class="md-codeblock"><code>let y = 2;</code></pre>');
+    expect(html).toContain('<pre class="md-codeblock"');
+    expect(html).toContain("<code>let y = 2;</code></pre>");
+  });
+
+  test("fence spans the source lines from opening to closing backticks", async ({ notePage }) => {
+    const html = await render(notePage, "text\n```\ncode\n```");
+    expect(html).toContain('<pre class="md-codeblock" data-line="1" data-line-end="3">');
   });
 
   test("markdown inside code block is not parsed", async ({ notePage }) => {
     const html = await render(notePage, "```\n# not a heading\n**not bold**\n- not a list\n```");
-    expect(html).toContain('<pre class="md-codeblock"><code>');
+    expect(html).toContain('<pre class="md-codeblock"');
     expect(html).not.toContain('md-h1');
     expect(html).not.toContain('<strong>');
     expect(html).not.toContain('md-bullet');
@@ -39,12 +46,14 @@ test.describe("renderMarkdown — fenced code block", () => {
 
   test("unclosed code block still renders", async ({ notePage }) => {
     const html = await render(notePage, "```\nunclosed code");
-    expect(html).toContain('<pre class="md-codeblock"><code>unclosed code</code></pre>');
+    expect(html).toContain('<pre class="md-codeblock"');
+    expect(html).toContain("<code>unclosed code</code></pre>");
   });
 
   test("empty code block", async ({ notePage }) => {
     const html = await render(notePage, "```\n```");
-    expect(html).toContain('<pre class="md-codeblock"><code></code></pre>');
+    expect(html).toContain('<pre class="md-codeblock"');
+    expect(html).toContain("<code></code></pre>");
   });
 
   test("code block preserves multiple lines", async ({ notePage }) => {

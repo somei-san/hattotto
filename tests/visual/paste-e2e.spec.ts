@@ -1,12 +1,10 @@
-import { test, expect, injectNoteMock } from "./fixtures";
+import { test, expect, enterEdit, getContent } from "./fixtures";
 
 test.describe("ペースト処理", () => {
   test("空の選択状態でURLペースト → リンク変換されずプレーンURL挿入", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    // 編集モードにする
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     // 選択なしでURLをペースト
     await page.evaluate(() => {
@@ -21,15 +19,14 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("https://example.com");
   });
 
   test("リッチテキスト（HTML含む）ペースト → Markdownに変換", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
@@ -44,15 +41,14 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("**bold text**");
   });
 
   test("プレーンテキストペースト → そのまま挿入", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
@@ -66,18 +62,17 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("plain text here");
   });
 
   test("複数行選択 + URLペースト → 選択範囲全体がMarkdownリンクになる", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     // テキストを入力して全選択
-    await page.locator(".editor").pressSequentially("multi line text");
+    await page.locator("#editor").pressSequentially("multi line text");
     const mod = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${mod}+a`);
 
@@ -93,15 +88,14 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("[multi line text](https://example.com/page)");
   });
 
   test("複数行の箇条書きペースト → 自動継続が発動せずそのまま挿入", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
@@ -115,15 +109,14 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("- A\n- B\n- C");
   });
 
   test("HTML由来の複数行箇条書きペースト → 自動継続が発動しない", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
@@ -138,15 +131,14 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content.replace(/\n+$/, "")).toBe("- A\n- B\n- C");
   });
 
   test("リッチテキスト（リンク付き）ペースト → Markdownリンクに変換", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
+    await enterEdit(page);
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;
@@ -161,7 +153,7 @@ test.describe("ペースト処理", () => {
       editor.dispatchEvent(pasteEvent);
     });
 
-    const content = await page.locator(".editor").innerText();
+    const content = await getContent(page);
     expect(content).toBe("[click here](https://example.com)");
   });
 });

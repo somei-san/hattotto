@@ -21,28 +21,6 @@ test.describe("設定反映: 初期ロード", () => {
     expect(opacity).toBe("1");
   });
 
-  test("edit_on_single_click: true → md記法付き付箋をシングルクリックで編集モードに入れる", async ({ openNote }) => {
-    const page = await openNote({ content: "# Title" }, { edit_on_single_click: true });
-    await expect(page.locator(".markdown-view")).toBeVisible();
-
-    // シングルクリックで編集モードになる
-    await page.click(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
-  });
-
-  test("edit_on_single_click: false → md記法付き付箋はダブルクリックが必要", async ({ openNote }) => {
-    const page = await openNote({ content: "# Title" }, { edit_on_single_click: false });
-    await expect(page.locator(".markdown-view")).toBeVisible();
-
-    // シングルクリックでは編集モードにならない
-    await page.click(".markdown-view");
-    await expect(page.locator(".markdown-view")).toBeVisible();
-
-    // ダブルクリックで編集モードに入れる
-    await page.dblclick(".markdown-view");
-    await expect(page.locator(".editor")).toBeVisible();
-  });
-
   test("show_pin_button: false → ピンボタン非表示", async ({ openNote }) => {
     const page = await openNote({}, { show_pin_button: false });
     await expect(page.locator("#btn-pin")).toBeHidden();
@@ -72,7 +50,6 @@ test.describe("設定反映: settings-changed イベント", () => {
           payload: {
             default_color: "yellow",
             opacity: 40,
-            edit_on_single_click: false,
             bring_all_to_front: true,
             show_pin_button: true,
             show_new_button: true,
@@ -101,7 +78,6 @@ test.describe("設定反映: settings-changed イベント", () => {
           payload: {
             default_color: "yellow",
             opacity: 100,
-            edit_on_single_click: false,
             bring_all_to_front: true,
             show_pin_button: false,
             show_new_button: true,

@@ -195,7 +195,6 @@ mod tests {
         let settings = Settings {
             default_color: "pink".into(),
             opacity: 80,
-            edit_on_single_click: true,
             bring_all_to_front: false,
             show_pin_button: true,
             show_new_button: true,
@@ -206,7 +205,7 @@ mod tests {
         let loaded = load_settings_from(&path);
         assert_eq!(loaded.default_color, "pink");
         assert_eq!(loaded.opacity, 80);
-        assert!(loaded.edit_on_single_click);
+        assert!(!loaded.bring_all_to_front);
         assert!(loaded.confirm_before_delete);
     }
 

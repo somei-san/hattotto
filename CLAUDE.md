@@ -60,7 +60,7 @@ npm run test:report
 
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/{darwin,linux}/`
 - UT — 上記以外の非 E2E spec。Markdown 変換・記法検出・レンダリング、アクセシビリティ、コンテキストメニュー等の単体テスト
-- E2E（`*-e2e.spec.ts`）— ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
+- E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
 
 ## アーキテクチャ
@@ -80,18 +80,18 @@ npm run test:report
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
 ### フロントエンド (`src/`)
-- `note.html` — 付箋ウィンドウ。Markdownプレビュー、リッチテキストペースト変換、カスタム右クリックメニュー、入力補助
-- `settings.html` — 設定画面。デフォルトカラー / 透過度 / 編集切替方式 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 自動起動
+- `note.html` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
+- `settings.html` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 自動起動
 - `trash.html` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
 - `index.html` — 空のデフォルトページ
-- `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。note.html のプレビューとテストで共有。`utils.js` の `escapeHtml()` に依存
+- `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。note.html の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
 - `colors.css` — 6色カラーテーマの共通パレット（CSS 変数）
 
 ### データモデル
 （正確なフィールドは `src-tauri/src/model.rs` を参照）
 - `Note`: id, content, color, x, y, width, height, zoom, pinned, deleted_at
-- `Settings`: default_color, opacity, edit_on_single_click, bring_all_to_front, show_pin_button, show_new_button, show_color_button, confirm_before_delete
+- `Settings`: default_color, opacity, bring_all_to_front, show_pin_button, show_new_button, show_color_button, confirm_before_delete
 
 ### データフロー
 - 各付箋は独立したウィンドウ（`note-{uuid}` ラベル）として開かれる
