@@ -232,12 +232,20 @@ mod tests {
     use super::*;
 
     fn single_monitor() -> Vec<MonitorRect> {
-        vec![MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 }]
+        vec![MonitorRect {
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+        }]
     }
 
     #[test]
     fn inside_single_monitor() {
-        assert_eq!(clamp_position(100.0, 200.0, &single_monitor(), (0.0, 0.0)), (100.0, 200.0));
+        assert_eq!(
+            clamp_position(100.0, 200.0, &single_monitor(), (0.0, 0.0)),
+            (100.0, 200.0)
+        );
     }
 
     #[test]
@@ -264,24 +272,43 @@ mod tests {
             (DEFAULT_POSITION.0, DEFAULT_POSITION.1)
         );
         // Just inside margin → should pass
-        assert_eq!(clamp_position(1869.0, 1029.0, &single_monitor(), (0.0, 0.0)), (1869.0, 1029.0));
+        assert_eq!(
+            clamp_position(1869.0, 1029.0, &single_monitor(), (0.0, 0.0)),
+            (1869.0, 1029.0)
+        );
     }
 
     #[test]
     fn dual_monitor_second_screen() {
         let monitors = vec![
-            MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 },
-            MonitorRect { x: 1920.0, y: 0.0, w: 2560.0, h: 1440.0 },
+            MonitorRect {
+                x: 0.0,
+                y: 0.0,
+                w: 1920.0,
+                h: 1080.0,
+            },
+            MonitorRect {
+                x: 1920.0,
+                y: 0.0,
+                w: 2560.0,
+                h: 1440.0,
+            },
         ];
         // On second monitor
-        assert_eq!(clamp_position(2000.0, 500.0, &monitors, (0.0, 0.0)), (2000.0, 500.0));
+        assert_eq!(
+            clamp_position(2000.0, 500.0, &monitors, (0.0, 0.0)),
+            (2000.0, 500.0)
+        );
     }
 
     #[test]
     fn outside_all_monitors_uses_primary_origin() {
-        let monitors = vec![
-            MonitorRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 },
-        ];
+        let monitors = vec![MonitorRect {
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+        }];
         assert_eq!(
             clamp_position(9999.0, 9999.0, &monitors, (100.0, 50.0)),
             (100.0 + DEFAULT_POSITION.0, 50.0 + DEFAULT_POSITION.1)

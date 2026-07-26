@@ -18,7 +18,9 @@ use crate::window::{
 fn update_note_field(state: &AppState, id: &str, f: impl FnOnce(&mut Note)) -> Result<(), String> {
     let snapshot = {
         let mut notes = state.notes.recover();
-        let note = notes.iter_mut().find(|n| n.id == id)
+        let note = notes
+            .iter_mut()
+            .find(|n| n.id == id)
             .ok_or_else(|| format!("note not found: {}", id))?;
         f(note);
         notes.clone()
