@@ -569,6 +569,9 @@
   /** 行 lineIdx を生 Markdown に差し替え、col 列にキャレットを置く（col が null なら行末）。 */
   function enterLine(lineIdx, col) {
     commitActive();
+    // 変換中の行から離れると compositionend が来ないまま要素が消えるので、
+    // フラグを持ち越さない（残ると次の行でキー操作が全て無視される）
+    composing = false;
     const lines = getLines();
     const i = Math.max(0, Math.min(lineIdx, lines.length - 1));
     const block = findBlock(i);
@@ -626,7 +629,11 @@
   /** 行頭マーカー（インデント・見出し・リスト・引用）の文字数。 */
   function markerLength(line) {
     const indent = line.match(/^ */)[0].length;
-    const m = line.slice(indent).match(/^(#{1,3} |[-*] \[[ xX]\] |[-*] |> |\d+\. )/);
+    // 見出しはインデントが無いときだけ markdown.js が記号を剥がす
+    const marker = indent === 0
+      ? /^(#{1,3} |[-*] \[[ xX]\] |[-*] |> |\d+\. )/
+      : /^([-*] \[[ xX]\] |[-*] |> |\d+\. )/;
+    const m = line.slice(indent).match(marker);
     return indent + (m ? m[1].length : 0);
   }
 
@@ -885,35 +892,26 @@
     }
   }
 
-  function onEditorPaste(e) {
-    e.preventDefault();
-    const ed = e.currentTarget;
-    const text = e.clipboardData.getData('text/plain');
-    const html = e.clipboardData.getData('text/html');
-    const sel = window.getSelection();
-    const selected = sel.toString();
-
-    // 選択テキスト + URL → markdown link
-    if (selected && /^https?:\/\/\S+$/.test(text.trim())) {
-      document.execCommand('insertText', false, `[${selected}](${text.trim()})`);
-      snapshotContent();
-      scheduleSave();
-      return;
-    }
-
-    // リッチテキストが含まれていれば markdown 変換
-    const inserted = html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)
+  /** リッチテキストなら markdown に変換し、そうでなければプレーンテキストを返す。 */
+  function toMarkdown(text, html) {
+    return html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)
       ? htmlToMarkdown(html)
       : text;
+  }
 
+  /**
+   * 生エディタへのテキスト挿入。改行を含む場合は contenteditable に任せず
+   * 行配列へ splice する。ブラウザが入れる div/br は textContent から消えるため、
+   * 任せると rawContent と表示が食い違う。
+   */
+  function insertIntoEditor(ed, inserted) {
     if (!inserted.includes('\n')) {
       document.execCommand('insertText', false, inserted);
       snapshotContent();
       scheduleSave();
       return;
     }
-
-    // 複数行は行配列へ splice する（自動継続は通さない）
+    const sel = window.getSelection();
     if (!sel.isCollapsed) document.execCommand('delete');
     snapshotContent();
     const { line, col } = caretLineCol(ed);
@@ -925,6 +923,33 @@
     parts[parts.length - 1] += cur.slice(col);
     lines.splice(line, 1, ...parts);
     applyLines(lines, line + parts.length - 1, tailCol);
+  }
+
+  function onEditorPaste(e) {
+    e.preventDefault();
+    const ed = e.currentTarget;
+    const text = e.clipboardData.getData('text/plain');
+    const sel = window.getSelection();
+    const selected = sel.toString();
+
+    // 選択テキスト + URL → markdown link
+    if (selected && /^https?:\/\/\S+$/.test(text.trim())) {
+      document.execCommand('insertText', false, `[${selected}](${text.trim()})`);
+      snapshotContent();
+      scheduleSave();
+      return;
+    }
+
+    insertIntoEditor(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
+  }
+
+  function onEditorDrop(e) {
+    e.preventDefault();
+    const ed = e.currentTarget;
+    const text = e.dataTransfer.getData('text/plain');
+    if (!text) return;
+    // drop 位置ではなく現在のキャレット位置へ入れる
+    insertIntoEditor(ed, toMarkdown(text, e.dataTransfer.getData('text/html')));
   }
 
   // ── Checkbox autocomplete ────────────────────────
@@ -1022,6 +1047,7 @@
     });
 
     ed.addEventListener('paste', onEditorPaste);
+    ed.addEventListener('drop', onEditorDrop);
 
     ed.addEventListener('blur', (e) => {
       // 色ピッカー等のボタンへフォーカスが移っただけなら生表示を保つ
@@ -1062,7 +1088,11 @@
       return;
     }
     if (NAV_KEYS.has(e.key)) return;
+    // preventDefault はブラウザ既定の編集を止めるだけで伝播は止まらない。
+    // 生エディタ側の keydown（Enter の行分割・Tab のインデント）にも
+    // 届かせないよう、ここで伝播ごと打ち切る。
     e.preventDefault();
+    e.stopPropagation();
   }, true);
 
   for (const type of ['cut', 'paste', 'drop']) {
