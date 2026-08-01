@@ -7,15 +7,15 @@
 - Xcode Command Line Tools (`xcode-select --install`)
 
 ```bash
-# Tauri CLI をインストール（初回のみ）
-cargo install tauri-cli --version "^2"
-
 # 開発モードで起動
-cargo tauri dev
+cargo run --manifest-path src-tauri/Cargo.toml
 
 # プロダクションビルド（DMG 生成、リリースは別手順あるので普通は使わない）
+cargo install tauri-cli --version "^2"   # 初回のみ
 cargo tauri build
 ```
+
+フロントエンドは静的ファイルをそのまま読むため、開発起動に Tauri CLI は不要です（DMG ビルド時のみ必要）。
 
 ## テスト
 

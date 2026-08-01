@@ -9,27 +9,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ビルド・開発コマンド
 
 ```bash
-# Tauri CLI インストール（初回のみ）
+# 開発起動。frontendDist が ../src の静的ファイルを指しており
+# devUrl も beforeDevCommand も無いため、tauri-cli を介さず直接起動できる
+cargo run --manifest-path src-tauri/Cargo.toml
+
+# プロダクションビルド（DMG生成）。こちらは tauri-cli が要る
 cargo install tauri-cli --version "^2"
-
-# 開発モード起動
-cargo tauri dev
-
-# プロダクションビルド（DMG生成）
 cargo tauri build
 
 # Rust 側のチェック・テスト
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
 前提条件: Rust 1.77+、Xcode Command Line Tools、Node.js（テスト用）
 
 ## コミット前の検証
 
-- Rust を変更したら `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` と `cargo test ...` を通す（CI の `build.yml` が `-D warnings` で落とすため、警告も修正する）。整形は `cargo fmt --manifest-path src-tauri/Cargo.toml`
-- フロントエンド（`src/*`）を変更したら `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` の差分もコミットに含める
+- Rust を変更したら上記の clippy / test / fmt --check を通す。警告も整形の崩れも CI で落ちる
+- フロントエンド（`src/*`）を変更したら `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` で更新し、差分画像を見て意図どおりか確かめてからコミットに含める
 - JS/CSS 専用のリンター・フォーマッターは未導入（`npm` スクリプトは Playwright のみ）
 
 ## リリース
@@ -58,7 +58,7 @@ npm run test:report
 ### テストファイル構成
 すべて `tests/visual/` 配下（全一覧は `ls tests/visual/*.spec.ts` を参照）。ファイル名で区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
 
-- VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/{darwin,linux}/`
+- VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/{darwin,linux}/`。darwin は `npm run test:update`、linux は `visual-test.yml` の `workflow_dispatch` から更新する
 - UT — 上記以外の非 E2E spec。Markdown 変換・記法検出・レンダリング、アクセシビリティ、コンテキストメニュー等の単体テスト
 - E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
@@ -83,7 +83,6 @@ npm run test:report
 - `note.html` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
 - `settings.html` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 自動起動
 - `trash.html` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
-- `index.html` — 空のデフォルトページ
 - `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。note.html の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
 - `colors.css` — 6色カラーテーマの共通パレット（CSS 変数）
