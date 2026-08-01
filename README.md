@@ -41,8 +41,11 @@ macOS Stickiesとの重要な違い
 ### Homebrew (推奨)
 
 ```bash
+brew trust somei-san/tap
 brew install --cask somei-san/tap/hattotto
 ```
+
+`brew trust` は初回のみ必要です。Homebrew 6 以降、信頼していない tap の cask は読み込まれません。これを省くと `brew upgrade` が hattotto をエラーも出さず飛ばすため、更新されないことに気づきにくくなります。
 
 > **Note:** 現在コード署名がないため、インストール時に quarantine 属性を自動解除します。
 
