@@ -336,8 +336,6 @@
     bottom: 3px; right: 1px;
     transform: rotate(-45deg);
   }
-
-  /* ── Toast Notification ──────────────────────────── */
 </style>
 </head>
 <body>
@@ -400,7 +398,6 @@
   const colorBtn  = document.getElementById('btn-color');
 
   let saveTimer = null;
-  let currentSettings = null;
 
   // ── Editor State ──────────────────────────────────
   // rawContent が唯一の真実。activeStart/activeEnd は今だけ生 Markdown で
@@ -412,7 +409,6 @@
 
   // ── Apply Settings to UI ─────────────────────────
   function applySettings(s) {
-    currentSettings = s;
     noteEl.style.opacity = (s.opacity ?? 100) / 100;
     pinBtn.style.display = s.show_pin_button === false ? 'none' : '';
     newBtn.style.display = s.show_new_button === false ? 'none' : '';
