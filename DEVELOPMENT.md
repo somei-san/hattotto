@@ -44,9 +44,9 @@ npm run test:update
 タグ push をトリガーに GitHub Actions が自動で universal DMG ビルド → GitHub Release 作成 → Homebrew tap 更新を行います。
 
 ```bash
-# 1. tauri.conf.json と Cargo.toml のバージョンを更新してコミット
-# 2. リリーススクリプトでタグを push（CI が自動実行）
-./scripts/release.sh 0.1.2
+# tauri.conf.json / Cargo.toml / Cargo.lock の更新からコミット・タグ・push まで
+# スクリプトが行います
+./scripts/release.sh 0.2.0
 
 # バージョン省略時は tauri.conf.json の現在のバージョンを使用
 ./scripts/release.sh

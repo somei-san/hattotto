@@ -44,7 +44,7 @@ if [[ "$CURRENT" != "$VERSION" ]]; then
 
   # バージョン更新をコミット
   git -C "$PROJECT_ROOT" add "$TAURI_CONF" "$CARGO_TOML" "$PROJECT_ROOT/src-tauri/Cargo.lock"
-  git -C "$PROJECT_ROOT" commit -m "chore: bump version to $VERSION"
+  git -C "$PROJECT_ROOT" commit -m "📦️ バージョンを $VERSION に上げる"
   echo "==> バージョン更新をコミットしました"
 fi
 
