@@ -407,6 +407,14 @@
   let activeEnd = null;
   let composing = false;
 
+  /** 失敗を握り潰してよい操作向けの invoke。エラーはログとトーストに出す。 */
+  function fireInvoke(cmd, args, failMessage) {
+    return invoke(cmd, args).catch(e => {
+      console.error(`${cmd} failed:`, e);
+      showToast(failMessage);
+    });
+  }
+
   // ── Apply Settings to UI ─────────────────────────
   function applySettings(s) {
     noteEl.style.opacity = (s.opacity ?? 100) / 100;
@@ -699,7 +707,7 @@
     if (next === currentZoom) return;
     currentZoom = next;
     applyZoom(next);
-    invoke('update_note_zoom', { id: noteId, zoom: next }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+    fireInvoke('update_note_zoom', { id: noteId, zoom: next }, '保存に失敗しました');
   }
 
   // ── Markdown auto-continue on Enter ─────────────
@@ -951,8 +959,7 @@
   function saveNow() {
     clearTimeout(saveTimer);
     saveTimer = null;
-    invoke('update_note_content', { id: noteId, content: rawContent })
-      .catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+    fireInvoke('update_note_content', { id: noteId, content: rawContent }, '保存に失敗しました');
   }
 
   // ── Raw Editor Bindings ───────────────────────────
@@ -1090,13 +1097,13 @@
         const size = await appWindow.outerSize();
         const lpos  = pos.toLogical(sf);
         const lsize = size.toLogical(sf);
-        invoke('update_note_geometry', {
+        fireInvoke('update_note_geometry', {
           id: noteId,
           x: lpos.x,
           y: lpos.y,
           width: lsize.width,
           height: lsize.height,
-        }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+        }, '保存に失敗しました');
       } catch (e) {
         // Window might be closing
       }
@@ -1105,11 +1112,11 @@
 
   // ── Buttons ───────────────────────────────────────
   newBtn.addEventListener('click', () => {
-    invoke('create_note').catch(e => { console.error('create note failed:', e); showToast('付箋の作成に失敗しました'); });
+    fireInvoke('create_note', undefined, '付箋の作成に失敗しました');
   });
 
   document.getElementById('btn-delete').addEventListener('click', () => {
-    invoke('delete_note', { id: noteId }).catch(e => { console.error('delete failed:', e); showToast('付箋の削除に失敗しました'); });
+    fireInvoke('delete_note', { id: noteId }, '付箋の削除に失敗しました');
   });
 
   colorBtn.addEventListener('click', (e) => {
@@ -1122,7 +1129,7 @@
     dot.addEventListener('click', () => {
       const color = dot.dataset.color;
       applyColor(color);
-      invoke('update_note_color', { id: noteId, color }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+      fireInvoke('update_note_color', { id: noteId, color }, '保存に失敗しました');
       picker.classList.remove('open');
     });
   });
@@ -1141,7 +1148,7 @@
   function resetZoom() {
     currentZoom = 100;
     applyZoom(100);
-    invoke('update_note_zoom', { id: noteId, zoom: 100 }).catch(e => { console.error('save failed:', e); showToast('保存に失敗しました'); });
+    fireInvoke('update_note_zoom', { id: noteId, zoom: 100 }, '保存に失敗しました');
   }
 
   // Listen for zoom events from app menu (only apply to focused window)
