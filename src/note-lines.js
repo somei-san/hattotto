@@ -21,10 +21,10 @@ function markerLength(line) {
 }
 
 const LIST_PATTERNS = [
-  { re: /^(- \[[ xX]\] )(.*)$/, prefix: (m) => '- [ ] ' },     // checkbox
+  { re: /^(- \[[ xX]\] )(.*)$/, prefix: () => '- [ ] ' },      // checkbox
   { re: /^([-*] )(?!\[[ xX]\] )(.*)$/, prefix: (m) => m[1] },   // bullet
   { re: /^(\d+)\. (.*)$/,      prefix: (m) => `${+m[1] + 1}. ` }, // ordered
-  { re: /^(> )(.*)$/,          prefix: (m) => '> ' },          // blockquote
+  { re: /^(> )(.*)$/,          prefix: () => '> ' },           // blockquote
 ];
 
 function stripIndent(line) {
