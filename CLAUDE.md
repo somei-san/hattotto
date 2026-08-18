@@ -55,7 +55,7 @@ npm run test:update
 npm run test:report
 ```
 
-**重要**: フロントエンド（`src/note.html`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
+**重要**: フロントエンド（`src/note.js`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
 
 ### テストファイル構成
 すべて `tests/visual/` 配下（全一覧は `ls tests/visual/*.spec.ts` を参照）。ファイル名で区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
@@ -83,10 +83,12 @@ npm run test:report
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
 ### フロントエンド (`src/`)
-- `note.html` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
-- `settings.html` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
-- `trash.html` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
-- `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。note.html の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
+HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js`〕→ ページ固有の `.js` の順に読み込み、グローバルスコープを共有する。
+
+- `note.html` / `note.js` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
+- `settings.html` / `settings.js` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
+- `trash.html` / `trash.js` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
+- `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。`note.js` の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
 - `i18n.js` — フロントエンド側 UI 文言（`window.I18N`）。`data-i18n` / `data-i18n-html` / `data-i18n-title` / `data-i18n-aria-label` / `data-i18n-doc-title` 属性を `applyDom()` が差し替える
 - `colors.css` — 6色カラーテーマの共通パレット（CSS 変数）
