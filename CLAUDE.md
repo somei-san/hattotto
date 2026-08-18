@@ -32,6 +32,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 - フロントエンド（`src/*`）を変更したら `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` で更新し、差分画像を見て意図どおりか確かめてからコミットに含める
 - JS/CSS 専用のリンター・フォーマッターは未導入（`npm` スクリプトは Playwright のみ）
 
+`.claude/settings.json` に登録したフックが一部を自動で回す。`.rs` を編集すると `rust-check.sh` が fmt / clippy を実行し、失敗すれば内容を返す。`tests/visual/__screenshots__/` への書き込みは `guard-vrt-baseline.sh` が止める（ベースラインは再生成でしか正しく作れない）。`cargo test` と `npm test` は自分で流す。
+
 ## リリース
 
 タグ push をトリガーに GitHub Actions が universal DMG ビルド → Release 作成 → Homebrew tap 更新まで自動実行する。手順は [DEVELOPMENT.md](DEVELOPMENT.md) を参照。
