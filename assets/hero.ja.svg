@@ -25,20 +25,20 @@
     <circle cx="318" cy="56" r="8" fill="rgba(0,0,0,0.08)"/>
     <circle cx="318" cy="56" r="4" fill="#3E3A2E" opacity="0.6"/>
     <!-- content - markdown rendered -->
-    <text x="80" y="100" font-size="16" font-weight="bold" font-family="-apple-system,sans-serif" fill="#3E3A2E">Welcome!</text>
-    <text x="80" y="128" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- Click a line to edit</text>
-    <text x="80" y="150" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- <tspan font-weight="bold">Bold</tspan> and <tspan font-style="italic">italic</tspan> supported</text>
-    <text x="80" y="172" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- Markdown preview</text>
+    <text x="80" y="100" font-size="16" font-weight="bold" font-family="-apple-system,sans-serif" fill="#3E3A2E">ようこそ！</text>
+    <text x="80" y="128" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- クリックした行を編集</text>
+    <text x="80" y="150" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- <tspan font-weight="bold">太字</tspan> と <tspan font-style="italic">斜体</tspan> が使えます</text>
+    <text x="80" y="172" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- Markdown を常に表示</text>
     <!-- checkbox -->
     <rect x="80" y="187" width="14" height="14" rx="3" fill="none" stroke="#3E3A2E" stroke-width="1.5"/>
     <polyline points="83,194 87,198 93,190" stroke="#3E3A2E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <text x="100" y="199" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Checklist support</text>
+    <text x="100" y="199" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">チェックリスト対応</text>
     <rect x="80" y="210" width="14" height="14" rx="3" fill="none" stroke="rgba(62,58,46,0.4)" stroke-width="1.5"/>
-    <text x="100" y="222" font-size="13" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.5)">Click to toggle</text>
+    <text x="100" y="222" font-size="13" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.5)">クリックで切替</text>
     <!-- blockquote -->
     <rect x="80" y="240" width="3" height="36" rx="1.5" fill="rgba(62,58,46,0.2)"/>
-    <text x="92" y="254" font-size="12" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.6)">Right-click for menu</text>
-    <text x="92" y="270" font-size="12" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.6)">New note</text>
+    <text x="92" y="254" font-size="12" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.6)">右クリックでメニュー</text>
+    <text x="92" y="270" font-size="12" font-family="-apple-system,sans-serif" fill="rgba(62,58,46,0.6)">新しい付箋</text>
   </g>
 
   <!-- ── Blue Note (behind, right) ───────────── -->
@@ -57,14 +57,14 @@
     <circle cx="618" cy="96" r="8" fill="rgba(0,0,0,0.08)"/>
     <circle cx="618" cy="96" r="4" fill="#3E3A2E" opacity="0.6"/>
     <!-- content -->
-    <text x="400" y="140" font-size="15" font-weight="bold" font-family="-apple-system,sans-serif" fill="#3E3A2E">TODO</text>
+    <text x="400" y="140" font-size="15" font-weight="bold" font-family="-apple-system,sans-serif" fill="#3E3A2E">やること</text>
     <rect x="400" y="153" width="14" height="14" rx="3" fill="none" stroke="#3E3A2E" stroke-width="1.5"/>
     <polyline points="403,160 407,164 413,156" stroke="#3E3A2E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <text x="420" y="165" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E" text-decoration="line-through">Design review</text>
+    <text x="420" y="165" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E" text-decoration="line-through">デザインレビュー</text>
     <rect x="400" y="176" width="14" height="14" rx="3" fill="none" stroke="rgba(62,58,46,0.4)" stroke-width="1.5"/>
-    <text x="420" y="188" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Ship v1.0</text>
+    <text x="420" y="188" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">v1.0 リリース</text>
     <rect x="400" y="199" width="14" height="14" rx="3" fill="none" stroke="rgba(62,58,46,0.4)" stroke-width="1.5"/>
-    <text x="420" y="211" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Write docs</text>
+    <text x="420" y="211" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">ドキュメント作成</text>
   </g>
 
   <!-- ── Pink Note (behind, bottom) ──────────── -->
@@ -83,11 +83,11 @@
     <circle cx="418" cy="276" r="8" fill="rgba(0,0,0,0.08)"/>
     <circle cx="418" cy="276" r="4" fill="#3E3A2E" opacity="0.6"/>
     <!-- content - editing mode feel -->
-    <text x="220" y="318" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Meeting notes 3/20</text>
-    <text x="220" y="340" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- API design finalized</text>
-    <text x="220" y="362" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- Launch date: April 1st</text>
+    <text x="220" y="318" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">打ち合わせメモ 3/20</text>
+    <text x="220" y="340" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- API 設計が確定</text>
+    <text x="220" y="362" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">- リリースは 4/1</text>
     <!-- cursor blink -->
-    <rect x="379" y="351" width="1.5" height="15" rx="0.75" fill="#3E3A2E" opacity="0.7"/>
+    <rect x="325" y="351" width="1.5" height="15" rx="0.75" fill="#3E3A2E" opacity="0.7"/>
   </g>
 
   <!-- ── Green Note (small, top right) ───────── -->
@@ -106,8 +106,8 @@
     <circle cx="678" cy="36" r="8" fill="rgba(0,0,0,0.08)"/>
     <circle cx="678" cy="36" r="4" fill="#3E3A2E" opacity="0.6"/>
     <!-- content -->
-    <text x="560" y="78" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Buy milk</text>
-    <text x="560" y="98" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">Call dentist</text>
+    <text x="560" y="78" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">牛乳を買う</text>
+    <text x="560" y="98" font-size="13" font-family="-apple-system,sans-serif" fill="#3E3A2E">歯医者に電話</text>
   </g>
 
 </svg>
