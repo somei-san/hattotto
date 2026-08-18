@@ -1,6 +1,7 @@
 // ── Markdown rendering utilities ─────────────────────────────
 // Shared by note.html (preview) and tests (via window.renderMarkdown).
 // Depends on escapeHtml() from utils.js (loaded before this script).
+/* exported renderMarkdown */
 
 // Note: inlineMarkdown receives escapeHtml-processed strings.
 // This is intentional — HTML entities (e.g. &amp;) are treated as plain text
@@ -30,6 +31,7 @@ function inlineMarkdown(escaped) {
     (_, pre, url) => `${pre}<a href="${url}" data-url="${url}">${url}</a>`
   );
   // Restore code blocks
+  // eslint-disable-next-line no-control-regex -- \x00 is the placeholder marker
   escaped = escaped.replace(/\x00CODE(\d+)\x00/g, (_, i) => '<code>' + codeBlocks[i] + '</code>');
   return escaped;
 }

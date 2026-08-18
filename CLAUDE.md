@@ -29,10 +29,10 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ## コミット前の検証
 
 - Rust を変更したら上記の clippy / test / fmt --check を通す。警告も整形の崩れも CI で落ちる
-- フロントエンド（`src/*`）を変更したら `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` で更新し、差分画像を見て意図どおりか確かめてからコミットに含める
-- JS/CSS 専用のリンター・フォーマッターは未導入（`npm` スクリプトは Playwright のみ）
+- フロントエンド（`src/*`）を変更したら `npm run lint` と `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` で更新し、差分画像を見て意図どおりか確かめてからコミットに含める
+- フォーマッターは未導入。CSS と `tests/visual/*.ts` も lint 対象外
 
-`.claude/settings.json` に登録したフックが一部を自動で回す。`.rs` を編集すると `rust-check.sh` が fmt / clippy を実行し、失敗すれば内容を返す。`tests/visual/__screenshots__/` への書き込みは `guard-vrt-baseline.sh` が止める（ベースラインは再生成でしか正しく作れない）。`cargo test` と `npm test` は自分で流す。
+`.claude/settings.json` に登録したフックが一部を自動で回す。`.rs` を編集すると `rust-check.sh` が fmt / clippy を実行し、失敗すれば内容を返す。`tests/visual/__screenshots__/` への書き込みは `guard-vrt-baseline.sh` が止める（ベースラインは再生成でしか正しく作れない）。`cargo test` と `npm test` と `npm run lint` は自分で流す。
 
 ## リリース
 
@@ -89,6 +89,8 @@ npm run test:report
 
 ### フロントエンド (`src/`)
 HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js` → `note-lines.js`〕→ ページ固有の `.js` の順に読む（〔〕内は `note.html` だけ）。同一ページ内でグローバルスコープを共有する。
+
+この読み込み順は `eslint.config.mjs` にも書いてある。各 `.js` の `globals` が「そのファイルより先に読まれるファイルの識別子」だけを持つので、`settings.js` から `renderMarkdown` を呼ぶような誤りは `no-undef` で落ちる。`<script>` の並びを変えたら設定側も直すこと。
 
 - `note.html` / `note.js` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
 - `settings.html` / `settings.js` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
