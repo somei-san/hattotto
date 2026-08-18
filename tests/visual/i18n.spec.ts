@@ -1,9 +1,7 @@
 import { test, expect, injectNoteMock } from "./fixtures";
 
 // 設定の language（"auto" | "ja" | "en"）による表示切り替えを検証する。
-// VRT（toHaveScreenshot）は使わない: ベースラインは darwin / linux 両方に要り、
-// linux 側は workflow_dispatch からしか作れないため、増やすと手作業が増える。
-// ここではテキストアサーションのみで表示言語を確認する。
+// 文言そのものが主題なので、スクリーンショットではなくテキストで見る。
 
 test.describe("設定画面の英語化", () => {
   test("language: en で開くと、タブ・セクション見出し・保存ボタンが英語表記になる", async ({ openSettings }) => {
@@ -21,6 +19,10 @@ test.describe("設定画面の英語化", () => {
   test("language: ja を明示すると、ブラウザロケール(en-US)に関わらず日本語のまま", async ({ openSettings }) => {
     const page = await openSettings({ language: "ja" });
     await expect(page.locator("#tab-settings")).toHaveText("設定");
+    await expect(page.locator("#tab-help")).toHaveText("ヘルプ");
+
+    await page.click('[data-tab="help"]');
+    await expect(page.locator("#panel-help .section-title").first()).toHaveText("基本操作");
   });
 
   test("言語セレクタを英語に変更すると、保存を待たず即座に表示が切り替わる", async ({ settingsPage }) => {
