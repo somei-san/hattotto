@@ -34,7 +34,6 @@ pub(crate) fn resolve_color(color: &str) -> String {
 
 pub(crate) struct ColorDef {
     pub key: &'static str,
-    pub label: &'static str,
     pub r: u8,
     pub g: u8,
     pub b: u8,
@@ -43,42 +42,36 @@ pub(crate) struct ColorDef {
 pub(crate) const COLOR_DEFS: &[ColorDef] = &[
     ColorDef {
         key: "yellow",
-        label: "イエロー",
         r: 0xF9,
         g: 0xE9,
         b: 0x7A,
     },
     ColorDef {
         key: "blue",
-        label: "ブルー",
         r: 0x7F,
         g: 0xB3,
         b: 0xE0,
     },
     ColorDef {
         key: "green",
-        label: "グリーン",
         r: 0x8C,
         g: 0xC9,
         b: 0x8F,
     },
     ColorDef {
         key: "pink",
-        label: "ピンク",
         r: 0xE8,
         g: 0x8F,
         b: 0xAB,
     },
     ColorDef {
         key: "purple",
-        label: "パープル",
         r: 0xC4,
         g: 0x8D,
         b: 0xD0,
     },
     ColorDef {
         key: "gray",
-        label: "グレー",
         r: 0xB8,
         g: 0xB8,
         b: 0xB8,
@@ -128,6 +121,16 @@ impl Note {
     }
 }
 
+/// 表示言語の設定値。`Auto` は OS のロケールに従う（`i18n::resolve` で解決する）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LanguageSetting {
+    #[default]
+    Auto,
+    Ja,
+    En,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub default_color: String,
@@ -142,6 +145,8 @@ pub struct Settings {
     pub show_color_button: bool,
     #[serde(default = "default_true")]
     pub confirm_before_delete: bool,
+    #[serde(default)]
+    pub language: LanguageSetting,
 }
 
 fn default_true() -> bool {
@@ -158,6 +163,7 @@ impl Default for Settings {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            language: LanguageSetting::Auto,
         }
     }
 }
@@ -331,6 +337,48 @@ mod tests {
         let json = r#"{"default_color":"yellow","opacity":100}"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(s.confirm_before_delete);
+    }
+
+    // ── language ──
+
+    #[test]
+    fn settings_deserialize_without_language_defaults_to_auto() {
+        let json = r#"{"default_color":"yellow","opacity":100}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.language, LanguageSetting::Auto);
+    }
+
+    #[test]
+    fn settings_json_roundtrip_with_language() {
+        for language in [
+            LanguageSetting::Auto,
+            LanguageSetting::Ja,
+            LanguageSetting::En,
+        ] {
+            let s = Settings {
+                language,
+                ..Default::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            let loaded: Settings = serde_json::from_str(&json).unwrap();
+            assert_eq!(loaded.language, language);
+        }
+    }
+
+    #[test]
+    fn language_setting_serializes_as_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&LanguageSetting::Auto).unwrap(),
+            "\"auto\""
+        );
+        assert_eq!(
+            serde_json::to_string(&LanguageSetting::Ja).unwrap(),
+            "\"ja\""
+        );
+        assert_eq!(
+            serde_json::to_string(&LanguageSetting::En).unwrap(),
+            "\"en\""
+        );
     }
 
     // ── resolve_color ──

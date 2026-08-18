@@ -1,4 +1,5 @@
 mod commands;
+mod i18n;
 mod menu;
 pub mod model;
 mod persistence;
@@ -11,6 +12,7 @@ use std::time::Instant;
 use tauri::{Manager, State};
 use tauri_plugin_autostart::MacosLauncher;
 
+use i18n::Lang;
 use model::{resolve_color, AppState, Note};
 use persistence::{load_notes, load_settings, load_trash, save_notes};
 use window::{bring_all_to_front, open_note_window};
@@ -67,17 +69,36 @@ pub fn run() {
 
             // Restore saved notes
             let state: State<AppState> = app.state();
-            let notes = state.notes.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let notes = state
+                .notes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
 
             if notes.is_empty() {
-                // Create a default note on first launch
+                // Create default notes on first launch — one in Japanese, one in
+                // English, so a first-time user sees both regardless of OS locale.
                 drop(notes);
-                let default_color = state.settings.lock().unwrap_or_else(|e| e.into_inner()).default_color.clone();
-                let mut note = Note::new(&resolve_color(&default_color));
-                note.content = String::from("# 貼っとっとへようこそ！\n\n- ダブルクリックで編集、外クリックでプレビュー\n- **太字** や *斜体* が使えます\n- [x] チェックボックスも\n- [ ] クリックで切替\n\n> 右クリックでメニュー、⌘N で新しい付箋");
-                open_note_window(app.handle(), &note);
+                let default_color = state
+                    .settings
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .default_color
+                    .clone();
+                let color = resolve_color(&default_color);
+
+                let mut note_ja = Note::new(&color);
+                note_ja.content = String::from(i18n::welcome_note(Lang::Ja));
+
+                let mut note_en = Note::new(&color);
+                note_en.content = String::from(i18n::welcome_note(Lang::En));
+                note_en.x += note_en.width + 20.0;
+
+                open_note_window(app.handle(), &note_ja);
+                open_note_window(app.handle(), &note_en);
                 let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
-                notes.push(note);
+                notes.push(note_ja);
+                notes.push(note_en);
                 if let Err(e) = save_notes(&notes) {
                     eprintln!("save notes error: {}", e);
                 }

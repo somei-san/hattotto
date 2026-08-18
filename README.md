@@ -1,68 +1,73 @@
 <div align="center">
-  <img src="assets/app-icon.png" alt="貼っとっと" width="128" />
-  <h1>🐻 貼っとっと (Hattotto)</h1>
-  <p>デスクトップにぺたぺた貼れる、熊の手つき付箋アプリ<br>軽量・ネイティブ・macOS Stickies ライクな操作感</p>
+  <img src="assets/app-icon.png" alt="Hattotto" width="128" />
+  <h1>🐻 Hattotto (貼っとっと)</h1>
+  <p>Sticky notes you slap onto the desktop, with a bear paw on top<br>Lightweight, native, and it feels like macOS Stickies</p>
 </div>
 
 <p align="center">
-  <img src="assets/hero.svg" alt="貼っとっと スクリーンショット" width="600" />
+  <a href="README.ja.md">日本語</a>
 </p>
 
-## こだわりポイント
-macOS Stickiesとの重要な違い
+<p align="center">
+  <img src="assets/hero.svg" alt="Hattotto screenshot" width="600" />
+</p>
 
-- markdown対応
-- 一つの付箋をクリックしたら全付箋が前面に出てくる
-  - ランチャー（Alfredなど）で開く、Mission Controlで開くなどした際に便利
-- ゴミ箱からの復元ができる
-- シュッと使いたい機能へのアクセスが良い
-  - 新しい付箋
-  - ピン留め
-  - カラーピック
-- 多少はマシな見た目
+## Highlights
+Where it differs from macOS Stickies
 
-## 機能
+- Markdown support
+- Clicking one note brings every note to the front
+  - Handy when you open it from a launcher (Alfred and friends) or Mission Control
+- Deleted notes can be restored from the trash
+- The things you reach for are one click away
+  - New note
+  - Pin
+  - Color picker
+- It looks a bit nicer
 
-- 📝 付箋ごとに独立ウィンドウ（フレームレス）
-- 🎨 6色カラーテーマ（黄・青・緑・ピンク・紫・グレー）
-- 💾 自動保存（テキスト・位置・サイズ・ズーム）
-- 🔄 起動時に前回の付箋を復元
-- ➕ 新規付箋の追加（ボタン / トレイメニュー / ⌘N）
-- 🗑️ ゴミ箱機能（削除した付箋を復元可能・最大200件保持）
-- 🔍 付箋ごとのズーム設定（⌘+ / ⌘- / ⌘0）
-- 📋 Markdown常時表示（見出し・箇条書き・チェックボックス・太字・斜体・取消線・コード・引用・番号リスト・区切り線・リンク）。編集中もキャレットのある行だけが生Markdownになり、他の行は表示のまま
-- ✏️ Markdown入力補助（箇条書き・番号リスト等のEnter自動継続）
-- 🔗 リッチテキストペースト → Markdown自動変換
-- 🖱️ カスタム右クリックメニュー
-- ⚙️ 設定画面（デフォルトカラー / 透過度 / 表示ボタン制御 / 削除確認 / 自動起動）
+## Features
 
-## インストール
+- 📝 Each note is its own frameless window
+- 🎨 Six color themes (yellow, blue, green, pink, purple, gray)
+- 💾 Autosave for text, position, size and zoom
+- 🔄 Notes come back where you left them on the next launch
+- ➕ New notes from the button, the tray menu, or ⌘N
+- 🗑️ Trash that keeps up to 200 deleted notes for restoring
+- 🔍 Per-note zoom (⌘+ / ⌘- / ⌘0)
+- 📋 Markdown is always rendered (headings, bullet and numbered lists, checkboxes, bold, italic, strikethrough, code, quotes, rules and links). While you edit, only the line under the caret turns back into raw Markdown — the rest stays rendered
+- ✏️ Markdown input help, such as continuing a list on Enter
+- 🔗 Rich text pasted from a browser becomes Markdown
+- 🖱️ Custom right-click menu
+- 🌐 Japanese and English UI, following the OS locale or pinned in settings
+- ⚙️ Settings for the default color, opacity, which buttons to show, delete confirmation, language and start at login
 
-### Homebrew (推奨)
+## Install
+
+### Homebrew (recommended)
 
 ```bash
 brew trust somei-san/tap
 brew install --cask somei-san/tap/hattotto
 ```
 
-`brew trust` は初回のみ必要です。Homebrew 6 以降、信頼していない tap の cask は読み込まれません。これを省くと `brew upgrade` が hattotto をエラーも出さず飛ばすため、更新されないことに気づきにくくなります。
+`brew trust` is needed once. Since Homebrew 6, casks from an untrusted tap are not loaded, and skipping this makes `brew upgrade` pass over hattotto without an error — you would not notice it stopped updating.
 
-> **Note:** 現在コード署名がないため、インストール時に quarantine 属性を自動解除します。
+> **Note:** The app is not code-signed, so the quarantine attribute is removed for you at install time.
 
-## データ保存先
+## Where data is stored
 
 ```
 ~/Library/Application Support/com.hattotto.app/
-├── notes.json      # 付箋データ
-├── settings.json   # 設定
-└── trash.json      # ゴミ箱（最大200件）
+├── notes.json      # notes
+├── settings.json   # settings
+└── trash.json      # trash (up to 200 notes)
 ```
 
-## リンク
+## Links
 
-- [開発ガイド](DEVELOPMENT.md)
-- [Homebrew Tap リポジトリ](https://github.com/somei-san/homebrew-tap)
+- [Development guide](DEVELOPMENT.md)
+- [Homebrew tap repository](https://github.com/somei-san/homebrew-tap)
 
-## 解説
+## About the name
 
-「貼っとっと」とは熊本弁で「貼ってるよ」という意味です
+“貼っとっと” is Kumamoto dialect for “it’s stuck up there”.

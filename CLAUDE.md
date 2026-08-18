@@ -76,21 +76,25 @@ npm run test:report
 - `src/window.rs` — 付箋ウィンドウの生成・管理
 - `src/menu.rs` — アプリメニュー
 - `src/tray.rs` — システムトレイ
+- `src/i18n.rs` — ネイティブ側 UI 文言の言語ごとの表記（`Msg` の表）と表示言語の解決。`Msg` を増やすと訳の付け忘れがコンパイルエラーになる
 - `tauri.conf.json` — Tauri 設定。`frontendDist` は `../src` を指す。`withGlobalTauri: true` で `window.__TAURI__` を使用
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
 ### フロントエンド (`src/`)
 - `note.html` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
-- `settings.html` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 自動起動
+- `settings.html` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
 - `trash.html` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
 - `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。note.html の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
+- `i18n.js` — フロントエンド側 UI 文言（`window.I18N`）。`data-i18n` / `data-i18n-html` / `data-i18n-title` / `data-i18n-aria-label` / `data-i18n-doc-title` 属性を `applyDom()` が差し替える
 - `colors.css` — 6色カラーテーマの共通パレット（CSS 変数）
 
 ### データモデル
 （正確なフィールドは `src-tauri/src/model.rs` を参照）
 - `Note`: id, content, color, x, y, width, height, zoom, pinned, deleted_at
-- `Settings`: default_color, opacity, bring_all_to_front, show_pin_button, show_new_button, show_color_button, confirm_before_delete
+- `Settings`: default_color, opacity, bring_all_to_front, show_pin_button, show_new_button, show_color_button, confirm_before_delete, language
+
+表示言語は `Settings.language`（`auto` / `ja` / `en`）で決まる。`auto` は OS のロケール（フロントエンドは `navigator.language`）の primary subtag が `ja` なら日本語、それ以外はすべて英語。文言テーブルはネイティブ側 `src-tauri/src/i18n.rs` とフロントエンド側 `src/i18n.js` に分かれて存在する。
 
 ### データフロー
 - 各付箋は独立したウィンドウ（`note-{uuid}` ラベル）として開かれる

@@ -343,41 +343,42 @@
     <!-- Titlebar -->
     <div class="titlebar" id="titlebar">
       <div class="titlebar-left">
-        <button class="btn btn-close" id="btn-delete" title="削除">
+        <button class="btn btn-close" id="btn-delete" title="削除" data-i18n-title="delete">
           <svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9"/><line x1="9" y1="3" x2="3" y2="9"/></svg>
         </button>
       </div>
       <div class="titlebar-right">
-        <button class="btn" id="btn-new" title="新しい付箋">
+        <button class="btn" id="btn-new" title="新しい付箋" data-i18n-title="newNote">
           <svg viewBox="0 0 12 12"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>
         </button>
         <button class="btn btn-pin" id="btn-pin" title="ピン留め" aria-label="ピン留め" aria-pressed="false">
           <svg viewBox="0 0 12 12"><path d="M6 11V7M3.5 7h5l-.7-2.5H4.2L3.5 7ZM4.5 4.5V2.2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5V4.5" fill="none"/></svg>
         </button>
-        <button class="btn" id="btn-color" title="色">
+        <button class="btn" id="btn-color" title="色" data-i18n-title="color">
           <svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="currentColor" stroke="none"/></svg>
         </button>
       </div>
     </div>
 
     <!-- Color Picker -->
-    <div class="color-picker" id="color-picker" role="radiogroup" aria-label="付箋の色">
-      <div class="color-dot" data-color="yellow" role="radio" aria-label="イエロー" aria-checked="false" tabindex="0"></div>
-      <div class="color-dot" data-color="blue" role="radio" aria-label="ブルー" aria-checked="false" tabindex="-1"></div>
-      <div class="color-dot" data-color="green" role="radio" aria-label="グリーン" aria-checked="false" tabindex="-1"></div>
-      <div class="color-dot" data-color="pink" role="radio" aria-label="ピンク" aria-checked="false" tabindex="-1"></div>
-      <div class="color-dot" data-color="purple" role="radio" aria-label="パープル" aria-checked="false" tabindex="-1"></div>
-      <div class="color-dot" data-color="gray" role="radio" aria-label="グレー" aria-checked="false" tabindex="-1"></div>
+    <div class="color-picker" id="color-picker" role="radiogroup" aria-label="付箋の色" data-i18n-aria-label="noteColorAriaLabel">
+      <div class="color-dot" data-color="yellow" role="radio" aria-label="イエロー" aria-checked="false" tabindex="0" data-i18n-aria-label="colorYellow"></div>
+      <div class="color-dot" data-color="blue" role="radio" aria-label="ブルー" aria-checked="false" tabindex="-1" data-i18n-aria-label="colorBlue"></div>
+      <div class="color-dot" data-color="green" role="radio" aria-label="グリーン" aria-checked="false" tabindex="-1" data-i18n-aria-label="colorGreen"></div>
+      <div class="color-dot" data-color="pink" role="radio" aria-label="ピンク" aria-checked="false" tabindex="-1" data-i18n-aria-label="colorPink"></div>
+      <div class="color-dot" data-color="purple" role="radio" aria-label="パープル" aria-checked="false" tabindex="-1" data-i18n-aria-label="colorPurple"></div>
+      <div class="color-dot" data-color="gray" role="radio" aria-label="グレー" aria-checked="false" tabindex="-1" data-i18n-aria-label="colorGray"></div>
     </div>
 
     <!-- Content -->
     <div class="content">
-      <div class="markdown-view" id="markdown-view" role="document" aria-label="付箋の内容"></div>
+      <div class="markdown-view" id="markdown-view" role="document" aria-label="付箋の内容" data-i18n-aria-label="noteContentAriaLabel"></div>
     </div>
   </div>
 
 
 <script src="utils.js"></script>
+<script src="i18n.js"></script>
 <script src="markdown.js"></script>
 <script>
   // ── Globals ───────────────────────────────────────
@@ -427,7 +428,7 @@
   function applyPinState(isPinned) {
     pinBtn.classList.toggle('active', isPinned);
     pinBtn.setAttribute('aria-pressed', String(isPinned));
-    const label = isPinned ? 'ピン留め解除' : 'ピン留め';
+    const label = I18N.t(isPinned ? 'unpinButton' : 'pinButton');
     pinBtn.title = label;
     pinBtn.setAttribute('aria-label', label);
   }
@@ -480,6 +481,8 @@
       appWindow.close();
       return;
     }
+
+    I18N.setLang(I18N.resolve(settings?.language));
 
     rawContent = note.content;
     renderAll();
@@ -582,7 +585,7 @@
     ed.id = 'editor';
     ed.className = 'raw-editor' + (activeEnd > activeStart ? ' atomic' : '');
     ed.contentEditable = 'true';
-    ed.setAttribute('aria-label', '付箋の内容');
+    ed.setAttribute('aria-label', I18N.t('noteContentAriaLabel'));
     ed.textContent = lines.slice(activeStart, activeEnd + 1).join('\n');
 
     // 空の付箋はプレースホルダしか無いので、差し替え先が無い
@@ -714,7 +717,7 @@
     if (next === currentZoom) return;
     currentZoom = next;
     applyZoom(next);
-    fireInvoke('update_note_zoom', { id: noteId, zoom: next }, '保存に失敗しました');
+    fireInvoke('update_note_zoom', { id: noteId, zoom: next }, I18N.t('toastSaveFailed'));
   }
 
   // ── Markdown auto-continue on Enter ─────────────
@@ -984,7 +987,7 @@
   function saveNow() {
     clearTimeout(saveTimer);
     saveTimer = null;
-    fireInvoke('update_note_content', { id: noteId, content: rawContent }, '保存に失敗しました');
+    fireInvoke('update_note_content', { id: noteId, content: rawContent }, I18N.t('toastSaveFailed'));
   }
 
   // ── Raw Editor Bindings ───────────────────────────
@@ -1133,7 +1136,7 @@
           y: lpos.y,
           width: lsize.width,
           height: lsize.height,
-        }, '保存に失敗しました');
+        }, I18N.t('toastSaveFailed'));
       } catch (e) {
         // Window might be closing
       }
@@ -1142,11 +1145,11 @@
 
   // ── Buttons ───────────────────────────────────────
   newBtn.addEventListener('click', () => {
-    fireInvoke('create_note', undefined, '付箋の作成に失敗しました');
+    fireInvoke('create_note', undefined, I18N.t('toastCreateFailed'));
   });
 
   document.getElementById('btn-delete').addEventListener('click', () => {
-    fireInvoke('delete_note', { id: noteId }, '付箋の削除に失敗しました');
+    fireInvoke('delete_note', { id: noteId }, I18N.t('toastDeleteFailed'));
   });
 
   colorBtn.addEventListener('click', (e) => {
@@ -1159,7 +1162,7 @@
     dot.addEventListener('click', () => {
       const color = dot.dataset.color;
       applyColor(color);
-      fireInvoke('update_note_color', { id: noteId, color }, '保存に失敗しました');
+      fireInvoke('update_note_color', { id: noteId, color }, I18N.t('toastSaveFailed'));
       picker.classList.remove('open');
     });
   });
@@ -1178,7 +1181,7 @@
   function resetZoom() {
     currentZoom = 100;
     applyZoom(100);
-    fireInvoke('update_note_zoom', { id: noteId, zoom: 100 }, '保存に失敗しました');
+    fireInvoke('update_note_zoom', { id: noteId, zoom: 100 }, I18N.t('toastSaveFailed'));
   }
 
   // Listen for zoom events from app menu (only apply to focused window)
@@ -1205,6 +1208,12 @@
   // ── Listen for settings changes ──────────────────
   unlisteners.push(listen('settings-changed', (e) => {
     applySettings(e.payload);
+    I18N.setLang(I18N.resolve(e.payload.language));
+    // ピンボタンはピン状態に応じてラベルを出し分けるため data-i18n* を持たず、
+    // applyDom の対象外。ここで明示的にラベルを更新する
+    applyPinState(pinBtn.classList.contains('active'));
+    // プレースホルダは renderMarkdown が生成する DOM なので applyDom では届かない
+    if (!rawContent) renderAll();
   }));
 
   // ── Cleanup on window close ──────────────────────

@@ -18,7 +18,7 @@ async function openNoteWithCapture(browser: Browser, content: string): Promise<{
             case "get_note":
               return { id: "test-note-id", content: noteContent, color: "yellow", x: 0, y: 0, width: 300, height: 350, zoom: 100 };
             case "get_settings":
-              return { default_color: "yellow", opacity: 100 };
+              return { default_color: "yellow", opacity: 100, language: "ja" };
             default:
               return null;
           }

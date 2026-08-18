@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   show_new_button: true,
   show_color_button: true,
   confirm_before_delete: true,
+  language: "ja",
 };
 
 // ── Note mock ──────────────────────────────────────────────
@@ -144,22 +145,42 @@ async function injectSettingsMock(
 async function injectTrashMock(
   page: Page,
   trashItems: Record<string, unknown>[] = [],
+  settingsOverrides: Record<string, unknown> = {},
 ) {
+  const settings = { ...DEFAULT_SETTINGS, ...settingsOverrides };
+
   await page.addInitScript((data) => {
+    type EventHandler = (...args: unknown[]) => void;
+    const globalListeners: Record<string, EventHandler[]> = {};
+    (window as any).__globalListeners = globalListeners;
+
     (window as any).__TAURI__ = {
       core: {
         invoke: async (cmd: string) => {
           switch (cmd) {
             case "get_trash":     return data.items;
             case "get_trash_max": return 200;
+            case "get_settings":  return data.settings;
             case "restore_note":  return null;
             case "empty_trash":   return null;
             default:              return null;
           }
         },
       },
+      event: {
+        listen: async (event: string, handler: EventHandler) => {
+          if (!globalListeners[event]) globalListeners[event] = [];
+          globalListeners[event].push(handler);
+          return () => {};
+        },
+      },
+      webviewWindow: {
+        getCurrentWebviewWindow: () => ({
+          close: async () => {},
+        }),
+      },
     };
-  }, { items: trashItems });
+  }, { items: trashItems, settings });
 }
 
 // ── Editor helpers ─────────────────────────────────────────
@@ -204,7 +225,7 @@ type Fixtures = {
   settingsPage: Page;
   openSettings: (overrides?: Record<string, unknown>, autostart?: boolean) => Promise<Page>;
   trashPage: Page;
-  openTrash: (items?: Record<string, unknown>[]) => Promise<Page>;
+  openTrash: (items?: Record<string, unknown>[], settings?: Record<string, unknown>) => Promise<Page>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -269,10 +290,10 @@ export const test = base.extend<Fixtures>({
   // trash.html — custom trash data, own browser context (360x480)
   openTrash: async ({ browser }, use) => {
     const pages: Page[] = [];
-    const open = async (items: Record<string, unknown>[] = []) => {
+    const open = async (items: Record<string, unknown>[] = [], settings: Record<string, unknown> = {}) => {
       const ctx = await browser.newContext({ viewport: { width: 360, height: 480 } });
       const page = await ctx.newPage();
-      await injectTrashMock(page, items);
+      await injectTrashMock(page, items, settings);
       await page.goto("/trash.html");
       await page.waitForLoadState("networkidle");
       pages.push(page);
