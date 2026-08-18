@@ -2,4 +2,6 @@ node_modules/
 test-results/
 playwright-report/
 src-tauri/target/
+# tauri-build がビルド時に生成する（Tauri の app テンプレートも無視している）
+src-tauri/gen/schemas/
 .claude/settings.local.json
