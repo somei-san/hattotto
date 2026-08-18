@@ -38,12 +38,16 @@ if [[ "$OPEN_BOT_PRS" != "0" ]]; then
   exit 1
 fi
 
+# 端末が無いときは確認できないので、黙って飛ばさず警告を出す。制御端末を持たない
+# 経路（パイプ越し、CI やエージェント経由の非対話実行）では /dev/tty も開けず、聞く手段が無い。
 if [[ -t 0 ]]; then
   read -r -p "Dependabot の Check for updates は押しましたか? [y/N] " reply
   if [[ ! "$reply" =~ ^[yY]$ ]]; then
     echo "中断しました。Insights → Dependency graph → Dependabot で押してください" >&2
     exit 1
   fi
+else
+  echo "WARNING: 端末が無いので Check for updates の確認を省略しました" >&2
 fi
 
 # バージョンを各設定ファイルに反映
