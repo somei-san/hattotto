@@ -179,13 +179,6 @@ function caretLineCol(ed) {
   return { line: activeStart + before.length - 1, col: before[before.length - 1].length };
 }
 
-/** ブロック内の (行インデックス, 列) をエディタ先頭からのオフセットに変換する。 */
-function blockOffset(blockLines, idx, col) {
-  let offset = 0;
-  for (let n = 0; n < idx; n++) offset += blockLines[n].length + 1;
-  return offset + col;
-}
-
 /** 行 lineIdx を生 Markdown に差し替え、col 列にキャレットを置く（col が null なら行末）。 */
 function enterLine(lineIdx, col) {
   commitActive();
@@ -246,17 +239,6 @@ function applyLines(lines, caretLine, caretCol) {
 }
 
 // ── Click → Enter Line ────────────────────────────
-/** 行頭マーカー（インデント・見出し・リスト・引用）の文字数。 */
-function markerLength(line) {
-  const indent = line.match(/^ */)[0].length;
-  // 見出しはインデントが無いときだけ markdown.js が記号を剥がす
-  const marker = indent === 0
-    ? /^(#{1,3} |[-*] \[[ xX]\] |[-*] |> |\d+\. )/
-    : /^([-*] \[[ xX]\] |[-*] |> |\d+\. )/;
-  const m = line.slice(indent).match(marker);
-  return indent + (m ? m[1].length : 0);
-}
-
 /**
  * クリック位置を生 Markdown の列に戻す。描画テキストには行頭マーカーが
  * 含まれないぶんを足し戻す。インライン記法（** など）の分だけ列はずれる。
@@ -338,46 +320,6 @@ async function changeZoom(delta) {
 }
 
 // ── Markdown auto-continue on Enter ─────────────
-const LIST_PATTERNS = [
-  { re: /^(- \[[ xX]\] )(.*)$/, prefix: (m) => '- [ ] ' },     // checkbox
-  { re: /^([-*] )(?!\[[ xX]\] )(.*)$/, prefix: (m) => m[1] },   // bullet
-  { re: /^(\d+)\. (.*)$/,      prefix: (m) => `${+m[1] + 1}. ` }, // ordered
-  { re: /^(> )(.*)$/,          prefix: (m) => '> ' },          // blockquote
-];
-
-/**
- * Return the prefix to auto-insert on the next line, or null if
- * the line is not a list/quote that should be continued.
- */
-function stripIndent(line) {
-  const indent = line.match(/^( *)/)[1];
-  return { indent, stripped: line.slice(indent.length) };
-}
-
-function getAutoPrefix(lineText) {
-  const { indent, stripped } = stripIndent(lineText);
-  for (const pat of LIST_PATTERNS) {
-    const m = stripped.match(pat.re);
-    if (m) return indent + pat.prefix(m);
-  }
-  return null;
-}
-
-/**
- * Return true if the line is an empty list item / blockquote
- * (i.e. prefix only, no content) that should be cancelled on Enter.
- */
-function isEmptyListItem(lineText) {
-  const { stripped } = stripIndent(lineText);
-  for (const pat of LIST_PATTERNS) {
-    const m = stripped.match(pat.re);
-    if (!m) continue;
-    const content = m[2];
-    return !content.trim();
-  }
-  return false;
-}
-
 /** Enter で行を分割する。リスト・引用の途中なら次の行へプレフィックスを引き継ぐ。 */
 function splitLine(ed) {
   snapshotContent();
@@ -573,8 +515,6 @@ function onEditorDrop(e) {
 }
 
 // ── Checkbox autocomplete ────────────────────────
-const CHECKBOX_RE = /^([-*])\s?\[([xX]?)\]$/;
-
 function autocompleteCheckbox(ed) {
   const { line, col } = caretLineCol(ed);
   const blockLines = editorText(ed).split("\n");
@@ -858,13 +798,10 @@ document.addEventListener('contextmenu', (e) => {
 
 // ── Expose for Playwright tests ──────────────────────
 window.htmlToMarkdown = htmlToMarkdown;
-window.getAutoPrefix = getAutoPrefix;
 // 生表示中の行を書き戻したうえでの付箋のソーステキスト
 window.getRawContent = () => { snapshotContent(); return rawContent; };
 window.enterLine = enterLine;
-window.isEmptyListItem = isEmptyListItem;
 window.renderMarkdown = renderMarkdown;
-window.CHECKBOX_RE = CHECKBOX_RE;
 window.applyColor = applyColor;
 window.changeZoom = changeZoom;
 window.resetZoom = resetZoom;
