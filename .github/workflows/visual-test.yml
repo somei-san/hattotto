@@ -9,13 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       update_snapshots:
-        description: linux のベースラインを更新してコミットする
+        description: ベースラインを更新してコミットする
         type: boolean
         default: false
 
 jobs:
   visual-test:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     permissions:
       contents: write
 
@@ -32,7 +32,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
 
       - name: Run tests
         if: ${{ !inputs.update_snapshots }}
@@ -47,11 +47,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/visual/__screenshots__/linux/
+          git add tests/visual/__screenshots__/darwin/
           if git diff --cached --quiet; then
             echo "No snapshot changes to commit"
           else
-            git commit -m "✅ linux のベースラインを更新する [skip ci]"
+            git commit -m "✅ VRT のベースラインを更新する [skip ci]"
             git push
           fi
 
