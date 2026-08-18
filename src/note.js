@@ -664,17 +664,10 @@ for (const type of ['cut', 'paste', 'drop']) {
 }
 
 // ── Drag Window ───────────────────────────────────
-let dragging = false;
-let dragTimeout = null;
 titlebar.addEventListener('mousedown', (e) => {
   if (e.target.closest('.btn') || e.target.closest('.color-picker')) return;
-  dragging = true;
   appWindow.startDragging();
-  // Fallback: clear flag after 5s in case mouseup is consumed by startDragging
-  clearTimeout(dragTimeout);
-  dragTimeout = setTimeout(() => { dragging = false; }, 5000);
 });
-document.addEventListener('mouseup', () => { dragging = false; });
 
 // ── Save Position/Size on Move & Resize ───────────
 let geoTimer = null;
@@ -694,7 +687,7 @@ function scheduleGeoSave() {
         width: lsize.width,
         height: lsize.height,
       }, I18N.t('toastSaveFailed'));
-    } catch (e) {
+    } catch {
       // Window might be closing
     }
   }, 500);
