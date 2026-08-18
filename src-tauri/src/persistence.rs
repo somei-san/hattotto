@@ -119,6 +119,7 @@ pub(crate) fn enforce_trash_limit(trash: &mut Vec<Note>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::LanguageSetting;
     use tempfile::TempDir;
 
     fn make_note(id: &str, color: &str, content: &str) -> Note {
@@ -200,6 +201,7 @@ mod tests {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            language: LanguageSetting::En,
         };
         save_settings_to(&settings, &path).unwrap();
         let loaded = load_settings_from(&path);
@@ -207,6 +209,7 @@ mod tests {
         assert_eq!(loaded.opacity, 80);
         assert!(!loaded.bring_all_to_front);
         assert!(loaded.confirm_before_delete);
+        assert_eq!(loaded.language, LanguageSetting::En);
     }
 
     #[test]

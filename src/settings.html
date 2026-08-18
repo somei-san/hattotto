@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>設定 / ヘルプ — 貼っとっと</title>
+<title data-i18n-doc-title="settingsDocTitle">貼っとっと — 設定 / ヘルプ</title>
 <link rel="stylesheet" href="colors.css" />
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -317,13 +317,26 @@
     color: var(--text-muted);
   }
 
+  /* ── Language Select ──────────────────────────────── */
+  .language-select {
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+
   /* ── Focus Indicator ──────────────────────────────── */
   .color-dot:focus-visible,
   .size-btn:focus-visible,
   .tab:focus-visible,
   .save-btn:focus-visible,
   .toggle-track:focus-visible,
-  .opacity-slider:focus-visible {
+  .opacity-slider:focus-visible,
+  .language-select:focus-visible {
     outline: 2px solid rgba(0, 102, 204, 0.6);
     outline-offset: 2px;
   }
@@ -332,83 +345,91 @@
 <body>
 
 <div class="tab-bar" role="tablist">
-  <div class="tab active" id="tab-settings" data-tab="settings" role="tab" aria-selected="true" aria-controls="panel-settings" tabindex="0">設定</div>
-  <div class="tab" id="tab-help" data-tab="help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1">ヘルプ</div>
+  <div class="tab active" id="tab-settings" data-tab="settings" role="tab" aria-selected="true" aria-controls="panel-settings" tabindex="0" data-i18n="tabSettings">設定</div>
+  <div class="tab" id="tab-help" data-tab="help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1" data-i18n="tabHelp">ヘルプ</div>
 </div>
 
 <!-- ── Settings Panel ─────────────────────────────── -->
 <div class="panel active" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
 
   <div class="section">
-    <div class="section-title">新しい付箋のデフォルトカラー</div>
-    <div class="color-row" id="color-picker" role="radiogroup" aria-label="デフォルトカラー">
-      <div class="color-dot active" data-color="yellow" tabindex="0" title="イエロー" role="radio" aria-label="イエロー" aria-checked="true"></div>
-      <div class="color-dot" data-color="blue"   tabindex="-1" title="ブルー" role="radio" aria-label="ブルー" aria-checked="false"></div>
-      <div class="color-dot" data-color="green"  tabindex="-1" title="グリーン" role="radio" aria-label="グリーン" aria-checked="false"></div>
-      <div class="color-dot" data-color="pink"   tabindex="-1" title="ピンク" role="radio" aria-label="ピンク" aria-checked="false"></div>
-      <div class="color-dot" data-color="purple" tabindex="-1" title="パープル" role="radio" aria-label="パープル" aria-checked="false"></div>
-      <div class="color-dot" data-color="gray"   tabindex="-1" title="グレー" role="radio" aria-label="グレー" aria-checked="false"></div>
-      <div class="color-dot" data-color="random" tabindex="-1" title="ランダム" role="radio" aria-label="ランダム" aria-checked="false"></div>
+    <div class="section-title" data-i18n="sectionDefaultColor">新しい付箋のデフォルトカラー</div>
+    <div class="color-row" id="color-picker" role="radiogroup" aria-label="デフォルトカラー" data-i18n-aria-label="defaultColorGroupLabel">
+      <div class="color-dot active" data-color="yellow" tabindex="0" title="イエロー" role="radio" aria-label="イエロー" aria-checked="true" data-i18n-title="colorYellow" data-i18n-aria-label="colorYellow"></div>
+      <div class="color-dot" data-color="blue"   tabindex="-1" title="ブルー" role="radio" aria-label="ブルー" aria-checked="false" data-i18n-title="colorBlue" data-i18n-aria-label="colorBlue"></div>
+      <div class="color-dot" data-color="green"  tabindex="-1" title="グリーン" role="radio" aria-label="グリーン" aria-checked="false" data-i18n-title="colorGreen" data-i18n-aria-label="colorGreen"></div>
+      <div class="color-dot" data-color="pink"   tabindex="-1" title="ピンク" role="radio" aria-label="ピンク" aria-checked="false" data-i18n-title="colorPink" data-i18n-aria-label="colorPink"></div>
+      <div class="color-dot" data-color="purple" tabindex="-1" title="パープル" role="radio" aria-label="パープル" aria-checked="false" data-i18n-title="colorPurple" data-i18n-aria-label="colorPurple"></div>
+      <div class="color-dot" data-color="gray"   tabindex="-1" title="グレー" role="radio" aria-label="グレー" aria-checked="false" data-i18n-title="colorGray" data-i18n-aria-label="colorGray"></div>
+      <div class="color-dot" data-color="random" tabindex="-1" title="ランダム" role="radio" aria-label="ランダム" aria-checked="false" data-i18n-title="colorRandom" data-i18n-aria-label="colorRandom"></div>
     </div>
   </div>
 
-  <div class="section" role="group" aria-label="透過度">
-    <div class="section-title">透過度</div>
+  <div class="section" role="group" aria-label="透過度" data-i18n-aria-label="sectionOpacity">
+    <div class="section-title" data-i18n="sectionOpacity">透過度</div>
     <div class="opacity-row">
-      <input type="range" class="opacity-slider" id="opacity-slider" min="20" max="100" step="5" value="100" aria-label="透過度" />
+      <input type="range" class="opacity-slider" id="opacity-slider" min="20" max="100" step="5" value="100" aria-label="透過度" data-i18n-aria-label="sectionOpacity" />
       <span class="opacity-value" id="opacity-value">100%</span>
     </div>
   </div>
 
-  <div class="section" role="group" aria-label="表示">
-    <div class="section-title">表示</div>
+  <div class="section" role="group" aria-label="表示" data-i18n-aria-label="sectionDisplay">
+    <div class="section-title" data-i18n="sectionDisplay">表示</div>
     <div class="toggle-row">
-      <span class="toggle-label">付箋をクリックしたら全付箋を前面に表示</span>
+      <span class="toggle-label" data-i18n="toggleBringAllToFront">付箋をクリックしたら全付箋を前面に表示</span>
       <label class="toggle">
-        <input type="checkbox" id="bring-all-toggle" checked aria-label="付箋をクリックしたら全付箋を前面に表示" />
+        <input type="checkbox" id="bring-all-toggle" checked aria-label="付箋をクリックしたら全付箋を前面に表示" data-i18n-aria-label="toggleBringAllToFront" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row">
-      <span class="toggle-label">ピン留めボタンを表示</span>
+      <span class="toggle-label" data-i18n="toggleShowPin">ピン留めボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-pin-toggle" checked aria-label="ピン留めボタンを表示" />
+        <input type="checkbox" id="show-pin-toggle" checked aria-label="ピン留めボタンを表示" data-i18n-aria-label="toggleShowPin" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row">
-      <span class="toggle-label">新しい付箋ボタンを表示</span>
+      <span class="toggle-label" data-i18n="toggleShowNew">新しい付箋ボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-new-toggle" checked aria-label="新しい付箋ボタンを表示" />
+        <input type="checkbox" id="show-new-toggle" checked aria-label="新しい付箋ボタンを表示" data-i18n-aria-label="toggleShowNew" />
         <div class="toggle-track"></div>
       </label>
     </div>
     <div class="toggle-row">
-      <span class="toggle-label">カラーボタンを表示</span>
+      <span class="toggle-label" data-i18n="toggleShowColor">カラーボタンを表示</span>
       <label class="toggle">
-        <input type="checkbox" id="show-color-toggle" checked aria-label="カラーボタンを表示" />
-        <div class="toggle-track"></div>
-      </label>
-    </div>
-  </div>
-
-  <div class="section" role="group" aria-label="削除確認">
-    <div class="section-title">削除確認</div>
-    <div class="toggle-row">
-      <span class="toggle-label">付箋削除時に確認する</span>
-      <label class="toggle">
-        <input type="checkbox" id="confirm-delete-toggle" checked aria-label="付箋削除時に確認する" />
+        <input type="checkbox" id="show-color-toggle" checked aria-label="カラーボタンを表示" data-i18n-aria-label="toggleShowColor" />
         <div class="toggle-track"></div>
       </label>
     </div>
   </div>
 
-  <div class="section" role="group" aria-label="システム">
-    <div class="section-title">システム</div>
+  <div class="section" role="group" aria-label="削除確認" data-i18n-aria-label="sectionConfirmDelete">
+    <div class="section-title" data-i18n="sectionConfirmDelete">削除確認</div>
     <div class="toggle-row">
-      <span class="toggle-label">ログイン時に自動起動</span>
+      <span class="toggle-label" data-i18n="toggleConfirmDelete">付箋削除時に確認する</span>
       <label class="toggle">
-        <input type="checkbox" id="autostart-toggle" aria-label="ログイン時に自動起動" />
+        <input type="checkbox" id="confirm-delete-toggle" checked aria-label="付箋削除時に確認する" data-i18n-aria-label="toggleConfirmDelete" />
+        <div class="toggle-track"></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="section" role="group" aria-label="システム" data-i18n-aria-label="sectionSystem">
+    <div class="section-title" data-i18n="sectionSystem">システム</div>
+    <div class="toggle-row">
+      <span class="toggle-label" data-i18n="labelLanguage">言語</span>
+      <select id="language-select" class="language-select" aria-label="言語" data-i18n-aria-label="labelLanguage">
+        <option value="auto" data-i18n="languageAuto">システムに合わせる</option>
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label" data-i18n="toggleAutostart">ログイン時に自動起動</span>
+      <label class="toggle">
+        <input type="checkbox" id="autostart-toggle" aria-label="ログイン時に自動起動" data-i18n-aria-label="toggleAutostart" />
         <div class="toggle-track"></div>
       </label>
     </div>
@@ -421,57 +442,57 @@
 <div class="panel" id="panel-help" role="tabpanel" aria-labelledby="tab-help">
 
   <div class="section">
-    <div class="section-title">基本操作</div>
+    <div class="section-title" data-i18n="sectionBasicUsage">基本操作</div>
     <ul class="usage-list">
-      <li><span class="icon">📝</span><span>付箋をダブルクリックで編集モード。フォーカスを外すとプレビューに戻ります。</span></li>
-      <li><span class="icon">🎨</span><span>タイトルバー右の ● ボタンで付箋の色を変更できます。</span></li>
-      <li><span class="icon">➕</span><span>＋ ボタン / トレイメニュー / ⌘N で新しい付箋を作成。</span></li>
-      <li><span class="icon">✕</span><span>✕ ボタンで付箋を削除。ゴミ箱から復元できます。</span></li>
-      <li><span class="icon">↔️</span><span>タイトルバーをドラッグで移動、右下角をドラッグでリサイズ。</span></li>
-      <li><span class="icon">🖱️</span><span>右クリックで操作メニュー（編集・付箋操作・ズーム）。</span></li>
+      <li><span class="icon">📝</span><span data-i18n="usageEdit">クリックした行だけ Markdown 記法で編集でき、フォーカスを外すとプレビューに戻ります。</span></li>
+      <li><span class="icon">🎨</span><span data-i18n="usageColor">タイトルバー右の ● ボタンで付箋の色を変更できます。</span></li>
+      <li><span class="icon">➕</span><span data-i18n="usageNew">＋ ボタン / トレイメニュー / ⌘N で新しい付箋を作成。</span></li>
+      <li><span class="icon">✕</span><span data-i18n="usageDelete">✕ ボタンで付箋を削除。ゴミ箱から復元できます。</span></li>
+      <li><span class="icon">↔️</span><span data-i18n="usageMove">タイトルバーをドラッグで移動、右下角をドラッグでリサイズ。</span></li>
+      <li><span class="icon">🖱️</span><span data-i18n="usageContextMenu">右クリックで操作メニュー（編集・付箋操作・ズーム）。</span></li>
     </ul>
   </div>
 
   <div class="section">
-    <div class="section-title">Markdown記法</div>
+    <div class="section-title" data-i18n="sectionMarkdownSyntax">Markdown記法</div>
     <ul class="usage-list">
-      <li><span class="icon">#</span><span><code># 見出し</code> <code>## 中見出し</code> <code>### 小見出し</code></span></li>
-      <li><span class="icon">•</span><span><code>- 箇条書き</code>（Enter で自動継続、空行で解除）</span></li>
-      <li><span class="icon">☑</span><span><code>- [ ] タスク</code> / <code>- [x] 完了</code>（プレビューでクリック切替）</span></li>
-      <li><span class="icon">1.</span><span><code>1. 番号リスト</code>（Enter で番号自動インクリメント）</span></li>
-      <li><span class="icon">❝</span><span><code>> 引用</code></span></li>
-      <li><span class="icon">B</span><span><code>**太字**</code> <code>*斜体*</code> <code>~~取消線~~</code> <code>`コード`</code></span></li>
-      <li><span class="icon">🔗</span><span><code>[テキスト](URL)</code> — プレビューでクリックするとブラウザで開きます</span></li>
-      <li><span class="icon">—</span><span><code>---</code> で区切り線</span></li>
+      <li><span class="icon">#</span><span data-i18n-html="mdHeading"><code># 見出し</code> <code>## 中見出し</code> <code>### 小見出し</code></span></li>
+      <li><span class="icon">•</span><span data-i18n-html="mdBullet"><code>- 箇条書き</code>（Enter で自動継続、空行で解除）</span></li>
+      <li><span class="icon">☑</span><span data-i18n-html="mdCheckbox"><code>- [ ] タスク</code> / <code>- [x] 完了</code>（プレビューでクリック切替）</span></li>
+      <li><span class="icon">1.</span><span data-i18n-html="mdOrdered"><code>1. 番号リスト</code>（Enter で番号自動インクリメント）</span></li>
+      <li><span class="icon">❝</span><span data-i18n-html="mdQuote"><code>> 引用</code></span></li>
+      <li><span class="icon">B</span><span data-i18n-html="mdInline"><code>**太字**</code> <code>*斜体*</code> <code>~~取消線~~</code> <code>`コード`</code></span></li>
+      <li><span class="icon">🔗</span><span data-i18n-html="mdLink"><code>[テキスト](URL)</code> — プレビューでクリックするとブラウザで開きます</span></li>
+      <li><span class="icon">—</span><span data-i18n-html="mdHr"><code>---</code> で区切り線</span></li>
     </ul>
   </div>
 
   <div class="section">
-    <div class="section-title">ショートカット</div>
+    <div class="section-title" data-i18n="sectionShortcuts">ショートカット</div>
     <table class="shortcut-table">
-      <tr><td>新しい付箋</td><td><kbd>⌘</kbd> <kbd>N</kbd></td></tr>
-      <tr><td>ゴミ箱を開く</td><td><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>T</kbd></td></tr>
-      <tr><td>ズームイン</td><td><kbd>⌘</kbd> <kbd>+</kbd></td></tr>
-      <tr><td>ズームアウト</td><td><kbd>⌘</kbd> <kbd>-</kbd></td></tr>
-      <tr><td>ズームリセット</td><td><kbd>⌘</kbd> <kbd>0</kbd></td></tr>
-      <tr><td>設定を開く</td><td><kbd>⌘</kbd> <kbd>,</kbd></td></tr>
-      <tr><td>アプリを終了</td><td><kbd>⌘</kbd> <kbd>Q</kbd></td></tr>
+      <tr><td data-i18n="shortcutNewNote">新しい付箋</td><td><kbd>⌘</kbd> <kbd>N</kbd></td></tr>
+      <tr><td data-i18n="shortcutOpenTrash">ゴミ箱を開く</td><td><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>T</kbd></td></tr>
+      <tr><td data-i18n="shortcutZoomIn">ズームイン</td><td><kbd>⌘</kbd> <kbd>+</kbd></td></tr>
+      <tr><td data-i18n="shortcutZoomOut">ズームアウト</td><td><kbd>⌘</kbd> <kbd>-</kbd></td></tr>
+      <tr><td data-i18n="shortcutZoomReset">ズームリセット</td><td><kbd>⌘</kbd> <kbd>0</kbd></td></tr>
+      <tr><td data-i18n="shortcutOpenSettings">設定を開く</td><td><kbd>⌘</kbd> <kbd>,</kbd></td></tr>
+      <tr><td data-i18n="shortcutQuitApp">アプリを終了</td><td><kbd>⌘</kbd> <kbd>Q</kbd></td></tr>
     </table>
   </div>
 
   <div class="section">
-    <div class="section-title">ペースト</div>
+    <div class="section-title" data-i18n="sectionPaste">ペースト</div>
     <ul class="usage-list">
-      <li><span class="icon">📋</span><span>ブラウザからリンクをコピペすると自動でMarkdownリンクに変換されます。</span></li>
-      <li><span class="icon">🔗</span><span>テキストを選択してURLを貼り付けると <code>[選択テキスト](URL)</code> に変換。</span></li>
-      <li><span class="icon">✨</span><span>リッチテキスト（太字・リスト等）も Markdown に自動変換されます。</span></li>
+      <li><span class="icon">📋</span><span data-i18n="pasteLink">ブラウザからリンクをコピペすると自動でMarkdownリンクに変換されます。</span></li>
+      <li><span class="icon">🔗</span><span data-i18n-html="pasteSelectionLink">テキストを選択してURLを貼り付けると <code>[選択テキスト](URL)</code> に変換。</span></li>
+      <li><span class="icon">✨</span><span data-i18n="pasteRichText">リッチテキスト（太字・リスト等）も Markdown に自動変換されます。</span></li>
     </ul>
   </div>
 
   <div class="section">
-    <div class="section-title">バージョン情報</div>
+    <div class="section-title" data-i18n="sectionVersion">バージョン情報</div>
     <div class="version-row">
-      <span class="version-name">貼っとっと</span>
+      <span class="version-name" data-i18n="appName">貼っとっと</span>
       <span class="version-badge" id="version-badge"></span>
     </div>
   </div>
@@ -479,10 +500,11 @@
 </div>
 
 <div class="save-footer" id="save-footer">
-  <button class="save-btn" id="save-btn" disabled>保存</button>
+  <button class="save-btn" id="save-btn" disabled data-i18n="saveButton">保存</button>
 </div>
 
 <script src="utils.js"></script>
+<script src="i18n.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core;
   const { emit, listen } = window.__TAURI__.event;
@@ -496,6 +518,7 @@
   let currentShowColor = true;
   let currentConfirmDelete = true;
   let currentAutostart = false;
+  let currentLanguage = 'auto';
 
   // ── Change Detection ──────────────────────────────
   let saved = {
@@ -505,6 +528,7 @@
     showNew: currentShowNew, showColor: currentShowColor,
     confirmDelete: currentConfirmDelete,
     autostart: currentAutostart,
+    language: currentLanguage,
   };
   const saveBtn = document.getElementById('save-btn');
   const saveFooter = document.getElementById('save-footer');
@@ -517,7 +541,8 @@
       || currentShowNew !== saved.showNew
       || currentShowColor !== saved.showColor
       || currentConfirmDelete !== saved.confirmDelete
-      || currentAutostart !== saved.autostart;
+      || currentAutostart !== saved.autostart
+      || currentLanguage !== saved.language;
     saveBtn.disabled = !dirty;
   }
 
@@ -529,6 +554,7 @@
       showNew: currentShowNew, showColor: currentShowColor,
       confirmDelete: currentConfirmDelete,
       autostart: currentAutostart,
+      language: currentLanguage,
     };
   }
 
@@ -596,6 +622,7 @@
         showNewButton: currentShowNew,
         showColorButton: currentShowColor,
         confirmBeforeDelete: currentConfirmDelete,
+        language: currentLanguage,
       });
       // autostart の状態が変わっていたら反映
       if (currentAutostart !== saved.autostart) {
@@ -620,12 +647,13 @@
         show_new_button: currentShowNew,
         show_color_button: currentShowColor,
         confirm_before_delete: currentConfirmDelete,
+        language: currentLanguage,
       });
       snapshotSaved();
       getCurrentWebviewWindow().close();
     } catch (e) {
       console.error('設定の保存に失敗しました:', e);
-      showToast('設定の保存に失敗しました');
+      showToast(I18N.t('toastSettingsSaveFailed'));
     }
   });
 
@@ -682,12 +710,26 @@
     checkDirty();
   });
 
+  // ── Language Select ──────────────────────────────────
+  // 保存を待たず選択直後に UI へ反映する（プレビュー。保存せず閉じても次回は保存値から読み直すので巻き戻しは不要）
+  const languageSelect = document.getElementById('language-select');
+  languageSelect.addEventListener('change', () => {
+    currentLanguage = languageSelect.value;
+    I18N.setLang(I18N.resolve(currentLanguage));
+    checkDirty();
+  });
+
   // ── Load current settings ────────────────────────────
   async function init() {
     const [s, autostartEnabled] = await Promise.all([
       invoke('get_settings'),
       invoke('plugin:autostart|is_enabled'),
     ]);
+
+    currentLanguage = s.language ?? 'auto';
+    I18N.setLang(I18N.resolve(currentLanguage));
+    languageSelect.value = currentLanguage;
+
     currentColor = s.default_color;
 
     document.querySelectorAll('#color-picker .color-dot').forEach(d => {

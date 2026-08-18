@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
+use crate::i18n::{self, Msg};
 use crate::model::{resolve_color, AppState, Note, RecoverMutex};
 use crate::persistence::save_notes;
 
@@ -188,8 +189,9 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         Some(t) => format!("settings.html?tab={}", t),
         None => "settings.html".to_string(),
     };
+    let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
-        .title("貼っとっと — 設定 / ヘルプ")
+        .title(i18n::text(lang, Msg::SettingsWindowTitle))
         .inner_size(440.0, 600.0)
         .min_inner_size(380.0, 460.0)
         .resizable(true)
@@ -202,8 +204,9 @@ pub(crate) fn open_trash_window(app: &AppHandle) {
         let _ = win.set_focus();
         return;
     }
+    let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
     let _ = WebviewWindowBuilder::new(app, "trash", WebviewUrl::App("trash.html".into()))
-        .title("ゴミ箱")
+        .title(i18n::text(lang, Msg::TrashWindowTitle))
         .inner_size(360.0, 480.0)
         .min_inner_size(300.0, 300.0)
         .resizable(true)

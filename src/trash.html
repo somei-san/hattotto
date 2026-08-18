@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ゴミ箱 — 貼っとっと</title>
+<title data-i18n-doc-title="trashDocTitle">ゴミ箱</title>
 <link rel="stylesheet" href="colors.css" />
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -159,14 +159,16 @@
 </head>
 <body>
   <div class="header">
-    <h1>ゴミ箱 <span id="trash-count" class="trash-count"></span></h1>
-    <button class="btn-empty" id="btn-empty" aria-label="すべて削除">すべて削除</button>
+    <h1><span data-i18n="trashHeading">ゴミ箱</span> <span id="trash-count" class="trash-count"></span></h1>
+    <button class="btn-empty" id="btn-empty" aria-label="すべて削除" data-i18n="emptyTrashButton" data-i18n-aria-label="emptyTrashButton">すべて削除</button>
   </div>
-  <div class="list" id="list" role="list" aria-label="削除した付箋"></div>
+  <div class="list" id="list" role="list" aria-label="削除した付箋" data-i18n-aria-label="trashListAriaLabel"></div>
 
 <script src="utils.js"></script>
+<script src="i18n.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core;
+  const { listen } = window.__TAURI__.event;
   const listEl = document.getElementById('list');
 
   function colorVar(color) {
@@ -179,7 +181,7 @@
 
   function formatDeletedAt(ts) {
     if (!ts) return '';
-    return new Date(ts * 1000).toLocaleString('ja-JP', {
+    return new Date(ts * 1000).toLocaleString(I18N.lang() === 'ja' ? 'ja-JP' : 'en-US', {
       month: 'numeric', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -196,17 +198,17 @@
       ]);
     } catch (e) {
       console.error('render trash failed:', e);
-      listEl.innerHTML = '<div class="empty-msg">読み込みに失敗しました</div>';
+      listEl.innerHTML = `<div class="empty-msg">${I18N.t('toastLoadFailed')}</div>`;
       return;
     }
     countEl.textContent = `(${items.length} / ${trashMax})`;
     if (items.length === 0) {
-      listEl.innerHTML = '<div class="empty-msg">ゴミ箱は空です</div>';
+      listEl.innerHTML = `<div class="empty-msg">${I18N.t('trashEmptyMessage')}</div>`;
       return;
     }
     // Show newest first
     listEl.innerHTML = items.slice().reverse().map(note => {
-      const preview = note.content.slice(0, 120) || '(空の付箋)';
+      const preview = note.content.slice(0, 120) || I18N.t('emptyNotePlaceholder');
       return `<div class="item" role="listitem">
         <div class="item-color" style="background:${colorVar(note.color)}"></div>
         <div class="item-body">
@@ -214,7 +216,7 @@
           ${note.deleted_at ? `<div class="item-date">${formatDeletedAt(note.deleted_at)}</div>` : ''}
         </div>
         <div class="item-actions">
-          <button class="btn-restore" data-id="${note.id}" aria-label="復元">復元</button>
+          <button class="btn-restore" data-id="${note.id}" aria-label="${I18N.t('restoreButton')}">${I18N.t('restoreButton')}</button>
         </div>
       </div>`;
     }).join('');
@@ -228,14 +230,14 @@
       render();
     } catch (e) {
       console.error('restore failed:', e);
-      showToast('付箋の復元に失敗しました');
+      showToast(I18N.t('toastRestoreFailed'));
     }
   });
 
   document.getElementById('btn-empty').addEventListener('click', async () => {
     const ok = await window.__TAURI__.dialog.confirm(
-      'ゴミ箱を空にしますか？\nこの操作は元に戻せません。',
-      { title: '貼っとっと', okLabel: '削除', cancelLabel: 'キャンセル' }
+      I18N.t('confirmEmptyTrashMessage'),
+      { title: I18N.t('appName'), okLabel: I18N.t('delete'), cancelLabel: I18N.t('cancel') }
     );
     if (!ok) return;
     try {
@@ -243,7 +245,7 @@
       render();
     } catch (e) {
       console.error('empty trash failed:', e);
-      showToast('ゴミ箱の削除に失敗しました');
+      showToast(I18N.t('toastEmptyTrashFailed'));
     }
   });
 
@@ -255,7 +257,27 @@
     }
   });
 
-  render();
+  // ── Listen for settings changes ──────────────────
+  listen('settings-changed', (e) => {
+    I18N.setLang(I18N.resolve(e.payload.language));
+    // 復元ボタン・空メッセージ・日付書式は render() が生成する DOM なので
+    // applyDom では届かない
+    render();
+  });
+
+  // ── Init ──────────────────────────────────────────
+  async function init() {
+    let settings = null;
+    try {
+      settings = await invoke('get_settings');
+    } catch (e) {
+      console.error('get_settings failed:', e);
+    }
+    I18N.setLang(I18N.resolve(settings?.language));
+    render();
+  }
+
+  init();
 </script>
 </body>
 </html>

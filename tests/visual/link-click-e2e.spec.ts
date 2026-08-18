@@ -31,7 +31,7 @@ test.describe("リンククリック", () => {
                 return {
                   default_color: "yellow", opacity: 100,
                   bring_all_to_front: true, show_pin_button: true, show_new_button: true,
-                  show_color_button: true, confirm_before_delete: true,
+                  show_color_button: true, confirm_before_delete: true, language: "ja",
                 };
               default: return null;
             }

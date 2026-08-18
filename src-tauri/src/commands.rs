@@ -5,11 +5,15 @@ use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, Predefi
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
-use crate::model::{resolve_color, AppState, Note, RecoverMutex, Settings, COLOR_DEFS, TRASH_MAX};
+use crate::i18n::{self, Lang, Msg};
+use crate::model::{
+    resolve_color, AppState, LanguageSetting, Note, RecoverMutex, Settings, COLOR_DEFS, TRASH_MAX,
+};
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
 };
+use crate::{menu, tray};
 
 // ── Tauri Commands ──────────────────────────────────────────
 
@@ -99,16 +103,22 @@ pub(crate) fn update_note_pinned(
 
 /// Confirm deletion if setting is enabled. Returns false if user cancelled.
 pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
-    let confirm = state.settings.recover().confirm_before_delete;
+    let (confirm, lang) = {
+        let settings = state.settings.recover();
+        (
+            settings.confirm_before_delete,
+            i18n::resolve(settings.language),
+        )
+    };
     if !confirm {
         return true;
     }
     app.dialog()
-        .message("この付箋を削除しますか？")
-        .title("貼っとっと")
+        .message(i18n::text(lang, Msg::DeleteConfirmMessage))
+        .title(i18n::app_name(lang))
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "削除".into(),
-            "キャンセル".into(),
+            i18n::text(lang, Msg::DeleteConfirmOk).into(),
+            i18n::text(lang, Msg::DeleteConfirmCancel).into(),
         ))
         .blocking_show()
 }
@@ -226,6 +236,8 @@ pub(crate) fn get_settings(state: State<AppState>) -> Settings {
 }
 
 /// 設定を更新して保存する。数値は範囲内にクランプされる。
+/// `language` が変わった場合は、アプリメニュー・トレイのメニュー・開いている設定/ゴミ箱
+/// ウィンドウのタイトルを表示中の言語で組み直す。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri コマンドは個別引数が JS キーに対応するため
 pub(crate) fn update_settings(
@@ -236,10 +248,13 @@ pub(crate) fn update_settings(
     show_new_button: bool,
     show_color_button: bool,
     confirm_before_delete: bool,
+    language: LanguageSetting,
+    app: AppHandle,
     state: State<AppState>,
 ) -> Result<(), String> {
-    let snapshot = {
+    let (snapshot, language_changed) = {
         let mut settings = state.settings.recover();
+        let language_changed = settings.language != language;
         settings.default_color = default_color;
         settings.opacity = opacity.clamp(20, 100);
         settings.bring_all_to_front = bring_all_to_front;
@@ -247,8 +262,25 @@ pub(crate) fn update_settings(
         settings.show_new_button = show_new_button;
         settings.show_color_button = show_color_button;
         settings.confirm_before_delete = confirm_before_delete;
-        settings.clone()
+        settings.language = language;
+        (settings.clone(), language_changed)
     };
+    if language_changed {
+        if let Err(e) = menu::rebuild_app_menu(&app) {
+            eprintln!("rebuild app menu error: {}", e);
+        }
+        if let Err(e) = tray::rebuild_tray(&app) {
+            eprintln!("rebuild tray error: {}", e);
+        }
+        // ネイティブウィンドウのタイトルは生成時にしか設定されないため、開いていれば組み直す
+        let lang = i18n::resolve(snapshot.language);
+        if let Some(win) = app.get_webview_window("settings") {
+            let _ = win.set_title(i18n::text(lang, Msg::SettingsWindowTitle));
+        }
+        if let Some(win) = app.get_webview_window("trash") {
+            let _ = win.set_title(i18n::text(lang, Msg::TrashWindowTitle));
+        }
+    }
     save_settings(&snapshot)
 }
 
@@ -297,6 +329,7 @@ fn build_context_menu(
     webview_win: &tauri::WebviewWindow,
     is_pinned: bool,
     current_color: &str,
+    lang: Lang,
 ) -> tauri::Result<()> {
     let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
         .iter()
@@ -309,7 +342,7 @@ fn build_context_menu(
             IconMenuItem::with_id(
                 app,
                 format!("ctx_color_{}", c.key),
-                format!("{}{}", check, c.label),
+                format!("{}{}", check, i18n::color_label(lang, c.key)),
                 true,
                 Some(color_circle(c.r, c.g, c.b)),
                 None::<&str>,
@@ -322,15 +355,21 @@ fn build_context_menu(
     let paste = PredefinedMenuItem::paste(app, None)?;
     let sep0 = PredefinedMenuItem::separator(app)?;
     let pin_label = if is_pinned {
-        "ピン留め解除"
+        Msg::CtxUnpin
     } else {
-        "ピン留め"
+        Msg::CtxPin
     };
-    let pin = MenuItem::with_id(app, "ctx_pin", pin_label, true, None::<&str>)?;
+    let pin = MenuItem::with_id(
+        app,
+        "ctx_pin",
+        i18n::text(lang, pin_label),
+        true,
+        None::<&str>,
+    )?;
     let new_note = IconMenuItem::with_id_and_native_icon(
         app,
         "ctx_new",
-        "新しい付箋を作成",
+        i18n::text(lang, Msg::NewNote),
         true,
         Some(NativeIcon::Add),
         Some("CmdOrCtrl+N"),
@@ -338,7 +377,7 @@ fn build_context_menu(
     let delete = IconMenuItem::with_id_and_native_icon(
         app,
         "ctx_delete",
-        "この付箋を削除",
+        i18n::text(lang, Msg::CtxDelete),
         true,
         Some(NativeIcon::Remove),
         None::<&str>,
@@ -346,30 +385,42 @@ fn build_context_menu(
     let trash = IconMenuItem::with_id_and_native_icon(
         app,
         "ctx_trash",
-        "ゴミ箱を開く",
+        i18n::text(lang, Msg::CtxOpenTrash),
         true,
         Some(NativeIcon::TrashEmpty),
         Some("CmdOrCtrl+Shift+T"),
     )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep1b = PredefinedMenuItem::separator(app)?;
-    let zoom_in = MenuItem::with_id(app, "ctx_zoom_in", "ズームイン", true, Some("CmdOrCtrl+="))?;
+    let zoom_in = MenuItem::with_id(
+        app,
+        "ctx_zoom_in",
+        i18n::text(lang, Msg::ZoomIn),
+        true,
+        Some("CmdOrCtrl+="),
+    )?;
     let zoom_out = MenuItem::with_id(
         app,
         "ctx_zoom_out",
-        "ズームアウト",
+        i18n::text(lang, Msg::ZoomOut),
         true,
         Some("CmdOrCtrl+-"),
     )?;
     let zoom_reset = MenuItem::with_id(
         app,
         "ctx_zoom_reset",
-        "ズームリセット",
+        i18n::text(lang, Msg::CtxZoomReset),
         true,
         Some("CmdOrCtrl+0"),
     )?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let settings = MenuItem::with_id(app, "ctx_settings", "設定を開く", true, Some("CmdOrCtrl+,"))?;
+    let settings = MenuItem::with_id(
+        app,
+        "ctx_settings",
+        i18n::text(lang, Msg::CtxOpenSettings),
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
     let sep3 = PredefinedMenuItem::separator(app)?;
 
     let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
@@ -415,7 +466,8 @@ pub(crate) fn show_context_menu(
     // Store note ID so on_menu_event knows which note to target
     *state.context_menu_note_id.recover() = id;
 
-    if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color) {
+    let lang = i18n::resolve(state.settings.recover().language);
+    if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color, lang) {
         eprintln!("context menu error: {}", e);
     }
 }
