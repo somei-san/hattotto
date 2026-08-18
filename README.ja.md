@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.svg" alt="貼っとっと スクリーンショット" width="600" />
+  <img src="assets/hero.ja.svg" alt="貼っとっと スクリーンショット" width="600" />
 </p>
 
 ## こだわりポイント
