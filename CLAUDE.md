@@ -45,8 +45,11 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 npm install
 npx playwright install chromium
 
-# テスト実行
+# テスト実行（node の単体テスト → Playwright の順）
 npm test
+
+# 単体テストだけ（ブラウザを起動しないので速い）
+npm run test:unit
 
 # スナップショット更新（UI変更後）
 npm run test:update
@@ -58,11 +61,12 @@ npm run test:report
 **重要**: フロントエンド（`src/note.js`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
 
 ### テストファイル構成
-すべて `tests/visual/` 配下（全一覧は `ls tests/visual/*.spec.ts` を参照）。ファイル名で区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
+`tests/unit/` は node の単体テスト（`node --test`）、`tests/visual/` は Playwright（全一覧は `ls tests/visual/*.spec.ts` を参照）。Playwright 側でファイル名から区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
 
+- 単体テスト — `tests/unit/*.test.js`。ブラウザを起動せず `src/` の関数を `require` して呼ぶ。対象は DOM にもアプリの状態にも触らない関数だけ
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
   - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
-- UT — 上記以外の非 E2E spec。Markdown 変換・記法検出・レンダリング、アクセシビリティ、コンテキストメニュー等の単体テスト
+- UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、レンダリング、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
 - E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
 
@@ -84,11 +88,12 @@ npm run test:report
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
 ### フロントエンド (`src/`)
-HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js`〕→ ページ固有の `.js` の順に読み込み、グローバルスコープを共有する。
+HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js` → `note-lines.js`〕→ ページ固有の `.js` の順に読む（〔〕内は `note.html` だけ）。同一ページ内でグローバルスコープを共有する。
 
 - `note.html` / `note.js` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
 - `settings.html` / `settings.js` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
 - `trash.html` / `trash.js` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
+- `note-lines.js` — 生 Markdown の行を扱う純粋関数（行頭マーカー長・リスト継続のプレフィックス・ブロック内オフセット）。DOM に触らないので `tests/unit/` から `require` できる
 - `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。`note.js` の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
 - `i18n.js` — フロントエンド側 UI 文言（`window.I18N`）。`data-i18n` / `data-i18n-html` / `data-i18n-title` / `data-i18n-aria-label` / `data-i18n-doc-title` 属性を `applyDom()` が差し替える
