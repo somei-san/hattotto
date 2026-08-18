@@ -60,7 +60,8 @@ npm run test:report
 ### テストファイル構成
 すべて `tests/visual/` 配下（全一覧は `ls tests/visual/*.spec.ts` を参照）。ファイル名で区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
 
-- VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/{darwin,linux}/`。darwin は `npm run test:update`、linux は `visual-test.yml` の `workflow_dispatch` から更新する
+- VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
+  - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
 - UT — 上記以外の非 E2E spec。Markdown 変換・記法検出・レンダリング、アクセシビリティ、コンテキストメニュー等の単体テスト
 - E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ

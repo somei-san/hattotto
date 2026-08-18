@@ -5,25 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # 見た目の変更を承認する行為なので、自動では走らせない
-  workflow_dispatch:
-    inputs:
-      update_snapshots:
-        description: linux のベースラインを更新してコミットする
-        type: boolean
-        default: false
 
 jobs:
   visual-test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    # ベースラインはローカルの npm run test:update で生成するため、macOS を揃える
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -32,28 +21,9 @@ jobs:
 
       - run: npm ci
 
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
 
-      - name: Run tests
-        if: ${{ !inputs.update_snapshots }}
-        run: npx playwright test
-
-      - name: Update snapshots
-        if: ${{ inputs.update_snapshots }}
-        run: npx playwright test --update-snapshots
-
-      - name: Commit updated snapshots
-        if: ${{ inputs.update_snapshots }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/visual/__screenshots__/linux/
-          if git diff --cached --quiet; then
-            echo "No snapshot changes to commit"
-          else
-            git commit -m "✅ linux のベースラインを更新する [skip ci]"
-            git push
-          fi
+      - run: npx playwright test
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
