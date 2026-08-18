@@ -1,5 +1,6 @@
 // ── Shared utilities ─────────────────────────────────────────
 // Common functions used across note.html, trash.html, settings.html.
+/* exported escapeHtml, showToast */
 
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

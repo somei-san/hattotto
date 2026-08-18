@@ -1,14 +1,18 @@
 {
   "private": true,
   "scripts": {
+    "lint": "eslint . --max-warnings 0",
     "test": "node --test tests/unit/*.test.js && playwright test",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:update": "playwright test --update-snapshots",
     "test:report": "playwright show-report"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.52.0",
     "@types/node": "^25.5.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "serve": "^14.2.4"
   }
 }
