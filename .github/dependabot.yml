@@ -2,10 +2,13 @@ version: 2
 
 # 更新は Insights → Dependency graph → Dependabot の「Check for updates」を押したときに拾う。
 # interval はスケジュール実行を実質止めるための yearly（手動チェックは interval と無関係に走る）。
-# 押すタイミングは DEVELOPMENT.md のリリース手順に紐づけている。
-# 脆弱性の alerts はこの設定とは別系統で、advisory の公開時に届く。
+# 押し忘れは scripts/release.sh がリリース前に止める。
+# 脆弱性はこの設定ではなく Dependabot alerts が拾う（リポジトリの Settings 側で有効にする）。
 # 自動マージは入れない。CI は実アプリを起動しない（Playwright は __TAURI__ をモックし、
 # Rust 側は純粋関数の unit test だけ）ので、緑でも挙動の変化は人が見るしかない。
+#
+# major を minor / patch と同じグループに入れないこと。major だけが壊れたときに
+# 無害な更新まで道連れになり、リリース直前に切り分け作業が発生する。
 
 updates:
   - package-ecosystem: npm
@@ -15,11 +18,15 @@ updates:
     commit-message:
       prefix: "⬆️"
     groups:
-      npm:
+      # Playwright は VRT のベースライン再生成が要るので単独 PR にする
+      npm-minor-patch:
         patterns: ["*"]
-        # Playwright は VRT のベースライン再生成が要るので単独 PR にする
         exclude-patterns: ["@playwright/test"]
-        update-types: [major, minor, patch]
+        update-types: [minor, patch]
+      npm-major:
+        patterns: ["*"]
+        exclude-patterns: ["@playwright/test"]
+        update-types: [major]
 
   - package-ecosystem: github-actions
     directory: /
@@ -28,9 +35,12 @@ updates:
     commit-message:
       prefix: "⬆️"
     groups:
-      actions:
+      actions-minor-patch:
         patterns: ["*"]
-        update-types: [major, minor, patch]
+        update-types: [minor, patch]
+      actions-major:
+        patterns: ["*"]
+        update-types: [major]
 
   # Cargo.toml は src-tauri/ にある
   - package-ecosystem: cargo
@@ -40,6 +50,9 @@ updates:
     commit-message:
       prefix: "⬆️"
     groups:
-      cargo:
+      cargo-minor-patch:
         patterns: ["*"]
-        update-types: [major, minor, patch]
+        update-types: [minor, patch]
+      cargo-major:
+        patterns: ["*"]
+        update-types: [major]

@@ -28,6 +28,24 @@ if git tag -l "$TAG" | grep -q .; then
   exit 1
 fi
 
+# 依存の更新はここで拾う（dependabot は定期実行しない設定。.github/dependabot.yml 参照）。
+# バージョン更新のコミットより前に置くこと。後ろだと中断時に未 push のコミットが残り、
+# その間に dependabot PR をマージすると再実行時の push が分岐して失敗する。
+OPEN_BOT_PRS="$(gh pr list --repo somei-san/hattotto --author "app/dependabot" --state open --json number --jq 'length')"
+if [[ "$OPEN_BOT_PRS" != "0" ]]; then
+  echo "ERROR: dependabot の PR が ${OPEN_BOT_PRS} 件残っています。片付けてからリリースしてください" >&2
+  gh pr list --repo somei-san/hattotto --author "app/dependabot" --state open >&2
+  exit 1
+fi
+
+if [[ -t 0 ]]; then
+  read -r -p "Dependabot の Check for updates は押しましたか? [y/N] " reply
+  if [[ ! "$reply" =~ ^[yY]$ ]]; then
+    echo "中断しました。Insights → Dependency graph → Dependabot で押してください" >&2
+    exit 1
+  fi
+fi
+
 # バージョンを各設定ファイルに反映
 CURRENT="$(jq -r '.version' "$TAURI_CONF")"
 if [[ "$CURRENT" != "$VERSION" ]]; then
