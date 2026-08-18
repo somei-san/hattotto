@@ -40,7 +40,10 @@ test("settings tab — confirm-delete-toggle default is checked", async ({ setti
 
 // ── ヘルプタブ ─────────────────────────────────────────────
 
-test("help tab", async ({ settingsPage }) => {
-  await settingsPage.click('[data-tab="help"]');
-  await expect(settingsPage).toHaveScreenshot("settings-help.png");
+// 英語表示で撮る。日本語のヘルプは `<code>` に日本語が入り、等幅フォントの
+// CJK フォールバックがローカルと CI ランナーで揃わない。
+test("help tab", async ({ openSettings }) => {
+  const page = await openSettings({ language: "en" });
+  await page.click('[data-tab="help"]');
+  await expect(page).toHaveScreenshot("settings-help.png");
 });
