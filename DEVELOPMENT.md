@@ -43,7 +43,7 @@ npm run test:update
 
 タグ push をトリガーに GitHub Actions が自動で universal DMG ビルド → GitHub Release 作成 → Homebrew tap 更新を行います。
 
-タグを打つ前に Insights → Dependency graph → Dependabot で「Check for updates」を押し、出てきた PR を片付けてください。dependabot は定期実行しない設定なので、依存を上げる機会はここだけです。
+dependabot は定期実行しない設定なので、依存を上げるのはリリース前です。Insights → Dependency graph → Dependabot で「Check for updates」を押し、出てきた PR を片付けてから実行してください。押したかの確認と、未処理の dependabot PR が残っていないかのチェックは `release.sh` が行います。
 
 ```bash
 # tauri.conf.json / Cargo.toml / Cargo.lock の更新からコミット・タグ・push まで
