@@ -138,6 +138,9 @@ pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Res
                     .as_secs(),
             );
             let mut trash = state.trash.recover();
+            // 保存が途中で止まって付箋とゴミ箱の両方に残った付箋を再度削除しても
+            // ゴミ箱に同じ id が並ばないようにする
+            trash.retain(|n| n.id != id);
             trash.push(note);
             enforce_trash_limit(&mut trash);
             let trash_snap = trash.clone();
@@ -147,11 +150,13 @@ pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Res
             (None, None)
         }
     };
-    if let Some(ns) = &notes_snapshot {
-        save_notes(state, ns)?;
-    }
+    // 付箋側を先に消すと、間で中断したときにどちらのファイルからも消える。
+    // この順なら両方に残るので捨て直せる
     if let Some(ts) = &trash_snapshot {
         save_trash(state, ts)?;
+    }
+    if let Some(ns) = &notes_snapshot {
+        save_notes(state, ns)?;
     }
     if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
         let _ = win.close();
@@ -201,18 +206,25 @@ pub(crate) fn restore_note(
             (None, None)
         }
     };
-    if let Some(ts) = &trash_snapshot {
-        save_trash(&state, ts)?;
-    }
     if let Some(mut note) = note {
         note.deleted_at = None;
         open_note_window(&app, &note);
         let notes_snapshot = {
             let mut notes = state.notes.recover();
-            notes.push(note.clone());
+            // 保存が途中で止まって付箋とゴミ箱の両方に残った付箋を復元しても
+            // 付箋側に同じ id が並ばないようにする。ゴミ箱のコピーは削除時点のもので
+            // 以降の編集を含まないため、付箋側に残っているほうを勝たせる
+            if !notes.iter().any(|n| n.id == note.id) {
+                notes.push(note.clone());
+            }
             notes.clone()
         };
+        // ゴミ箱側を先に消すと、間で中断したときにどちらのファイルからも消える。
+        // この順なら両方に残るので復元し直せる
         save_notes(&state, &notes_snapshot)?;
+        if let Some(ts) = &trash_snapshot {
+            save_trash(&state, ts)?;
+        }
         Ok(Some(note))
     } else {
         Ok(None)
