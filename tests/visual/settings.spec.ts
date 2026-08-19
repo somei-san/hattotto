@@ -47,3 +47,17 @@ test("help tab", async ({ openSettings }) => {
   await page.click('[data-tab="help"]');
   await expect(page).toHaveScreenshot("settings-help.png");
 });
+
+// ── 支援タブ ───────────────────────────────────────────────
+
+test("support tab", async ({ settingsPage }) => {
+  await settingsPage.click('[data-tab="support"]');
+  await expect(settingsPage).toHaveScreenshot("settings-support.png");
+});
+
+test("support tab — button opens the support page", async ({ settingsPage }) => {
+  await settingsPage.click('[data-tab="support"]');
+  await settingsPage.click("#support-btn");
+  const calls = await settingsPage.evaluate(() => (window as any).__shell_open_calls);
+  expect(calls).toEqual(["https://buymeacoffee.com/somei"]);
+});

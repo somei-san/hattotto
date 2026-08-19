@@ -9,6 +9,7 @@ test.describe("設定画面の英語化", () => {
 
     await expect(page.locator("#tab-settings")).toHaveText("Settings");
     await expect(page.locator("#tab-help")).toHaveText("Help");
+    await expect(page.locator("#tab-support")).toHaveText("Support");
     await expect(page.locator(".section-title").first()).toHaveText("Default Color for New Notes");
     await expect(page.locator("#save-btn")).toHaveText("Save");
 
@@ -20,6 +21,7 @@ test.describe("設定画面の英語化", () => {
     const page = await openSettings({ language: "ja" });
     await expect(page.locator("#tab-settings")).toHaveText("設定");
     await expect(page.locator("#tab-help")).toHaveText("ヘルプ");
+    await expect(page.locator("#tab-support")).toHaveText("支援");
 
     await page.click('[data-tab="help"]');
     await expect(page.locator("#panel-help .section-title").first()).toHaveText("基本操作");

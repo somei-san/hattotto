@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title data-i18n-doc-title="settingsDocTitle">貼っとっと — 設定 / ヘルプ</title>
+<title data-i18n-doc-title="settingsDocTitle">貼っとっと — 設定</title>
 <link rel="stylesheet" href="colors.css" />
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -142,6 +142,31 @@
     cursor: default;
   }
   .save-btn:disabled:hover { opacity: 0.4; }
+
+  /* ── Support ──────────────────────────────────────── */
+  .support-message {
+    white-space: pre-line;
+    line-height: 1.6;
+    text-align: center;
+    color: var(--text);
+  }
+
+  .support-btn {
+    display: block;
+    margin: 16px auto 0;
+    padding: 10px 20px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .support-btn:hover { opacity: 0.85; }
+  .support-btn:active { opacity: 0.7; }
 
   /* ── Help: Shortcuts ──────────────────────────────── */
   .shortcut-table {
@@ -334,6 +359,7 @@
   .size-btn:focus-visible,
   .tab:focus-visible,
   .save-btn:focus-visible,
+  .support-btn:focus-visible,
   .toggle-track:focus-visible,
   .opacity-slider:focus-visible,
   .language-select:focus-visible {
@@ -347,6 +373,7 @@
 <div class="tab-bar" role="tablist">
   <div class="tab active" id="tab-settings" data-tab="settings" role="tab" aria-selected="true" aria-controls="panel-settings" tabindex="0" data-i18n="tabSettings">設定</div>
   <div class="tab" id="tab-help" data-tab="help" role="tab" aria-selected="false" aria-controls="panel-help" tabindex="-1" data-i18n="tabHelp">ヘルプ</div>
+  <div class="tab" id="tab-support" data-tab="support" role="tab" aria-selected="false" aria-controls="panel-support" tabindex="-1" data-i18n="tabSupport">支援</div>
 </div>
 
 <!-- ── Settings Panel ─────────────────────────────── -->
@@ -497,6 +524,15 @@
     </div>
   </div>
 
+</div>
+
+<!-- ── Support Panel ──────────────────────────────── -->
+<div class="panel" id="panel-support" role="tabpanel" aria-labelledby="tab-support">
+  <div class="section">
+    <p class="support-message" data-i18n="supportMessage">貼っとっとはすべての機能を無償で提供しています。
+ビールを奢ってもらえると開発の励みになります 🍺</p>
+    <button class="support-btn" id="support-btn" data-i18n="supportBuyBeer">ビールを奢る…</button>
+  </div>
 </div>
 
 <div class="save-footer" id="save-footer">

@@ -68,6 +68,10 @@ brew install --cask somei-san/tap/hattotto
 - [Development guide](DEVELOPMENT.md)
 - [Homebrew tap repository](https://github.com/somei-san/homebrew-tap)
 
+## Support
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/somei)
+
 ## About the name
 
 “貼っとっと” is Kumamoto dialect for “it’s stuck up there”.

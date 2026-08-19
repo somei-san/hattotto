@@ -68,6 +68,10 @@ brew install --cask somei-san/tap/hattotto
 - [開発ガイド](DEVELOPMENT.md)
 - [Homebrew Tap リポジトリ](https://github.com/somei-san/homebrew-tap)
 
+## 支援
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/somei)
+
 ## 解説
 
 「貼っとっと」とは熊本弁で「貼ってるよ」という意味です
