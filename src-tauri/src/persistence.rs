@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
@@ -39,13 +39,30 @@ fn trash_file() -> PathBuf {
     data_dir().join("trash.json")
 }
 
+/// tmp へ書き、fsync してから rename する。
+///
+/// rename の永続化までは保証しない。電源断で rename が失われても残るのは完全な旧ファイルで、
+/// 失うのは直前の保存 1 回分だけなので、中途半端な内容のファイルにはならない。
+///
+/// tmp 名は書き込みごとには変えない。クラッシュで残った tmp が溜まるのを避けるためで、
+/// 使い回しても衝突しないのは、プロセス ID で他プロセスと分かれ、同一プロセス内では
+/// Tauri コマンドがメインスレッドで直列に実行されるからである。
 fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!(
         "{}.tmp.{}",
         path.file_name().unwrap().to_string_lossy(),
         std::process::id()
     ));
-    fs::write(&tmp, data).map_err(|e| format!("{}: {}", tmp.display(), e))?;
+    let written = (|| -> io::Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(data.as_bytes())?;
+        // Apple プラットフォームでは F_FULLFSYNC になり、ディスクのキャッシュまで書き出す
+        f.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("{}: {}", tmp.display(), e));
+    }
     fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("rename {} -> {}: {}", tmp.display(), path.display(), e)
@@ -380,6 +397,19 @@ mod tests {
         atomic_write(&path, r#"{"hello":"world"}"#).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, r#"{"hello":"world"}"#);
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_tmp_behind() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.json");
+        atomic_write(&path, "first").unwrap();
+        atomic_write(&path, "second").unwrap();
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["test.json"]);
     }
 
     #[test]
