@@ -24,9 +24,10 @@ const I18N_TABLE = {
   color: { ja: '色', en: 'Color' },
 
   // ── settings.html ──────────────────────────────────
-  settingsDocTitle: { ja: '貼っとっと — 設定 / ヘルプ', en: 'Hattotto — Settings / Help' },
+  settingsDocTitle: { ja: '貼っとっと — 設定', en: 'Hattotto — Settings' },
   tabSettings: { ja: '設定', en: 'Settings' },
   tabHelp: { ja: 'ヘルプ', en: 'Help' },
+  tabSupport: { ja: '支援', en: 'Support' },
 
   sectionDefaultColor: { ja: '新しい付箋のデフォルトカラー', en: 'Default Color for New Notes' },
   defaultColorGroupLabel: { ja: 'デフォルトカラー', en: 'Default Color' },
@@ -83,6 +84,9 @@ const I18N_TABLE = {
   sectionVersion: { ja: 'バージョン情報', en: 'Version' },
   saveButton: { ja: '保存', en: 'Save' },
   toastSettingsSaveFailed: { ja: '設定の保存に失敗しました', en: 'Failed to save settings' },
+
+  supportMessage: { ja: '貼っとっとはすべての機能を無償で提供しています。\nビールを奢ってもらえると開発の励みになります 🍺', en: 'Hattotto is free, with every feature included.\nBuying me a beer keeps the work going 🍺' },
+  supportBuyBeer: { ja: 'ビールを奢る…', en: 'Buy me a beer…' },
 
   // ── trash.html ─────────────────────────────────────
   trashDocTitle: { ja: 'ゴミ箱', en: 'Trash' },

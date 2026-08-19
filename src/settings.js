@@ -2,6 +2,9 @@ const { invoke } = window.__TAURI__.core;
 const { emit, listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
+// URL は言語によらず固定
+const SUPPORT_URL = 'https://buymeacoffee.com/somei';
+
 let currentColor   = 'yellow';
 let currentOpacity = 100;
 let currentBringAll = true;
@@ -209,6 +212,11 @@ languageSelect.addEventListener('change', () => {
   currentLanguage = languageSelect.value;
   I18N.setLang(I18N.resolve(currentLanguage));
   checkDirty();
+});
+
+// ── Support Button ───────────────────────────────────
+document.getElementById('support-btn').addEventListener('click', () => {
+  window.__TAURI__.shell.open(SUPPORT_URL);
 });
 
 // ── Load current settings ────────────────────────────

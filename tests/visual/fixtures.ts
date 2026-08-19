@@ -111,6 +111,9 @@ async function injectSettingsMock(
   const settings = { ...DEFAULT_SETTINGS, ...settingsOverrides };
 
   await page.addInitScript((data) => {
+    const shellOpenCalls: string[] = [];
+    (window as any).__shell_open_calls = shellOpenCalls;
+
     (window as any).__TAURI__ = {
       core: {
         invoke: async (cmd: string) => {
@@ -130,6 +133,9 @@ async function injectSettingsMock(
       },
       app: {
         getVersion: async () => "0.1.0",
+      },
+      shell: {
+        open: async (url: string) => { shellOpenCalls.push(url); },
       },
       webviewWindow: {
         getCurrentWebviewWindow: () => ({
