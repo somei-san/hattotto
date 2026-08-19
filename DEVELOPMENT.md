@@ -43,9 +43,19 @@ npm run test:update
 
 タグ push をトリガーに GitHub Actions が自動で universal DMG ビルド → GitHub Release 作成 → Homebrew tap 更新を行います。バージョン更新・コミット・タグ付け・push は [cargo-release](https://github.com/crate-ci/cargo-release) が行います（`cargo install cargo-release` または `brew install cargo-release` で導入）。未処理の dependabot PR が残っているとフック（`scripts/check-dependabot.sh`）が止めるので、先に片付けてください。
 
+上げ幅は第 1 引数で指定します。次のバージョンは `Cargo.toml` の現在値から計算されるので、番号そのものは書きません。
+
+| 引数 | 0.3.1 のとき |
+|---|---|
+| `patch` | 0.3.2 |
+| `minor` | 0.4.0 |
+| `major` | 1.0.0 |
+
 ```bash
-# dry-run で内容を確認してから --execute で実行。patch の代わりに minor / major も指定可
+# dry-run で内容を確認する（--execute を付けるまで何も起きない）
 cargo release patch --manifest-path src-tauri/Cargo.toml
+
+# 確認できたら実行する
 cargo release patch --manifest-path src-tauri/Cargo.toml --execute
 
 # 中断からのやり直し（バージョンは上がっているがタグが無い場合）
