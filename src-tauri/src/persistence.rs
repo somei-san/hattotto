@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn save_notes_refuses_when_not_loaded() {
         // save_notes は固定パス（data_dir() 配下）に書くため、HOME を差し替えて
-        // 実データに触れずに検証する（issue #42 の再現手順と同じ手法）。
+        // 実データに触れずに検証する。
         let dir = TempDir::new().unwrap();
         let prev_home = std::env::var_os("HOME");
         unsafe {
