@@ -49,6 +49,12 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        // 2 個目のインスタンスは同じ notes.json を別々に書き戻して互いの変更を消すため、
+        // 起動そのものを止める。データディレクトリに触る前に終了させる必要があるので、
+        // このプラグインは他より先に登録する
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            bring_all_to_front(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
