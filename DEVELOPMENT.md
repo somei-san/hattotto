@@ -41,17 +41,26 @@ npm run test:update
 
 ## リリース手順
 
-タグ push をトリガーに GitHub Actions が自動で universal DMG ビルド → GitHub Release 作成 → Homebrew tap 更新を行います。
+タグ push をトリガーに GitHub Actions が自動で universal DMG ビルド → GitHub Release 作成 → Homebrew tap 更新を行います。バージョン更新・コミット・タグ付け・push は [cargo-release](https://github.com/crate-ci/cargo-release) が行います（`cargo install cargo-release` または `brew install cargo-release` で導入）。未処理の dependabot PR が残っているとフック（`scripts/check-dependabot.sh`）が止めるので、先に片付けてください。
 
-dependabot は定期実行しない設定なので、依存を上げるのはリリース前です。Insights → Dependency graph → Dependabot で「Check for updates」を押し、出てきた PR を片付けてから実行してください。押したかの確認と、未処理の dependabot PR が残っていないかのチェックは `release.sh` が行います。
+上げ幅は第 1 引数で指定します。次のバージョンは `Cargo.toml` の現在値から計算されるので、番号そのものは書きません。
+
+| 引数 | 0.3.1 のとき |
+|---|---|
+| `patch` | 0.3.2 |
+| `minor` | 0.4.0 |
+| `major` | 1.0.0 |
 
 ```bash
-# tauri.conf.json / Cargo.toml / Cargo.lock の更新からコミット・タグ・push まで
-# スクリプトが行います
-./scripts/release.sh 0.2.0
+# dry-run で内容を確認する（--execute を付けるまで何も起きない）
+cargo release patch --manifest-path src-tauri/Cargo.toml
 
-# バージョン省略時は tauri.conf.json の現在のバージョンを使用
-./scripts/release.sh
+# 確認できたら実行する
+cargo release patch --manifest-path src-tauri/Cargo.toml --execute
+
+# 中断からのやり直し（バージョンは上がっているがタグが無い場合）
+cargo release tag --manifest-path src-tauri/Cargo.toml --execute
+cargo release push --manifest-path src-tauri/Cargo.toml --execute
 ```
 
 ### 初回セットアップ（リポジトリ管理者のみ）
