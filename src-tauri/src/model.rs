@@ -175,6 +175,13 @@ pub struct AppState {
     pub(crate) last_bring_to_front: Mutex<Instant>,
     /// Note ID that last opened the context menu (for routing menu events)
     pub(crate) context_menu_note_id: Mutex<String>,
+    /// notes.json を起動時に読み込めたか。`false` は「ファイルはあるが読めなかった」を意味し、
+    /// この場合 `notes` は空のまま初期化されるが、それを付箋 0 件の初回起動と混同してはならない。
+    pub(crate) notes_loaded: bool,
+    /// settings.json を起動時に読み込めたか。`false` は「ファイルはあるが読めなかった」を意味する。
+    pub(crate) settings_loaded: bool,
+    /// trash.json を起動時に読み込めたか。`false` は「ファイルはあるが読めなかった」を意味する。
+    pub(crate) trash_loaded: bool,
 }
 
 #[cfg(test)]

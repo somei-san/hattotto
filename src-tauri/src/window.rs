@@ -60,7 +60,7 @@ pub(crate) fn create_note_with_window(app: &AppHandle, state: &AppState) -> Note
         notes.push(n.clone());
         notes.clone()
     };
-    if let Err(e) = save_notes(&snapshot) {
+    if let Err(e) = save_notes(state, &snapshot) {
         eprintln!("save notes error: {}", e);
     }
     n

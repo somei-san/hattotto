@@ -1,13 +1,25 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 
-use crate::model::{Note, Settings, TRASH_MAX};
+use crate::model::{AppState, Note, Settings, TRASH_MAX};
+
+/// ファイル読み込みの結果。「無い」「読めた」「あるが読めない」を区別する。
+/// `Vec<Note>` の `Default` が空であるのと同じ形になってしまう `Unreadable` を
+/// `Missing` と混同すると、読み込み失敗を初回起動と誤認して既存データを上書きしうる。
+pub(crate) enum Loaded<T> {
+    /// ファイルが存在しない。初回起動として扱ってよい
+    Missing,
+    Ok(T),
+    /// ファイルはあるが読み取り・パースに失敗した。上書き保存してはいけない
+    Unreadable,
+}
 
 // ── Persistence ─────────────────────────────────────────────
 
-fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     let dir = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("com.hattotto.app");
@@ -40,14 +52,20 @@ fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     })
 }
 
-fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
-    if path.exists() {
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    } else {
-        T::default()
+fn load_json<T: DeserializeOwned>(path: &Path) -> Loaded<T> {
+    // `Path::exists()` は I/O エラーでも false を返すため、故障中のディスクを
+    // 「ファイルが無い」と誤認する。`Missing` に倒せるのは NotFound のときだけ
+    match fs::metadata(path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Loaded::Missing,
+        Err(_) => return Loaded::Unreadable,
+    }
+    match fs::read_to_string(path) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(v) => Loaded::Ok(v),
+            Err(_) => Loaded::Unreadable,
+        },
+        Err(_) => Loaded::Unreadable,
     }
 }
 
@@ -60,11 +78,11 @@ fn save_json<T: serde::Serialize + ?Sized>(
     atomic_write(path, &json).map_err(|e| format!("Failed to save {}: {}", label, e))
 }
 
-fn load_notes_from(path: &Path) -> Vec<Note> {
+fn load_notes_from(path: &Path) -> Loaded<Vec<Note>> {
     load_json(path)
 }
 
-pub(crate) fn load_notes() -> Vec<Note> {
+pub(crate) fn load_notes() -> Loaded<Vec<Note>> {
     load_notes_from(&data_file())
 }
 
@@ -72,15 +90,20 @@ fn save_notes_to(notes: &[Note], path: &Path) -> Result<(), String> {
     save_json(notes, path, "notes")
 }
 
-pub(crate) fn save_notes(notes: &[Note]) -> Result<(), String> {
+/// `state.notes_loaded` が `false`（起動時に notes.json を読めなかった）場合は書かずに `Err` を返す。
+/// 読めなかった元データを空データで上書きしないためのガード。
+pub(crate) fn save_notes(state: &AppState, notes: &[Note]) -> Result<(), String> {
+    if !state.notes_loaded {
+        return Err("Refusing to save notes: notes.json failed to load at startup".to_string());
+    }
     save_notes_to(notes, &data_file())
 }
 
-fn load_settings_from(path: &Path) -> Settings {
+fn load_settings_from(path: &Path) -> Loaded<Settings> {
     load_json(path)
 }
 
-pub(crate) fn load_settings() -> Settings {
+pub(crate) fn load_settings() -> Loaded<Settings> {
     load_settings_from(&settings_file())
 }
 
@@ -88,15 +111,22 @@ fn save_settings_to(settings: &Settings, path: &Path) -> Result<(), String> {
     save_json(settings, path, "settings")
 }
 
-pub(crate) fn save_settings(settings: &Settings) -> Result<(), String> {
+/// `state.settings_loaded` が `false`（起動時に settings.json を読めなかった）場合は
+/// 書かずに `Err` を返す。読めなかった元データを既定値で上書きしないためのガード。
+pub(crate) fn save_settings(state: &AppState, settings: &Settings) -> Result<(), String> {
+    if !state.settings_loaded {
+        return Err(
+            "Refusing to save settings: settings.json failed to load at startup".to_string(),
+        );
+    }
     save_settings_to(settings, &settings_file())
 }
 
-fn load_trash_from(path: &Path) -> Vec<Note> {
+fn load_trash_from(path: &Path) -> Loaded<Vec<Note>> {
     load_json(path)
 }
 
-pub(crate) fn load_trash() -> Vec<Note> {
+pub(crate) fn load_trash() -> Loaded<Vec<Note>> {
     load_trash_from(&trash_file())
 }
 
@@ -104,7 +134,12 @@ fn save_trash_to(trash: &[Note], path: &Path) -> Result<(), String> {
     save_json(trash, path, "trash")
 }
 
-pub(crate) fn save_trash(trash: &[Note]) -> Result<(), String> {
+/// `state.trash_loaded` が `false`（起動時に trash.json を読めなかった）場合は書かずに `Err` を返す。
+/// 読めなかった元データを空データで上書きしないためのガード。
+pub(crate) fn save_trash(state: &AppState, trash: &[Note]) -> Result<(), String> {
+    if !state.trash_loaded {
+        return Err("Refusing to save trash: trash.json failed to load at startup".to_string());
+    }
     save_trash_to(trash, &trash_file())
 }
 
@@ -120,6 +155,8 @@ pub(crate) fn enforce_trash_limit(trash: &mut Vec<Note>) {
 mod tests {
     use super::*;
     use crate::model::LanguageSetting;
+    use std::sync::Mutex;
+    use std::time::Instant;
     use tempfile::TempDir;
 
     fn make_note(id: &str, color: &str, content: &str) -> Note {
@@ -134,6 +171,27 @@ mod tests {
             zoom: 100,
             pinned: false,
             deleted_at: None,
+        }
+    }
+
+    /// テスト用の `AppState`。ロード済みフラグ以外は使わない。
+    fn make_state(notes_loaded: bool, settings_loaded: bool, trash_loaded: bool) -> AppState {
+        AppState {
+            notes: Mutex::new(Vec::new()),
+            settings: Mutex::new(Settings::default()),
+            trash: Mutex::new(Vec::new()),
+            last_bring_to_front: Mutex::new(Instant::now()),
+            context_menu_note_id: Mutex::new(String::new()),
+            notes_loaded,
+            settings_loaded,
+            trash_loaded,
+        }
+    }
+
+    fn unwrap_ok<T>(loaded: Loaded<T>) -> T {
+        match loaded {
+            Loaded::Ok(v) => v,
+            _ => panic!("expected Loaded::Ok"),
         }
     }
 
@@ -181,7 +239,7 @@ mod tests {
             make_note("b", "blue", "world"),
         ];
         save_notes_to(&notes, &path).unwrap();
-        let loaded = load_notes_from(&path);
+        let loaded = unwrap_ok(load_notes_from(&path));
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].id, "a");
         assert_eq!(loaded[0].content, "hello");
@@ -204,7 +262,7 @@ mod tests {
             language: LanguageSetting::En,
         };
         save_settings_to(&settings, &path).unwrap();
-        let loaded = load_settings_from(&path);
+        let loaded = unwrap_ok(load_settings_from(&path));
         assert_eq!(loaded.default_color, "pink");
         assert_eq!(loaded.opacity, 80);
         assert!(!loaded.bring_all_to_front);
@@ -218,25 +276,99 @@ mod tests {
         let path = dir.path().join("trash.json");
         let trash = vec![make_note("t1", "green", "deleted")];
         save_trash_to(&trash, &path).unwrap();
-        let loaded = load_trash_from(&path);
+        let loaded = unwrap_ok(load_trash_from(&path));
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, "t1");
         assert_eq!(loaded[0].content, "deleted");
     }
 
+    // ── Loaded の3状態 ──
+
     #[test]
-    fn load_notes_nonexistent_returns_empty() {
+    fn load_notes_nonexistent_returns_missing() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.json");
-        assert!(load_notes_from(&path).is_empty());
+        assert!(matches!(load_notes_from(&path), Loaded::Missing));
     }
 
     #[test]
-    fn load_settings_nonexistent_returns_default() {
+    fn load_settings_nonexistent_returns_missing() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.json");
-        let s = load_settings_from(&path);
-        assert_eq!(s.default_color, "yellow");
+        assert!(matches!(load_settings_from(&path), Loaded::Missing));
+    }
+
+    #[test]
+    fn load_notes_valid_json_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("notes.json");
+        let notes = vec![make_note("a", "yellow", "hello")];
+        save_notes_to(&notes, &path).unwrap();
+        let loaded = unwrap_ok(load_notes_from(&path));
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn load_notes_broken_json_returns_unreadable() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("notes.json");
+        fs::write(&path, r#"{"broken"#).unwrap();
+        assert!(matches!(load_notes_from(&path), Loaded::Unreadable));
+    }
+
+    #[test]
+    fn load_notes_unreadable_permissions_returns_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("notes.json");
+        let notes = vec![make_note("a", "yellow", "hello")];
+        save_notes_to(&notes, &path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = fs::read_to_string(&path);
+        // root や CI コンテナ等、パーミッションが効かない環境では検証不能なのでスキップする
+        if result.is_ok() {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            eprintln!(
+                "skipping load_notes_unreadable_permissions_returns_unreadable: \
+                 this environment ignores file permissions (likely running as root)"
+            );
+            return;
+        }
+
+        assert!(matches!(load_notes_from(&path), Loaded::Unreadable));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    /// ファイルの有無すら確認できない状況を `Missing` に倒さないことの確認。
+    /// 親ディレクトリの検索権限を落とすと `Path::exists()` は false を返すので、
+    /// この経路を `Missing` にすると故障中のディスクで既存データを上書きしてしまう。
+    #[test]
+    fn load_notes_unstattable_returns_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let locked = dir.path().join("locked");
+        fs::create_dir(&locked).unwrap();
+        let path = locked.join("notes.json");
+        save_notes_to(&[make_note("a", "yellow", "hello")], &path).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let unstattable = fs::metadata(&path).is_err();
+        let result = load_notes_from(&path);
+        // TempDir が後片付けできるよう、判定前に権限を戻す
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // root や CI コンテナ等、パーミッションが効かない環境では検証不能なのでスキップする
+        if !unstattable {
+            eprintln!(
+                "skipping load_notes_unstattable_returns_unreadable: \
+                 this environment ignores directory permissions (likely running as root)"
+            );
+            return;
+        }
+        assert!(matches!(result, Loaded::Unreadable));
     }
 
     // ── atomic_write tests ──
@@ -284,5 +416,36 @@ mod tests {
         let trash = vec![make_note("t1", "green", "err")];
         let result = save_trash_to(&trash, &path);
         assert!(result.is_err());
+    }
+
+    // ── save_notes ガード（notes_loaded == false）──
+
+    #[test]
+    fn save_notes_refuses_when_not_loaded() {
+        // save_notes は固定パス（data_dir() 配下）に書くため、HOME を差し替えて
+        // 実データに触れずに検証する（issue #42 の再現手順と同じ手法）。
+        let dir = TempDir::new().unwrap();
+        let prev_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+
+        let state = make_state(false, true, true);
+        let notes = vec![make_note("a", "yellow", "should not be saved")];
+        let result = save_notes(&state, &notes);
+        let notes_written = data_dir().join("notes.json").exists();
+
+        unsafe {
+            match &prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        assert!(result.is_err());
+        assert!(
+            !notes_written,
+            "notes.json must not be created when notes_loaded is false"
+        );
     }
 }

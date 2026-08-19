@@ -29,7 +29,7 @@ fn update_note_field(state: &AppState, id: &str, f: impl FnOnce(&mut Note)) -> R
         f(note);
         notes.clone()
     };
-    save_notes(&snapshot)
+    save_notes(state, &snapshot)
 }
 
 /// 指定 ID の付箋を返す。見つからない場合は `None`。
@@ -148,10 +148,10 @@ pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Res
         }
     };
     if let Some(ns) = &notes_snapshot {
-        save_notes(ns)?;
+        save_notes(state, ns)?;
     }
     if let Some(ts) = &trash_snapshot {
-        save_trash(ts)?;
+        save_trash(state, ts)?;
     }
     if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
         let _ = win.close();
@@ -202,7 +202,7 @@ pub(crate) fn restore_note(
         }
     };
     if let Some(ts) = &trash_snapshot {
-        save_trash(ts)?;
+        save_trash(&state, ts)?;
     }
     if let Some(mut note) = note {
         note.deleted_at = None;
@@ -212,7 +212,7 @@ pub(crate) fn restore_note(
             notes.push(note.clone());
             notes.clone()
         };
-        save_notes(&notes_snapshot)?;
+        save_notes(&state, &notes_snapshot)?;
         Ok(Some(note))
     } else {
         Ok(None)
@@ -226,7 +226,7 @@ pub(crate) fn empty_trash(state: State<AppState>) -> Result<(), String> {
         let mut trash = state.trash.recover();
         trash.clear();
     }
-    save_trash(&[])
+    save_trash(&state, &[])
 }
 
 /// 現在の設定を返す。
@@ -281,7 +281,7 @@ pub(crate) fn update_settings(
             let _ = win.set_title(i18n::text(lang, Msg::TrashWindowTitle));
         }
     }
-    save_settings(&snapshot)
+    save_settings(&state, &snapshot)
 }
 
 /// 設定ウィンドウを開く（既に開いている場合はフォーカスを移す）。
@@ -535,7 +535,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
                 }
             };
             if let Some(snap) = snapshot {
-                if let Err(e) = save_notes(&snap) {
+                if let Err(e) = save_notes(&state, &snap) {
                     eprintln!("save notes error: {}", e);
                 }
             }
