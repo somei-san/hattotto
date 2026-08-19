@@ -40,8 +40,10 @@ pub(crate) enum Msg {
     DeleteConfirmOk,
     DeleteConfirmCancel,
 
+    /// 読み込めなかったファイル名を差し込む `{files}` を含む
     DataLoadFailed,
     DataLoadFailedOpenFolder,
+    DataLoadFailedCancel,
 
     CtxPin,
     CtxUnpin,
@@ -84,10 +86,11 @@ pub(crate) fn text(lang: Lang, msg: Msg) -> &'static str {
         Msg::DeleteConfirmCancel => ("キャンセル", "Cancel"),
 
         Msg::DataLoadFailed => (
-            "データを読み込めませんでした。\nファイルは削除していません。そのまま残っています。\n\nこの状態では変更を保存しません。新しく付箋を作っても残りません。",
-            "Your data could not be loaded.\nYour files have not been deleted — they are still there.\n\nNothing will be saved while in this state. New notes will not persist.",
+            "{files} を読み込めませんでした。\n\n中身が壊れているか、ファイルを開けない状態です。ファイルは削除していません。\n\n該当のファイルを削除するか、JSON として読める状態に直してから、貼っとっとを起動し直してください。",
+            "Hattotto could not read the following data: {files}\n\nNothing has been deleted. The data is either damaged or cannot be opened.\n\nDelete or repair it so that it is valid JSON, then start Hattotto again.",
         ),
-        Msg::DataLoadFailedOpenFolder => ("フォルダを開く", "Open Folder"),
+        Msg::DataLoadFailedOpenFolder => ("Finder で表示", "Show in Finder"),
+        Msg::DataLoadFailedCancel => ("起動をキャンセル", "Cancel Launch"),
 
         Msg::CtxPin => ("ピン留め", "Pin"),
         Msg::CtxUnpin => ("ピン留め解除", "Unpin"),

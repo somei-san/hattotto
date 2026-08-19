@@ -107,12 +107,21 @@ fn save_notes_to(notes: &[Note], path: &Path) -> Result<(), String> {
     save_json(notes, path, "notes")
 }
 
-/// `state.notes_loaded` が `false`（起動時に notes.json を読めなかった）場合は書かずに `Err` を返す。
-/// 読めなかった元データを空データで上書きしないためのガード。
-pub(crate) fn save_notes(state: &AppState, notes: &[Note]) -> Result<(), String> {
-    if !state.notes_loaded {
-        return Err("Refusing to save notes: notes.json failed to load at startup".to_string());
+/// 起動時に 1 つでも読めなかったファイルがあれば `Err` を返す。読めなかった元データを
+/// 空データや既定値で上書きしないためのガード。
+///
+/// ファイル単位で許すと、読めたファイルだけが更新されてファイル間の対応が崩れる。
+/// notes.json だけが書ける状態で付箋を削除すると、付箋一覧からは消えるのに
+/// ゴミ箱には入らない。
+fn refuse_if_unloaded(state: &AppState) -> Result<(), String> {
+    if state.notes_loaded && state.settings_loaded && state.trash_loaded {
+        return Ok(());
     }
+    Err("Refusing to save: a data file failed to load at startup".to_string())
+}
+
+pub(crate) fn save_notes(state: &AppState, notes: &[Note]) -> Result<(), String> {
+    refuse_if_unloaded(state)?;
     save_notes_to(notes, &data_file())
 }
 
@@ -128,14 +137,8 @@ fn save_settings_to(settings: &Settings, path: &Path) -> Result<(), String> {
     save_json(settings, path, "settings")
 }
 
-/// `state.settings_loaded` が `false`（起動時に settings.json を読めなかった）場合は
-/// 書かずに `Err` を返す。読めなかった元データを既定値で上書きしないためのガード。
 pub(crate) fn save_settings(state: &AppState, settings: &Settings) -> Result<(), String> {
-    if !state.settings_loaded {
-        return Err(
-            "Refusing to save settings: settings.json failed to load at startup".to_string(),
-        );
-    }
+    refuse_if_unloaded(state)?;
     save_settings_to(settings, &settings_file())
 }
 
@@ -151,12 +154,8 @@ fn save_trash_to(trash: &[Note], path: &Path) -> Result<(), String> {
     save_json(trash, path, "trash")
 }
 
-/// `state.trash_loaded` が `false`（起動時に trash.json を読めなかった）場合は書かずに `Err` を返す。
-/// 読めなかった元データを空データで上書きしないためのガード。
 pub(crate) fn save_trash(state: &AppState, trash: &[Note]) -> Result<(), String> {
-    if !state.trash_loaded {
-        return Err("Refusing to save trash: trash.json failed to load at startup".to_string());
-    }
+    refuse_if_unloaded(state)?;
     save_trash_to(trash, &trash_file())
 }
 
@@ -448,7 +447,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── save_notes ガード（notes_loaded == false）──
+    // ── 保存ガード ──
 
     #[test]
     fn save_notes_refuses_when_not_loaded() {
@@ -477,5 +476,13 @@ mod tests {
             !notes_written,
             "notes.json must not be created when notes_loaded is false"
         );
+    }
+
+    /// 読めなかったのが別のファイルでも保存を止める。
+    #[test]
+    fn save_notes_refuses_when_another_file_failed_to_load() {
+        assert!(refuse_if_unloaded(&make_state(true, false, true)).is_err());
+        assert!(refuse_if_unloaded(&make_state(true, true, false)).is_err());
+        assert!(refuse_if_unloaded(&make_state(true, true, true)).is_ok());
     }
 }

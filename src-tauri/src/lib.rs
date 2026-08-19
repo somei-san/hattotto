@@ -12,7 +12,6 @@ use std::time::Instant;
 use tauri::{Manager, State};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-use tauri_plugin_shell::ShellExt;
 
 use i18n::{Lang, Msg};
 use model::{resolve_color, AppState, Note, Settings};
@@ -92,9 +91,20 @@ pub fn run() {
 
             let state: State<AppState> = app.state();
 
-            // データファイルが読めなかった場合、付箋ウィンドウを開く前に伝える。
-            // 「消えていない」ことが最重要なので、ウェルカム付箋の作成より先に知らせる。
-            if !state.notes_loaded || !state.settings_loaded || !state.trash_loaded {
+            // データファイルが読めなかった場合、付箋ウィンドウを開かずに伝えて終了する。
+            // このまま起動を続けても保存は拒否されるので、ユーザーがファイルを片付けて
+            // 起動し直せる状態に戻すのが唯一の道筋になる。
+            let unreadable = [
+                ("notes.json", state.notes_loaded),
+                ("settings.json", state.settings_loaded),
+                ("trash.json", state.trash_loaded),
+            ]
+            .iter()
+            .filter(|(_, loaded)| !loaded)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+
+            if !unreadable.is_empty() {
                 let lang = i18n::resolve(
                     state
                         .settings
@@ -102,26 +112,42 @@ pub fn run() {
                         .unwrap_or_else(|e| e.into_inner())
                         .language,
                 );
+                let separator = match lang {
+                    Lang::Ja => "、",
+                    Lang::En => ", ",
+                };
                 let open_folder = app
                     .dialog()
-                    .message(i18n::text(lang, Msg::DataLoadFailed))
+                    .message(
+                        i18n::text(lang, Msg::DataLoadFailed)
+                            .replace("{files}", &unreadable.join(separator)),
+                    )
                     .title(i18n::app_name(lang))
                     .buttons(MessageDialogButtons::OkCancelCustom(
                         i18n::text(lang, Msg::DataLoadFailedOpenFolder).to_string(),
-                        // 「OK」は日英で同一表記なのでリテラルで書く
-                        "OK".to_string(),
+                        i18n::text(lang, Msg::DataLoadFailedCancel).to_string(),
                     ))
                     .blocking_show();
 
                 if open_folder {
+                    // データフォルダ名が .app で終わるため、Finder はこれをアプリケーション
+                    // バンドルとみなし、フォルダとして開けない。-R でファイルを選択状態に
+                    // すれば起動を試みずに済む。直後にプロセスを落とすので完了を待つ
                     let dir = persistence::data_dir();
-                    // tauri-plugin-opener は依存に無いため、既存の tauri_plugin_shell 経由で開く
-                    #[allow(deprecated)]
-                    let result = app.shell().open(dir.to_string_lossy(), None);
-                    if let Err(e) = result {
-                        eprintln!("Failed to open data folder: {e}");
+                    let result = std::process::Command::new("open")
+                        .arg("-R")
+                        .args(unreadable.iter().map(|name| dir.join(name)))
+                        .status();
+                    match result {
+                        Ok(status) if !status.success() => {
+                            eprintln!("Failed to reveal data files: open exited with {status}");
+                        }
+                        Err(e) => eprintln!("Failed to reveal data files: {e}"),
+                        Ok(_) => {}
                     }
                 }
+                // Tauri の終了処理を通さずに落とす。この状態では何も書き込ませたくない
+                std::process::exit(0);
             }
 
             // Restore saved notes
@@ -131,7 +157,7 @@ pub fn run() {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
 
-            if notes.is_empty() && state.notes_loaded {
+            if notes.is_empty() {
                 // Create default notes on first launch — one in Japanese, one in
                 // English, so a first-time user sees both regardless of OS locale.
                 drop(notes);
