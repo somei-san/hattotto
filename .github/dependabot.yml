@@ -1,9 +1,8 @@
 version: 2
 
-# 更新は Insights → Dependency graph → Dependabot の「Check for updates」を押したときに拾う。
-# interval はスケジュール実行を実質止めるための yearly（手動チェックは interval と無関係に走る）。
-# 押し忘れは scripts/release.sh がリリース前に止める。
-# 脆弱性はこの設定ではなく Dependabot alerts が拾う（リポジトリの Settings 側で有効にする）。
+# 更新は半年に 1 度 dependabot が自動で拾う（interval 参照）。
+# 溜まった PR は scripts/check-dependabot.sh がリリース前に片付けさせる。
+# 脆弱性は interval と無関係に Dependabot alerts と security updates が拾う（リポジトリの Settings 側で有効化済み）。
 # 自動マージは入れない。CI は実アプリを起動しない（Playwright は __TAURI__ をモックし、
 # Rust 側は純粋関数の unit test だけ）ので、緑でも挙動の変化は人が見るしかない。
 #
@@ -14,7 +13,7 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: yearly
+      interval: semiannually
     commit-message:
       prefix: "⬆️"
     groups:
@@ -31,7 +30,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: yearly
+      interval: semiannually
     commit-message:
       prefix: "⬆️"
     groups:
@@ -46,7 +45,7 @@ updates:
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
-      interval: yearly
+      interval: semiannually
     commit-message:
       prefix: "⬆️"
     groups:

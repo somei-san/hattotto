@@ -1,0 +1,13 @@
+publish = false
+tag-name = "v{{version}}"
+# main 以外のブランチでの誤実行を防ぐ
+allow-branch = ["main"]
+pre-release-commit-message = "📦️ バージョンを {{version}} に上げる"
+# 既定は英語の "chore: Release ..." で、このリポジトリの規約から外れる
+tag-message = "📦️ バージョンを {{version}} に上げる"
+# 相対パスの基準はクレートルート（src-tauri）。フックの cwd も同じ
+pre-release-hook = ["../scripts/check-dependabot.sh"]
+pre-release-replacements = [
+  # exactly = 1 で「複数箇所ヒットしたら失敗」を強制する。$schema の URL には当たらない
+  { file = "tauri.conf.json", search = '"version": "[^"]+"', replace = '"version": "{{version}}"', exactly = 1 },
+]
