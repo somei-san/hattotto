@@ -122,13 +122,29 @@ impl Note {
 }
 
 /// 表示言語の設定値。`Auto` は OS のロケールに従う（`i18n::resolve` で解決する）。
+///
+/// 未知の値は `Auto` として読む。言語を追加したバージョンで保存した `settings.json` が
+/// 原因で、その言語を知らないバージョンが起動できなくなるのを防ぐ。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", from = "String")]
 pub enum LanguageSetting {
     #[default]
     Auto,
     Ja,
     En,
+}
+
+// `#[serde(other)]` は外部タグ形式の enum に付けられないため、`from = "String"` で
+// 未知の値を `Auto` に倒す。ここの対応表はシリアライズ側（`rename_all = "lowercase"` の
+// 変換名）と一致させること。食い違うと保存した値が既定値に化ける
+impl From<String> for LanguageSetting {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "ja" => Self::Ja,
+            "en" => Self::En,
+            _ => Self::Auto,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -368,6 +384,13 @@ mod tests {
             let loaded: Settings = serde_json::from_str(&json).unwrap();
             assert_eq!(loaded.language, language);
         }
+    }
+
+    #[test]
+    fn settings_deserialize_unknown_language_falls_back_to_auto() {
+        let json = r#"{"default_color":"yellow","opacity":100,"language":"fr"}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.language, LanguageSetting::Auto);
     }
 
     #[test]
