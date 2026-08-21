@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# 同じブランチへ push を重ねたら古い実行を打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   visual-test:
     # ベースラインはローカルの npm run test:update で生成するため、macOS を揃える
@@ -16,10 +21,20 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
+
+      - name: Resolve Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # ブラウザ本体のダウンロードを毎回やらない
+      - uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
 
       - run: npx playwright install chromium
 

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# 同じブランチへ push を重ねたら古い実行を打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
