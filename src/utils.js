@@ -7,30 +7,33 @@ function escapeHtml(s) {
 }
 
 // Inject toast CSS once (avoids duplicating styles across HTML files)
-(function injectToastStyle() {
-  if (document.getElementById('toast-style')) return;
-  const style = document.createElement('style');
-  style.id = 'toast-style';
-  style.textContent = `
-    .toast {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      background: #D32F2F;
-      color: #fff;
-      font-size: 13px;
-      padding: 8px 16px;
-      border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      z-index: 99999;
-      pointer-events: none;
-    }
-    .toast.show { opacity: 1; }
-  `;
-  document.head.appendChild(style);
-})();
+// node（単体テストの require）では document が無いのでスキップする
+if (typeof document !== 'undefined') {
+  (function injectToastStyle() {
+    if (document.getElementById('toast-style')) return;
+    const style = document.createElement('style');
+    style.id = 'toast-style';
+    style.textContent = `
+      .toast {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        background: #D32F2F;
+        color: #fff;
+        font-size: 13px;
+        padding: 8px 16px;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 99999;
+        pointer-events: none;
+      }
+      .toast.show { opacity: 1; }
+    `;
+    document.head.appendChild(style);
+  })();
+}
 
 function showToast(msg) {
   const el = document.createElement('div');
@@ -42,4 +45,9 @@ function showToast(msg) {
     el.classList.remove('show');
     el.addEventListener('transitionend', () => el.remove());
   }, 3000);
+}
+
+// ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
+if (typeof module !== 'undefined') {
+  module.exports = { escapeHtml };
 }

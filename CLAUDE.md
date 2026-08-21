@@ -66,7 +66,7 @@ npm run test:report
 - 単体テスト — `tests/unit/*.test.js`。ブラウザを起動せず `src/` の関数を `require` して呼ぶ。対象は DOM にもアプリの状態にも触らない関数だけ
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
   - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
-- UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、レンダリング、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
+- UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
 - E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
 

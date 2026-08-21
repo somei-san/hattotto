@@ -92,11 +92,6 @@ test.describe("ゴミ箱の英語化", () => {
 });
 
 test.describe("window.I18N.resolve()", () => {
-  test("'ja' / 'en' はそのまま解決される", async ({ notePage }) => {
-    expect(await notePage.evaluate(() => (window as any).I18N.resolve("ja"))).toBe("ja");
-    expect(await notePage.evaluate(() => (window as any).I18N.resolve("en"))).toBe("en");
-  });
-
   test("'auto' と undefined は navigator.language の primary subtag で決まる", async ({ browser }) => {
     const jaCtx = await browser.newContext({ locale: "ja-JP" });
     const jaPage = await jaCtx.newPage();

@@ -795,10 +795,8 @@ window.htmlToMarkdown = htmlToMarkdown;
 window.getRawContent = () => { snapshotContent(); return rawContent; };
 window.enterLine = enterLine;
 window.renderMarkdown = renderMarkdown;
-window.applyColor = applyColor;
 window.changeZoom = changeZoom;
 window.resetZoom = resetZoom;
-window.togglePin = togglePin;
 
 
 // ── Keyboard: color dots (Enter/Space/Arrow) ───────

@@ -28,12 +28,13 @@ export default [
     languageOptions: { sourceType: "script", globals: globals.browser },
   },
 
-  // utils.js は最初に読まれるので追加の globals は無い
-  { files: ["src/i18n.js"], languageOptions: { globals: utils } },
-  { files: ["src/markdown.js"], languageOptions: { globals: { ...utils, ...i18n } } },
+  // module は tests/unit から require するためのガード（typeof module）で参照する
+  // utils.js は最初に読まれるので追加の globals は module のみ
+  { files: ["src/utils.js"], languageOptions: { globals: { module: "readonly" } } },
+  { files: ["src/i18n.js"], languageOptions: { globals: { ...utils, module: "readonly" } } },
+  { files: ["src/markdown.js"], languageOptions: { globals: { ...utils, ...i18n, module: "readonly" } } },
   {
     files: ["src/note-lines.js"],
-    // module は tests/unit から require するためのガード（typeof module）で参照する
     languageOptions: { globals: { ...utils, ...i18n, ...markdown, module: "readonly" } },
   },
   {

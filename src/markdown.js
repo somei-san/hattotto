@@ -38,8 +38,8 @@ function inlineMarkdown(escaped) {
 
 function renderMarkdown(text) {
   if (!text) {
-    // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト等）でも壊れないようフォールバックする
-    const placeholder = window.I18N ? window.I18N.t('notePlaceholder') : 'メモを入力…';
+    // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト・node 環境等）でも壊れないようフォールバックする
+    const placeholder = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('notePlaceholder') : 'メモを入力…';
     return `<div class="md-placeholder">${placeholder}</div>`;
   }
   // Normalize non-breaking spaces (contenteditable often inserts \u00A0)
@@ -144,4 +144,9 @@ function renderMarkdown(text) {
     result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${lines.length - 1}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
   }
   return result.join('');
+}
+
+// ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
+if (typeof module !== 'undefined') {
+  module.exports = { renderMarkdown };
 }
