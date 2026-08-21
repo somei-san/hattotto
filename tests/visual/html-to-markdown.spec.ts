@@ -1,21 +1,10 @@
 import { test, expect } from "./fixtures";
 
-// htmlToMarkdown is defined inside note.html's <script> scope.
-// We evaluate it in the browser context via the notePage fixture.
-
 async function convert(page: any, html: string): Promise<string> {
   return page.evaluate((h: string) => (window as any).htmlToMarkdown(h), html);
 }
 
 test.describe("htmlToMarkdown", () => {
-  test.beforeEach(async ({ notePage }) => {
-    // Expose htmlToMarkdown to window so we can call it from evaluate
-    await notePage.evaluate(() => {
-      // htmlToMarkdown is already in scope via the note.html script
-      (window as any).htmlToMarkdown = (window as any).htmlToMarkdown;
-    });
-  });
-
   test("plain text passthrough", async ({ notePage }) => {
     expect(await convert(notePage, "hello world")).toBe("hello world");
   });

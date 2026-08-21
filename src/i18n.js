@@ -157,6 +157,9 @@ function lang() {
   return currentLang;
 }
 
-window.I18N = { resolve, setLang, t, applyDom, lang };
+const I18N = { resolve, setLang, t, applyDom, lang };
+if (typeof window !== 'undefined') window.I18N = I18N;
+// ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
+if (typeof module !== 'undefined') module.exports = I18N;
 
 })();
