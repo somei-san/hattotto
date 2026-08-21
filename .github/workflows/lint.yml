@@ -1,10 +1,15 @@
-name: Frontend Lint
+name: Frontend Checks
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+# 同じブランチへ push を重ねたら古い実行を打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -21,3 +26,6 @@ jobs:
       - run: npm ci
 
       - run: npm run lint
+
+      # ブラウザ不要の単体テストはこの ubuntu ジョブで速く検出する
+      - run: npm run test:unit
