@@ -1,4 +1,5 @@
 mod commands;
+mod context_menu;
 mod i18n;
 mod menu;
 pub mod model;
@@ -14,7 +15,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use i18n::{Lang, Msg};
-use model::{resolve_color, AppState, Note, Settings};
+use model::{resolve_color, AppState, Note, RecoverMutex, Settings};
 use persistence::{load_notes, load_settings, load_trash, save_notes, Loaded};
 use window::{bring_all_to_front, open_note_window};
 
@@ -107,13 +108,7 @@ pub fn run() {
             .collect::<Vec<_>>();
 
             if !unreadable.is_empty() {
-                let lang = i18n::resolve(
-                    state
-                        .settings
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .language,
-                );
+                let lang = i18n::resolve(state.settings.recover().language);
                 let separator = match lang {
                     Lang::Ja => "、",
                     Lang::En => ", ",
@@ -152,22 +147,13 @@ pub fn run() {
             }
 
             // Restore saved notes
-            let notes = state
-                .notes
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+            let notes = state.notes.recover().clone();
 
             if notes.is_empty() {
                 // Create default notes on first launch — one in Japanese, one in
                 // English, so a first-time user sees both regardless of OS locale.
                 drop(notes);
-                let default_color = state
-                    .settings
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .default_color
-                    .clone();
+                let default_color = state.settings.recover().default_color.clone();
                 let color = resolve_color(&default_color);
 
                 let mut note_ja = Note::new(&color);
@@ -179,7 +165,7 @@ pub fn run() {
 
                 open_note_window(app.handle(), &note_ja);
                 open_note_window(app.handle(), &note_en);
-                let mut notes = state.notes.lock().unwrap_or_else(|e| e.into_inner());
+                let mut notes = state.notes.recover();
                 notes.push(note_ja);
                 notes.push(note_en);
                 if let Err(e) = save_notes(&state, &notes) {

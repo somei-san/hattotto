@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 
-use crate::model::{AppState, Note, Settings, TRASH_MAX};
+use crate::model::{is_valid_default_color, AppState, Note, Settings, TRASH_MAX};
 
 /// ファイル読み込みの結果。「無い」「読めた」「あるが読めない」を区別する。
 /// `Vec<Note>` の `Default` が空であるのと同じ形になってしまう `Unreadable` を
@@ -131,7 +131,17 @@ pub(crate) fn save_notes(state: &AppState, notes: &[Note]) -> Result<(), String>
 }
 
 fn load_settings_from(path: &Path) -> Loaded<Settings> {
-    load_json(path)
+    match load_json::<Settings>(path) {
+        Loaded::Ok(mut s) => {
+            // 未知の `language` を `Auto` に倒すのと同じ方針で、手編集などで壊れた
+            // `default_color` も既定色に倒し、不正値のまま付箋が作られるのを防ぐ
+            if !is_valid_default_color(&s.default_color) {
+                s.default_color = Settings::default().default_color;
+            }
+            Loaded::Ok(s)
+        }
+        other => other,
+    }
 }
 
 pub(crate) fn load_settings(dir: &Path) -> Loaded<Settings> {
@@ -295,6 +305,24 @@ mod tests {
         assert!(!loaded.bring_all_to_front);
         assert!(loaded.confirm_before_delete);
         assert_eq!(loaded.language, LanguageSetting::En);
+    }
+
+    #[test]
+    fn load_settings_invalid_default_color_falls_back_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"default_color":"vermilion","opacity":100}"#).unwrap();
+        let loaded = unwrap_ok(load_settings_from(&path));
+        assert_eq!(loaded.default_color, "yellow");
+    }
+
+    #[test]
+    fn load_settings_random_default_color_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"default_color":"random","opacity":100}"#).unwrap();
+        let loaded = unwrap_ok(load_settings_from(&path));
+        assert_eq!(loaded.default_color, "random");
     }
 
     #[test]

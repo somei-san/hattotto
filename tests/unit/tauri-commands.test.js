@@ -15,7 +15,8 @@ function handlerCommands() {
   const src = read("src-tauri/src/lib.rs");
   const block = src.match(/generate_handler!\[([\s\S]*?)\]/);
   assert.ok(block, "generate_handler! が lib.rs に見つからない");
-  return [...block[1].matchAll(/commands::(\w+)/g)].map((m) => m[1]);
+  // モジュール名は固定しない。コマンドが commands.rs 以外へ移っても一覧から落とさない
+  return [...block[1].matchAll(/\w+::(\w+)/g)].map((m) => m[1]);
 }
 
 /** fixtures.ts のモックの switch が分岐するコマンド名。plugin 呼び出しは対象外。 */
