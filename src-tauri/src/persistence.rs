@@ -13,8 +13,9 @@ pub(crate) enum Loaded<T> {
     /// ファイルが存在しない。初回起動として扱ってよい
     Missing,
     Ok(T),
-    /// ファイルはあるが読み取り・パースに失敗した。上書き保存してはいけない
-    Unreadable,
+    /// ファイルはあるが読み取り・パースに失敗した。上書き保存してはいけない。
+    /// 理由文字列はログ用（io / serde エラーの `to_string()`）。ファイルの内容は含まない
+    Unreadable(String),
 }
 
 // ── Persistence ─────────────────────────────────────────────
@@ -80,14 +81,21 @@ fn load_json<T: DeserializeOwned>(path: &Path) -> Loaded<T> {
     match fs::metadata(path) {
         Ok(_) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Loaded::Missing,
-        Err(_) => return Loaded::Unreadable,
+        Err(e) => return Loaded::Unreadable(e.to_string()),
     }
     match fs::read_to_string(path) {
         Ok(s) => match serde_json::from_str(&s) {
             Ok(v) => Loaded::Ok(v),
-            Err(_) => Loaded::Unreadable,
+            // serde エラーの Display はファイル内の文字列値を逐語で含みうる
+            // （付箋本文がログに漏れる）ため、種別と位置だけを残す
+            Err(e) => Loaded::Unreadable(format!(
+                "{:?} error at line {} column {}",
+                e.classify(),
+                e.line(),
+                e.column()
+            )),
         },
-        Err(_) => Loaded::Unreadable,
+        Err(e) => Loaded::Unreadable(e.to_string()),
     }
 }
 
@@ -222,6 +230,9 @@ mod tests {
             notes_loaded,
             settings_loaded,
             trash_loaded,
+            notes_load_error: None,
+            settings_load_error: None,
+            trash_load_error: None,
         }
     }
 
@@ -368,7 +379,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("notes.json");
         fs::write(&path, r#"{"broken"#).unwrap();
-        assert!(matches!(load_notes_from(&path), Loaded::Unreadable));
+        assert!(matches!(load_notes_from(&path), Loaded::Unreadable(_)));
     }
 
     #[test]
@@ -392,7 +403,7 @@ mod tests {
             return;
         }
 
-        assert!(matches!(load_notes_from(&path), Loaded::Unreadable));
+        assert!(matches!(load_notes_from(&path), Loaded::Unreadable(_)));
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
     }
 
@@ -423,7 +434,7 @@ mod tests {
             );
             return;
         }
-        assert!(matches!(result, Loaded::Unreadable));
+        assert!(matches!(result, Loaded::Unreadable(_)));
     }
 
     // ── atomic_write tests ──

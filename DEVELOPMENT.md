@@ -33,6 +33,11 @@ npm test
 npm run test:update
 ```
 
+## ログ
+
+`~/Library/Logs/com.hattotto.app/` にログファイルが出力される。不具合の追跡はまずここを見る。
+上限 1MB・直近 1 世代のみ保持（超えたら古い世代を破棄して書き直す）。
+
 ## 技術スタック
 
 - **Backend:** Rust + Tauri v2

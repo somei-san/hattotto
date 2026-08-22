@@ -178,7 +178,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
         "ctx_delete" => {
             if confirm_delete_if_needed(app, &state, &note_id) {
                 if let Err(e) = do_delete_note(&note_id, app, &state) {
-                    eprintln!("delete note error: {}", e);
+                    log::error!("delete note error: {}", e);
                 }
             }
         }
@@ -219,7 +219,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             };
             if let Some(snap) = snapshot {
                 if let Err(e) = save_notes(&state, &snap) {
-                    eprintln!("save notes error: {}", e);
+                    log::error!("save notes error: {}", e);
                 }
             }
             if let Some(w) = &win {
