@@ -102,7 +102,18 @@ pub(crate) fn update_note_pinned(
 }
 
 /// Confirm deletion if setting is enabled. Returns false if user cancelled.
-pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> bool {
+/// 空の付箋（issue #56）は消えて困る中身が無いため、設定に関わらず確認しない。
+pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState, id: &str) -> bool {
+    let is_empty = state
+        .notes
+        .recover()
+        .iter()
+        .find(|n| n.id == id)
+        .map(Note::is_empty)
+        .unwrap_or(false);
+    if is_empty {
+        return true;
+    }
     let (confirm, lang) = {
         let settings = state.settings.recover();
         (
@@ -132,14 +143,40 @@ pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> boo
 /// 戻さない。メモリは意図した最終状態にあり、ディスクは両方のファイルに付箋が
 /// 残っているので次に成功した保存で収束する。
 pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, String> {
-    let (notes_snapshot, trash_snapshot) = {
+    let (notes_snapshot, mut note) = {
         let notes = state.notes.recover();
         let Some(pos) = notes.iter().position(|n| n.id == id) else {
             return Ok(false);
         };
         let mut notes_snap = notes.clone();
         drop(notes);
-        let mut note = notes_snap.remove(pos);
+        let note = notes_snap.remove(pos);
+        (notes_snap, note)
+    };
+
+    // 空の付箋（issue #56）は消えて困る中身が無いので、ゴミ箱に入れず notes から取り除くだけにする
+    if note.is_empty() {
+        // 保存が途中で止まって同じ id がゴミ箱にも残っている場合は、その残骸も一緒に
+        // 掃除する（掃除しないと空の付箋がゴミ箱に残り続ける）。書き込み順は非空の
+        // 削除と同じ trash 先行
+        let stale_trash = {
+            let trash = state.trash.recover();
+            trash.iter().any(|n| n.id == id).then(|| {
+                let mut snap = trash.clone();
+                snap.retain(|n| n.id != id);
+                snap
+            })
+        };
+        if let Some(ts) = &stale_trash {
+            save_trash(state, ts)?;
+            *state.trash.recover() = ts.clone();
+        }
+        save_notes(state, &notes_snapshot)?;
+        *state.notes.recover() = notes_snapshot;
+        return Ok(true);
+    }
+
+    let trash_snapshot = {
         note.deleted_at = Some(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -152,7 +189,7 @@ pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, Strin
         trash_snap.retain(|n| n.id != id);
         trash_snap.push(note);
         enforce_trash_limit(&mut trash_snap);
-        (notes_snap, trash_snap)
+        trash_snap
     };
     // 付箋側を先に消すと、間で中断したときにどちらのファイルからも消える。
     // この順なら両方に残るので捨て直せる
@@ -197,7 +234,7 @@ pub(crate) fn delete_note(
     app: AppHandle,
     state: State<AppState>,
 ) -> Result<(), String> {
-    if !confirm_delete_if_needed(&app, &state) {
+    if !confirm_delete_if_needed(&app, &state, &id) {
         return Ok(());
     }
     do_delete_note(&id, &app, &state)
@@ -465,7 +502,7 @@ mod tests {
     #[test]
     fn delete_note_data_sets_deleted_at() {
         let dir = TempDir::new().unwrap();
-        let state = make_state(&dir, vec![make_note("a", "")], vec![]);
+        let state = make_state(&dir, vec![make_note("a", "hello")], vec![]);
 
         delete_note_data(&state, "a").unwrap();
 
@@ -492,7 +529,7 @@ mod tests {
         let existing_trash: Vec<Note> = (0..TRASH_MAX)
             .map(|i| make_note(&i.to_string(), ""))
             .collect();
-        let state = make_state(&dir, vec![make_note("new", "")], existing_trash);
+        let state = make_state(&dir, vec![make_note("new", "hello")], existing_trash);
 
         delete_note_data(&state, "new").unwrap();
 
@@ -512,6 +549,72 @@ mod tests {
         assert!(!found);
         assert!(!dir.path().join("notes.json").exists());
         assert!(!dir.path().join("trash.json").exists());
+    }
+
+    // ── delete_note_data: 空の付箋（issue #56） ──────────────────
+
+    #[test]
+    fn delete_note_data_empty_note_skips_trash() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "")], vec![make_note("z", "kept")]);
+
+        let found = delete_note_data(&state, "a").unwrap();
+
+        assert!(found);
+        assert!(state.notes.recover().is_empty());
+        let trash = state.trash.recover();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, "z");
+        assert!(read_notes_json(&dir).is_empty());
+        assert!(!dir.path().join("trash.json").exists());
+    }
+
+    #[test]
+    fn delete_note_data_whitespace_only_note_skips_trash() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "  \n\t\n  ")], vec![]);
+
+        delete_note_data(&state, "a").unwrap();
+
+        assert!(state.notes.recover().is_empty());
+        assert!(state.trash.recover().is_empty());
+        assert!(!dir.path().join("trash.json").exists());
+    }
+
+    /// 保存の中断で同じ id がゴミ箱にも残っていた空の付箋を削除すると、残骸も掃除される。
+    #[test]
+    fn delete_note_data_empty_note_cleans_stale_trash_entry() {
+        let dir = TempDir::new().unwrap();
+        let mut stale = make_note("a", "stale");
+        stale.deleted_at = Some(1);
+        let state = make_state(
+            &dir,
+            vec![make_note("a", "")],
+            vec![stale, make_note("z", "kept")],
+        );
+
+        delete_note_data(&state, "a").unwrap();
+
+        assert!(state.notes.recover().is_empty());
+        let trash_ids: Vec<String> = state.trash.recover().iter().map(|n| n.id.clone()).collect();
+        assert_eq!(trash_ids, vec!["z"]);
+        let disk = read_trash_json(&dir);
+        assert_eq!(disk.len(), 1);
+        assert_eq!(disk[0].id, "z");
+    }
+
+    /// 空の付箋の削除で notes.json の保存が失敗しても、メモリは無傷のまま。
+    #[test]
+    fn delete_note_data_empty_note_save_failure_leaves_memory_untouched() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("notes.json")).unwrap();
+        let state = make_state(&dir, vec![make_note("a", "")], vec![]);
+
+        assert!(delete_note_data(&state, "a").is_err());
+
+        assert_eq!(state.notes.recover().len(), 1);
+        assert_eq!(state.notes.recover()[0].id, "a");
+        assert!(state.trash.recover().is_empty());
     }
 
     /// ゴミ箱側を先に書く順序の確認。notes.json への書き込みをディレクトリ衝突で
