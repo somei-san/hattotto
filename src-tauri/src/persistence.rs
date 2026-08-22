@@ -27,16 +27,16 @@ pub(crate) fn data_dir() -> PathBuf {
     dir
 }
 
-fn data_file() -> PathBuf {
-    data_dir().join("notes.json")
+fn data_file(dir: &Path) -> PathBuf {
+    dir.join("notes.json")
 }
 
-fn settings_file() -> PathBuf {
-    data_dir().join("settings.json")
+fn settings_file(dir: &Path) -> PathBuf {
+    dir.join("settings.json")
 }
 
-fn trash_file() -> PathBuf {
-    data_dir().join("trash.json")
+fn trash_file(dir: &Path) -> PathBuf {
+    dir.join("trash.json")
 }
 
 /// tmp へ書き、fsync してから rename する。
@@ -48,6 +48,11 @@ fn trash_file() -> PathBuf {
 /// 使い回しても衝突しないのは、プロセス ID で他プロセスと分かれ、同一プロセス内では
 /// Tauri コマンドがメインスレッドで直列に実行されるからである。
 fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
+    // 保存先ディレクトリが起動後に消されても、次の保存で作り直して復帰できるようにする。
+    // 作成に失敗しても直後の File::create が理由付きで失敗するので、ここでは握り潰す
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     let tmp = path.with_file_name(format!(
         "{}.tmp.{}",
         path.file_name().unwrap().to_string_lossy(),
@@ -99,8 +104,8 @@ fn load_notes_from(path: &Path) -> Loaded<Vec<Note>> {
     load_json(path)
 }
 
-pub(crate) fn load_notes() -> Loaded<Vec<Note>> {
-    load_notes_from(&data_file())
+pub(crate) fn load_notes(dir: &Path) -> Loaded<Vec<Note>> {
+    load_notes_from(&data_file(dir))
 }
 
 fn save_notes_to(notes: &[Note], path: &Path) -> Result<(), String> {
@@ -122,15 +127,15 @@ fn refuse_if_unloaded(state: &AppState) -> Result<(), String> {
 
 pub(crate) fn save_notes(state: &AppState, notes: &[Note]) -> Result<(), String> {
     refuse_if_unloaded(state)?;
-    save_notes_to(notes, &data_file())
+    save_notes_to(notes, &data_file(&state.data_dir))
 }
 
 fn load_settings_from(path: &Path) -> Loaded<Settings> {
     load_json(path)
 }
 
-pub(crate) fn load_settings() -> Loaded<Settings> {
-    load_settings_from(&settings_file())
+pub(crate) fn load_settings(dir: &Path) -> Loaded<Settings> {
+    load_settings_from(&settings_file(dir))
 }
 
 fn save_settings_to(settings: &Settings, path: &Path) -> Result<(), String> {
@@ -139,15 +144,15 @@ fn save_settings_to(settings: &Settings, path: &Path) -> Result<(), String> {
 
 pub(crate) fn save_settings(state: &AppState, settings: &Settings) -> Result<(), String> {
     refuse_if_unloaded(state)?;
-    save_settings_to(settings, &settings_file())
+    save_settings_to(settings, &settings_file(&state.data_dir))
 }
 
 fn load_trash_from(path: &Path) -> Loaded<Vec<Note>> {
     load_json(path)
 }
 
-pub(crate) fn load_trash() -> Loaded<Vec<Note>> {
-    load_trash_from(&trash_file())
+pub(crate) fn load_trash(dir: &Path) -> Loaded<Vec<Note>> {
+    load_trash_from(&trash_file(dir))
 }
 
 fn save_trash_to(trash: &[Note], path: &Path) -> Result<(), String> {
@@ -156,7 +161,7 @@ fn save_trash_to(trash: &[Note], path: &Path) -> Result<(), String> {
 
 pub(crate) fn save_trash(state: &AppState, trash: &[Note]) -> Result<(), String> {
     refuse_if_unloaded(state)?;
-    save_trash_to(trash, &trash_file())
+    save_trash_to(trash, &trash_file(&state.data_dir))
 }
 
 /// ゴミ箱のFIFO制限: TRASH_MAXを超えた分を先頭から削除
@@ -191,13 +196,19 @@ mod tests {
     }
 
     /// テスト用の `AppState`。ロード済みフラグ以外は使わない。
-    fn make_state(notes_loaded: bool, settings_loaded: bool, trash_loaded: bool) -> AppState {
+    fn make_state(
+        data_dir: &Path,
+        notes_loaded: bool,
+        settings_loaded: bool,
+        trash_loaded: bool,
+    ) -> AppState {
         AppState {
             notes: Mutex::new(Vec::new()),
             settings: Mutex::new(Settings::default()),
             trash: Mutex::new(Vec::new()),
             last_bring_to_front: Mutex::new(Instant::now()),
             context_menu_note_id: Mutex::new(String::new()),
+            data_dir: data_dir.to_path_buf(),
             notes_loaded,
             settings_loaded,
             trash_loaded,
@@ -411,37 +422,42 @@ mod tests {
         assert_eq!(names, vec!["test.json"]);
     }
 
+    /// 保存先ディレクトリが消えていても作り直して保存できる（自己修復）。
     #[test]
-    fn atomic_write_to_nonexistent_dir_returns_err() {
+    fn atomic_write_creates_missing_parent_dir() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("no_such_dir").join("file.json");
-        let result = atomic_write(&path, "data");
-        assert!(result.is_err());
+        atomic_write(&path, "data").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "data");
     }
 
     // ── save_*_to error path tests ──
+    // 親パスを通常ファイルで塞ぐとディレクトリを作れず、保存は失敗する
 
     #[test]
-    fn save_notes_to_nonexistent_dir_returns_err() {
+    fn save_notes_to_blocked_parent_returns_err() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("no_such_dir").join("notes.json");
+        fs::write(dir.path().join("blocker"), "").unwrap();
+        let path = dir.path().join("blocker").join("notes.json");
         let notes = vec![make_note("e1", "yellow", "err")];
         let result = save_notes_to(&notes, &path);
         assert!(result.is_err());
     }
 
     #[test]
-    fn save_settings_to_nonexistent_dir_returns_err() {
+    fn save_settings_to_blocked_parent_returns_err() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("no_such_dir").join("settings.json");
+        fs::write(dir.path().join("blocker"), "").unwrap();
+        let path = dir.path().join("blocker").join("settings.json");
         let result = save_settings_to(&Settings::default(), &path);
         assert!(result.is_err());
     }
 
     #[test]
-    fn save_trash_to_nonexistent_dir_returns_err() {
+    fn save_trash_to_blocked_parent_returns_err() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("no_such_dir").join("trash.json");
+        fs::write(dir.path().join("blocker"), "").unwrap();
+        let path = dir.path().join("blocker").join("trash.json");
         let trash = vec![make_note("t1", "green", "err")];
         let result = save_trash_to(&trash, &path);
         assert!(result.is_err());
@@ -451,29 +467,14 @@ mod tests {
 
     #[test]
     fn save_notes_refuses_when_not_loaded() {
-        // save_notes は固定パス（data_dir() 配下）に書くため、HOME を差し替えて
-        // 実データに触れずに検証する。
         let dir = TempDir::new().unwrap();
-        let prev_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", dir.path());
-        }
-
-        let state = make_state(false, true, true);
+        let state = make_state(dir.path(), false, true, true);
         let notes = vec![make_note("a", "yellow", "should not be saved")];
         let result = save_notes(&state, &notes);
-        let notes_written = data_dir().join("notes.json").exists();
-
-        unsafe {
-            match &prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
 
         assert!(result.is_err());
         assert!(
-            !notes_written,
+            !dir.path().join("notes.json").exists(),
             "notes.json must not be created when notes_loaded is false"
         );
     }
@@ -481,8 +482,9 @@ mod tests {
     /// 読めなかったのが別のファイルでも保存を止める。
     #[test]
     fn save_notes_refuses_when_another_file_failed_to_load() {
-        assert!(refuse_if_unloaded(&make_state(true, false, true)).is_err());
-        assert!(refuse_if_unloaded(&make_state(true, true, false)).is_err());
-        assert!(refuse_if_unloaded(&make_state(true, true, true)).is_ok());
+        let dir = TempDir::new().unwrap();
+        assert!(refuse_if_unloaded(&make_state(dir.path(), true, false, true)).is_err());
+        assert!(refuse_if_unloaded(&make_state(dir.path(), true, true, false)).is_err());
+        assert!(refuse_if_unloaded(&make_state(dir.path(), true, true, true)).is_ok());
     }
 }

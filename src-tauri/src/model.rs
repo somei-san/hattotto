@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 use uuid::Uuid;
@@ -104,6 +105,16 @@ fn default_zoom() -> u32 {
     100
 }
 
+/// zoom の許容範囲（50〜200%）にクランプする。
+pub(crate) fn clamp_zoom(zoom: u32) -> u32 {
+    zoom.clamp(50, 200)
+}
+
+/// opacity の許容範囲（20〜100%）にクランプする。
+pub(crate) fn clamp_opacity(opacity: u32) -> u32 {
+    opacity.clamp(20, 100)
+}
+
 impl Note {
     pub(crate) fn new(color: &str) -> Self {
         Self {
@@ -191,6 +202,8 @@ pub struct AppState {
     pub(crate) last_bring_to_front: Mutex<Instant>,
     /// Note ID that last opened the context menu (for routing menu events)
     pub(crate) context_menu_note_id: Mutex<String>,
+    /// notes.json / settings.json / trash.json を置くディレクトリ。テストでは `TempDir` を指す
+    pub(crate) data_dir: PathBuf,
     /// 対応するファイルを起動時に読み込めたか。`false` は「ファイルはあるが読めなかった」を
     /// 意味する。このとき中身は既定値で初期化されるため、付箋 0 件の初回起動と混同してはならない。
     pub(crate) notes_loaded: bool,
@@ -247,34 +260,34 @@ mod tests {
 
     #[test]
     fn zoom_clamp_below_min() {
-        assert_eq!(30_u32.clamp(50, 200), 50);
+        assert_eq!(clamp_zoom(30), 50);
     }
 
     #[test]
     fn zoom_clamp_above_max() {
-        assert_eq!(250_u32.clamp(50, 200), 200);
+        assert_eq!(clamp_zoom(250), 200);
     }
 
     #[test]
     fn zoom_clamp_within_range() {
-        assert_eq!(120_u32.clamp(50, 200), 120);
+        assert_eq!(clamp_zoom(120), 120);
     }
 
     // ── Opacity clamp ──
 
     #[test]
     fn opacity_clamp_below_min() {
-        assert_eq!(10_u32.clamp(20, 100), 20);
+        assert_eq!(clamp_opacity(10), 20);
     }
 
     #[test]
     fn opacity_clamp_above_max() {
-        assert_eq!(150_u32.clamp(20, 100), 100);
+        assert_eq!(clamp_opacity(150), 100);
     }
 
     #[test]
     fn opacity_clamp_within_range() {
-        assert_eq!(75_u32.clamp(20, 100), 75);
+        assert_eq!(clamp_opacity(75), 75);
     }
 
     // ── Note serde backward compat (missing zoom field) ──

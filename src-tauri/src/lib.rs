@@ -21,17 +21,18 @@ use window::{bring_all_to_front, open_note_window};
 // ── App Entry ───────────────────────────────────────────────
 
 pub fn run() {
-    let (notes, notes_loaded) = match load_notes() {
+    let data_dir = persistence::data_dir();
+    let (notes, notes_loaded) = match load_notes(&data_dir) {
         Loaded::Missing => (Vec::new(), true),
         Loaded::Ok(v) => (v, true),
         Loaded::Unreadable => (Vec::new(), false),
     };
-    let (settings, settings_loaded) = match load_settings() {
+    let (settings, settings_loaded) = match load_settings(&data_dir) {
         Loaded::Missing => (Settings::default(), true),
         Loaded::Ok(v) => (v, true),
         Loaded::Unreadable => (Settings::default(), false),
     };
-    let (trash, trash_loaded) = match load_trash() {
+    let (trash, trash_loaded) = match load_trash(&data_dir) {
         Loaded::Missing => (Vec::new(), true),
         Loaded::Ok(v) => (v, true),
         Loaded::Unreadable => (Vec::new(), false),
@@ -42,6 +43,7 @@ pub fn run() {
         trash: Mutex::new(trash),
         last_bring_to_front: Mutex::new(Instant::now() - std::time::Duration::from_secs(10)),
         context_menu_note_id: Mutex::new(String::new()),
+        data_dir,
         notes_loaded,
         settings_loaded,
         trash_loaded,
@@ -133,10 +135,9 @@ pub fn run() {
                     // データフォルダ名が .app で終わるため、Finder はこれをアプリケーション
                     // バンドルとみなし、フォルダとして開けない。-R でファイルを選択状態に
                     // すれば起動を試みずに済む。直後にプロセスを落とすので完了を待つ
-                    let dir = persistence::data_dir();
                     let result = std::process::Command::new("open")
                         .arg("-R")
-                        .args(unreadable.iter().map(|name| dir.join(name)))
+                        .args(unreadable.iter().map(|name| state.data_dir.join(name)))
                         .status();
                     match result {
                         Ok(status) if !status.success() => {

@@ -7,7 +7,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::i18n::{self, Lang, Msg};
 use crate::model::{
-    resolve_color, AppState, LanguageSetting, Note, RecoverMutex, Settings, COLOR_DEFS, TRASH_MAX,
+    clamp_opacity, clamp_zoom, resolve_color, AppState, LanguageSetting, Note, RecoverMutex,
+    Settings, COLOR_DEFS, TRASH_MAX,
 };
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{
@@ -88,7 +89,7 @@ pub(crate) fn update_note_zoom(
     zoom: u32,
     state: State<AppState>,
 ) -> Result<(), String> {
-    update_note_field(&state, &id, |note| note.zoom = zoom.clamp(50, 200))
+    update_note_field(&state, &id, |note| note.zoom = clamp_zoom(zoom))
 }
 
 /// 付箋のピン留め状態を更新して保存する。
@@ -123,8 +124,9 @@ pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState) -> boo
         .blocking_show()
 }
 
-/// Move a note to trash and close its window.
-pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Result<(), String> {
+/// 付箋をゴミ箱へ移動する（メモリ上の移動＋保存のみ。ウィンドウは操作しない）。
+/// 該当 id の付箋があったかどうかを返す。
+pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, String> {
     let (notes_snapshot, trash_snapshot) = {
         let mut notes = state.notes.recover();
         if let Some(pos) = notes.iter().position(|n| n.id == id) {
@@ -150,6 +152,7 @@ pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Res
             (None, None)
         }
     };
+    let found = notes_snapshot.is_some();
     // 付箋側を先に消すと、間で中断したときにどちらのファイルからも消える。
     // この順なら両方に残るので捨て直せる
     if let Some(ts) = &trash_snapshot {
@@ -158,6 +161,12 @@ pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Res
     if let Some(ns) = &notes_snapshot {
         save_notes(state, ns)?;
     }
+    Ok(found)
+}
+
+/// Move a note to trash and close its window.
+pub(crate) fn do_delete_note(id: &str, app: &AppHandle, state: &AppState) -> Result<(), String> {
+    delete_note_data(state, id)?;
     if let Some(win) = app.get_webview_window(&format!("note-{}", id)) {
         let _ = win.close();
     }
@@ -189,13 +198,9 @@ pub(crate) fn get_trash_max() -> usize {
     TRASH_MAX
 }
 
-/// ゴミ箱から付箋を復元し、ウィンドウを開く。見つからない場合は `None`。
-#[tauri::command]
-pub(crate) fn restore_note(
-    id: String,
-    app: AppHandle,
-    state: State<AppState>,
-) -> Result<Option<Note>, String> {
+/// ゴミ箱から付箋を notes へ戻す（メモリ上の移動＋保存のみ。ウィンドウは操作しない）。
+/// 見つからない場合は `None`。
+pub(crate) fn restore_note_data(state: &AppState, id: &str) -> Result<Option<Note>, String> {
     let (note, trash_snapshot) = {
         let mut trash = state.trash.recover();
         if let Some(pos) = trash.iter().position(|n| n.id == id) {
@@ -206,28 +211,56 @@ pub(crate) fn restore_note(
             (None, None)
         }
     };
-    if let Some(mut note) = note {
-        note.deleted_at = None;
-        open_note_window(&app, &note);
-        let notes_snapshot = {
-            let mut notes = state.notes.recover();
-            // 保存が途中で止まって付箋とゴミ箱の両方に残った付箋を復元しても
-            // 付箋側に同じ id が並ばないようにする。ゴミ箱のコピーは削除時点のもので
-            // 以降の編集を含まないため、付箋側に残っているほうを勝たせる
-            if !notes.iter().any(|n| n.id == note.id) {
-                notes.push(note.clone());
-            }
-            notes.clone()
-        };
-        // ゴミ箱側を先に消すと、間で中断したときにどちらのファイルからも消える。
-        // この順なら両方に残るので復元し直せる
-        save_notes(&state, &notes_snapshot)?;
-        if let Some(ts) = &trash_snapshot {
-            save_trash(&state, ts)?;
+    let Some(mut note) = note else {
+        return Ok(None);
+    };
+    note.deleted_at = None;
+    let notes_snapshot = {
+        let mut notes = state.notes.recover();
+        // 保存が途中で止まって付箋とゴミ箱の両方に残った付箋を復元しても
+        // 付箋側に同じ id が並ばないようにする。ゴミ箱のコピーは削除時点のもので
+        // 以降の編集を含まないため、付箋側に残っているほうを勝たせる
+        if !notes.iter().any(|n| n.id == note.id) {
+            notes.push(note.clone());
         }
-        Ok(Some(note))
-    } else {
-        Ok(None)
+        notes.clone()
+    };
+    // ゴミ箱側を先に消すと、間で中断したときにどちらのファイルからも消える。
+    // この順なら両方に残るので復元し直せる
+    save_notes(state, &notes_snapshot)?;
+    if let Some(ts) = &trash_snapshot {
+        save_trash(state, ts)?;
+    }
+    Ok(Some(note))
+}
+
+/// ゴミ箱から付箋を復元し、ウィンドウを開く。見つからない場合は `None`。
+#[tauri::command]
+pub(crate) fn restore_note(
+    id: String,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<Option<Note>, String> {
+    match restore_note_data(&state, &id) {
+        Ok(note) => {
+            if let Some(n) = &note {
+                open_note_window(&app, n);
+            }
+            Ok(note)
+        }
+        Err(e) => {
+            // 保存に失敗してもメモリ上では復元済みで、ゴミ箱一覧からは既に消えている。
+            // ウィンドウまで出さないと付箋がどこにも見えなくなるので、開いたうえで
+            // エラーを返す
+            let note = {
+                let notes = state.notes.recover();
+                notes.iter().find(|n| n.id == id).cloned()
+            };
+            if let Some(n) = &note {
+                open_note_window(&app, n);
+            }
+            Err(e)
+        }
     }
 }
 
@@ -268,7 +301,7 @@ pub(crate) fn update_settings(
         let mut settings = state.settings.recover();
         let language_changed = settings.language != language;
         settings.default_color = default_color;
-        settings.opacity = opacity.clamp(20, 100);
+        settings.opacity = clamp_opacity(opacity);
         settings.bring_all_to_front = bring_all_to_front;
         settings.show_pin_button = show_pin_button;
         settings.show_new_button = show_new_button;
@@ -562,6 +595,207 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+    use std::time::Instant;
+    use tempfile::TempDir;
+
+    fn make_note(id: &str, content: &str) -> Note {
+        Note {
+            id: id.to_string(),
+            content: content.to_string(),
+            color: "yellow".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 280.0,
+            height: 320.0,
+            zoom: 100,
+            pinned: false,
+            deleted_at: None,
+        }
+    }
+
+    /// notes / trash を初期値付きで構築するテスト用 `AppState`。保存先には `dir` を使う。
+    fn make_state(dir: &TempDir, notes: Vec<Note>, trash: Vec<Note>) -> AppState {
+        AppState {
+            notes: Mutex::new(notes),
+            settings: Mutex::new(Settings::default()),
+            trash: Mutex::new(trash),
+            last_bring_to_front: Mutex::new(Instant::now()),
+            context_menu_note_id: Mutex::new(String::new()),
+            data_dir: dir.path().to_path_buf(),
+            notes_loaded: true,
+            settings_loaded: true,
+            trash_loaded: true,
+        }
+    }
+
+    fn read_notes_json(dir: &TempDir) -> Vec<Note> {
+        let s = std::fs::read_to_string(dir.path().join("notes.json")).unwrap();
+        serde_json::from_str(&s).unwrap()
+    }
+
+    fn read_trash_json(dir: &TempDir) -> Vec<Note> {
+        let s = std::fs::read_to_string(dir.path().join("trash.json")).unwrap();
+        serde_json::from_str(&s).unwrap()
+    }
+
+    // ── delete_note_data ──────────────────────────────────────
+
+    #[test]
+    fn delete_note_data_moves_note_to_trash_and_persists() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "hello")], vec![]);
+
+        let found = delete_note_data(&state, "a").unwrap();
+
+        assert!(found);
+        assert!(state.notes.recover().is_empty());
+        assert_eq!(state.trash.recover().len(), 1);
+        assert!(read_notes_json(&dir).is_empty());
+        let trash_on_disk = read_trash_json(&dir);
+        assert_eq!(trash_on_disk.len(), 1);
+        assert_eq!(trash_on_disk[0].id, "a");
+    }
+
+    #[test]
+    fn delete_note_data_sets_deleted_at() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "")], vec![]);
+
+        delete_note_data(&state, "a").unwrap();
+
+        assert!(state.trash.recover()[0].deleted_at.is_some());
+    }
+
+    #[test]
+    fn delete_note_data_replaces_existing_trash_entry_with_same_id() {
+        let dir = TempDir::new().unwrap();
+        let mut stale = make_note("a", "stale");
+        stale.deleted_at = Some(1);
+        let state = make_state(&dir, vec![make_note("a", "fresh")], vec![stale]);
+
+        delete_note_data(&state, "a").unwrap();
+
+        let trash = state.trash.recover();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].content, "fresh");
+    }
+
+    #[test]
+    fn delete_note_data_enforces_trash_limit() {
+        let dir = TempDir::new().unwrap();
+        let existing_trash: Vec<Note> = (0..TRASH_MAX)
+            .map(|i| make_note(&i.to_string(), ""))
+            .collect();
+        let state = make_state(&dir, vec![make_note("new", "")], existing_trash);
+
+        delete_note_data(&state, "new").unwrap();
+
+        let trash = state.trash.recover();
+        assert_eq!(trash.len(), TRASH_MAX);
+        assert_eq!(trash[0].id, "1"); // oldest ("0") dropped
+        assert_eq!(trash.last().unwrap().id, "new");
+    }
+
+    #[test]
+    fn delete_note_data_nonexistent_id_returns_false_and_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "")], vec![]);
+
+        let found = delete_note_data(&state, "missing").unwrap();
+
+        assert!(!found);
+        assert!(!dir.path().join("notes.json").exists());
+        assert!(!dir.path().join("trash.json").exists());
+    }
+
+    /// ゴミ箱側を先に書く順序の確認。notes.json への書き込みをディレクトリ衝突で
+    /// 失敗させても、trash.json には既に書けているので捨て直せる状態が残る。
+    #[test]
+    fn delete_note_data_writes_trash_before_notes() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("notes.json")).unwrap();
+        let state = make_state(&dir, vec![make_note("a", "hello")], vec![]);
+
+        assert!(delete_note_data(&state, "a").is_err());
+
+        assert_eq!(read_trash_json(&dir)[0].id, "a");
+    }
+
+    // ── restore_note_data ─────────────────────────────────────
+
+    #[test]
+    fn restore_note_data_moves_note_to_notes_and_persists() {
+        let dir = TempDir::new().unwrap();
+        let mut trashed = make_note("a", "hello");
+        trashed.deleted_at = Some(123);
+        let state = make_state(&dir, vec![], vec![trashed]);
+
+        let restored = restore_note_data(&state, "a").unwrap();
+
+        assert_eq!(restored.unwrap().deleted_at, None);
+        assert!(state.trash.recover().is_empty());
+        assert_eq!(state.notes.recover().len(), 1);
+        let notes_on_disk = read_notes_json(&dir);
+        assert_eq!(notes_on_disk.len(), 1);
+        assert_eq!(notes_on_disk[0].id, "a");
+        assert!(read_trash_json(&dir).is_empty());
+    }
+
+    #[test]
+    fn restore_note_data_keeps_existing_notes_entry_on_duplicate_id() {
+        let dir = TempDir::new().unwrap();
+        let mut trashed = make_note("a", "stale-from-trash");
+        trashed.deleted_at = Some(1);
+        let state = make_state(&dir, vec![make_note("a", "fresh-in-notes")], vec![trashed]);
+
+        restore_note_data(&state, "a").unwrap();
+
+        let notes = state.notes.recover();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].content, "fresh-in-notes");
+    }
+
+    #[test]
+    fn restore_note_data_nonexistent_id_returns_none_and_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![], vec![make_note("a", "")]);
+
+        let restored = restore_note_data(&state, "missing").unwrap();
+
+        assert!(restored.is_none());
+        assert!(!dir.path().join("notes.json").exists());
+        assert!(!dir.path().join("trash.json").exists());
+    }
+
+    /// 付箋側を先に書く順序の確認。trash.json への書き込みをディレクトリ衝突で
+    /// 失敗させても、notes.json には既に書けているので復元し直せる状態が残る。
+    #[test]
+    fn restore_note_data_writes_notes_before_trash() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("trash.json")).unwrap();
+        let state = make_state(&dir, vec![], vec![make_note("a", "hello")]);
+
+        assert!(restore_note_data(&state, "a").is_err());
+
+        assert_eq!(read_notes_json(&dir)[0].id, "a");
+    }
+
+    // ── delete → restore round-trip ───────────────────────────
+
+    #[test]
+    fn delete_then_restore_returns_note_to_notes() {
+        let dir = TempDir::new().unwrap();
+        let state = make_state(&dir, vec![make_note("a", "hello")], vec![]);
+
+        delete_note_data(&state, "a").unwrap();
+        let restored = restore_note_data(&state, "a").unwrap().unwrap();
+
+        assert_eq!(restored.content, "hello");
+        assert_eq!(restored.deleted_at, None);
+        assert!(read_trash_json(&dir).is_empty());
+        assert_eq!(read_notes_json(&dir)[0].id, "a");
+    }
 
     // ── color_circle ────────────────────────────────────────
 
