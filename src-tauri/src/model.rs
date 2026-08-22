@@ -79,6 +79,16 @@ pub(crate) const COLOR_DEFS: &[ColorDef] = &[
     },
 ];
 
+/// `COLOR_DEFS` に実在する色キーか検証する。
+pub(crate) fn is_valid_color_key(color: &str) -> bool {
+    COLOR_DEFS.iter().any(|c| c.key == color)
+}
+
+/// `default_color` として妥当な値か検証する。`"random"` と `COLOR_DEFS` のキーのみを許可する。
+pub(crate) fn is_valid_default_color(color: &str) -> bool {
+    color == "random" || is_valid_color_key(color)
+}
+
 // ── Data Model ──────────────────────────────────────────────
 
 pub(crate) const TRASH_MAX: usize = 200;
@@ -444,5 +454,24 @@ mod tests {
     fn resolve_color_unknown_key_passthrough() {
         // 不明なキーはそのまま返す（バリデーションは呼び出し側が行う）
         assert_eq!(resolve_color("bogus"), "bogus");
+    }
+
+    // ── is_valid_default_color ──
+
+    #[test]
+    fn is_valid_default_color_accepts_random() {
+        assert!(is_valid_default_color("random"));
+    }
+
+    #[test]
+    fn is_valid_default_color_accepts_color_defs_keys() {
+        for c in COLOR_DEFS {
+            assert!(is_valid_default_color(c.key));
+        }
+    }
+
+    #[test]
+    fn is_valid_default_color_rejects_unknown_key() {
+        assert!(!is_valid_default_color("bogus"));
     }
 }

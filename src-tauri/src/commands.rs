@@ -1,14 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::image::Image;
-use tauri::menu::{ContextMenu, IconMenuItem, Menu, MenuItem, NativeIcon, PredefinedMenuItem};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
-use crate::i18n::{self, Lang, Msg};
+use crate::context_menu::build_context_menu;
+use crate::i18n::{self, Msg};
 use crate::model::{
-    clamp_opacity, clamp_zoom, resolve_color, AppState, LanguageSetting, Note, RecoverMutex,
-    Settings, COLOR_DEFS, TRASH_MAX,
+    clamp_opacity, clamp_zoom, is_valid_color_key, is_valid_default_color, resolve_color, AppState,
+    LanguageSetting, Note, RecoverMutex, Settings, TRASH_MAX,
 };
 use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
 use crate::window::{
@@ -58,7 +57,7 @@ pub(crate) fn update_note_color(
     state: State<AppState>,
 ) -> Result<(), String> {
     let resolved = resolve_color(&color);
-    if !COLOR_DEFS.iter().any(|c| c.key == resolved) {
+    if !is_valid_color_key(&resolved) {
         return Ok(());
     }
     update_note_field(&state, &id, |note| note.color = resolved)
@@ -300,7 +299,9 @@ pub(crate) fn update_settings(
     let (snapshot, language_changed) = {
         let mut settings = state.settings.recover();
         let language_changed = settings.language != language;
-        settings.default_color = default_color;
+        if is_valid_default_color(&default_color) {
+            settings.default_color = default_color;
+        }
         settings.opacity = clamp_opacity(opacity);
         settings.bring_all_to_front = bring_all_to_front;
         settings.show_pin_button = show_pin_button;
@@ -347,154 +348,6 @@ pub(crate) fn create_note(app: AppHandle, state: State<AppState>) -> Note {
     create_note_with_window(&app, &state)
 }
 
-/// Generate a colored circle icon (16×16 RGBA) for context menu color items.
-fn color_circle(r: u8, g: u8, b: u8) -> Image<'static> {
-    const S: u32 = 16;
-    let mut rgba = vec![0u8; (S * S * 4) as usize];
-    let c = S as f32 / 2.0;
-    let rad = c - 1.0;
-    for y in 0..S {
-        for x in 0..S {
-            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-            let i = ((y * S + x) * 4) as usize;
-            if d <= rad {
-                rgba[i] = r;
-                rgba[i + 1] = g;
-                rgba[i + 2] = b;
-                rgba[i + 3] = 255;
-            }
-        }
-    }
-    Image::new_owned(rgba, S, S)
-}
-
-/// Build and display the note context menu. Returns Err on menu construction failure.
-fn build_context_menu(
-    app: &AppHandle,
-    webview_win: &tauri::WebviewWindow,
-    is_pinned: bool,
-    current_color: &str,
-    lang: Lang,
-) -> tauri::Result<()> {
-    let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
-        .iter()
-        .map(|c| {
-            let check = if c.key == current_color {
-                "✓ "
-            } else {
-                "    "
-            };
-            IconMenuItem::with_id(
-                app,
-                format!("ctx_color_{}", c.key),
-                format!("{}{}", check, i18n::color_label(lang, c.key)),
-                true,
-                Some(color_circle(c.r, c.g, c.b)),
-                None::<&str>,
-            )
-            .unwrap()
-        })
-        .collect();
-
-    let copy = PredefinedMenuItem::copy(app, None)?;
-    let paste = PredefinedMenuItem::paste(app, None)?;
-    let sep0 = PredefinedMenuItem::separator(app)?;
-    let pin_label = if is_pinned {
-        Msg::CtxUnpin
-    } else {
-        Msg::CtxPin
-    };
-    let pin = MenuItem::with_id(
-        app,
-        "ctx_pin",
-        i18n::text(lang, pin_label),
-        true,
-        None::<&str>,
-    )?;
-    let new_note = IconMenuItem::with_id_and_native_icon(
-        app,
-        "ctx_new",
-        i18n::text(lang, Msg::NewNote),
-        true,
-        Some(NativeIcon::Add),
-        Some("CmdOrCtrl+N"),
-    )?;
-    let delete = IconMenuItem::with_id_and_native_icon(
-        app,
-        "ctx_delete",
-        i18n::text(lang, Msg::CtxDelete),
-        true,
-        Some(NativeIcon::Remove),
-        None::<&str>,
-    )?;
-    let trash = IconMenuItem::with_id_and_native_icon(
-        app,
-        "ctx_trash",
-        i18n::text(lang, Msg::CtxOpenTrash),
-        true,
-        Some(NativeIcon::TrashEmpty),
-        Some("CmdOrCtrl+Shift+T"),
-    )?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    let sep1b = PredefinedMenuItem::separator(app)?;
-    let zoom_in = MenuItem::with_id(
-        app,
-        "ctx_zoom_in",
-        i18n::text(lang, Msg::ZoomIn),
-        true,
-        Some("CmdOrCtrl+="),
-    )?;
-    let zoom_out = MenuItem::with_id(
-        app,
-        "ctx_zoom_out",
-        i18n::text(lang, Msg::ZoomOut),
-        true,
-        Some("CmdOrCtrl+-"),
-    )?;
-    let zoom_reset = MenuItem::with_id(
-        app,
-        "ctx_zoom_reset",
-        i18n::text(lang, Msg::CtxZoomReset),
-        true,
-        Some("CmdOrCtrl+0"),
-    )?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let settings = MenuItem::with_id(
-        app,
-        "ctx_settings",
-        i18n::text(lang, Msg::CtxOpenSettings),
-        true,
-        Some("CmdOrCtrl+,"),
-    )?;
-    let sep3 = PredefinedMenuItem::separator(app)?;
-
-    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-        &copy,
-        &paste,
-        &sep0,
-        &pin,
-        &sep1,
-        &new_note,
-        &delete,
-        &trash,
-        &sep1b,
-        &zoom_in,
-        &zoom_out,
-        &zoom_reset,
-        &sep2,
-        &settings,
-        &sep3,
-    ];
-    for ci in &color_items {
-        items.push(ci as &dyn tauri::menu::IsMenuItem<tauri::Wry>);
-    }
-
-    let menu = Menu::with_items(app, &items)?;
-    // popup() is blocking — shows native menu and returns after user selects or dismisses
-    menu.popup(webview_win.as_ref().window().clone())?;
-    Ok(())
-}
-
 #[tauri::command]
 pub(crate) fn show_context_menu(
     id: String,
@@ -514,81 +367,6 @@ pub(crate) fn show_context_menu(
     let lang = i18n::resolve(state.settings.recover().language);
     if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color, lang) {
         eprintln!("context menu error: {}", e);
-    }
-}
-
-/// Handle context menu events (called from menu.rs on_menu_event)
-pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
-    let state: State<AppState> = app.state();
-    let note_id = state.context_menu_note_id.recover().clone();
-    if note_id.is_empty() {
-        return;
-    }
-    let win_label = format!("note-{}", note_id);
-
-    let win = app.get_webview_window(&win_label);
-
-    match event_id {
-        "ctx_pin" => {
-            if let Some(w) = &win {
-                let _ = w.emit_to(w.label(), "ctx-toggle-pin", ());
-            }
-        }
-        "ctx_new" => {
-            create_note_with_window(app, &state);
-        }
-        "ctx_delete" => {
-            if confirm_delete_if_needed(app, &state) {
-                if let Err(e) = do_delete_note(&note_id, app, &state) {
-                    eprintln!("delete note error: {}", e);
-                }
-            }
-        }
-        "ctx_trash" => {
-            open_trash_window(app);
-        }
-        "ctx_settings" => {
-            open_settings_window(app, None);
-        }
-        "ctx_zoom_in" => {
-            if let Some(w) = &win {
-                let _ = w.emit_to(w.label(), "ctx-zoom", "in");
-            }
-        }
-        "ctx_zoom_out" => {
-            if let Some(w) = &win {
-                let _ = w.emit_to(w.label(), "ctx-zoom", "out");
-            }
-        }
-        "ctx_zoom_reset" => {
-            if let Some(w) = &win {
-                let _ = w.emit_to(w.label(), "ctx-zoom", "reset");
-            }
-        }
-        _ if event_id.starts_with("ctx_color_") => {
-            let color = event_id.trim_start_matches("ctx_color_");
-            if !COLOR_DEFS.iter().any(|c| c.key == color) {
-                return;
-            }
-            let snapshot = {
-                let mut notes = state.notes.recover();
-                if let Some(note) = notes.iter_mut().find(|n| n.id == note_id) {
-                    note.color = color.to_string();
-                    Some(notes.clone())
-                } else {
-                    None
-                }
-            };
-            if let Some(snap) = snapshot {
-                if let Err(e) = save_notes(&state, &snap) {
-                    eprintln!("save notes error: {}", e);
-                }
-            }
-            if let Some(w) = &win {
-                let _ = w.emit_to(w.label(), "ctx-apply-color", color);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -795,55 +573,5 @@ mod tests {
         assert_eq!(restored.deleted_at, None);
         assert!(read_trash_json(&dir).is_empty());
         assert_eq!(read_notes_json(&dir)[0].id, "a");
-    }
-
-    // ── color_circle ────────────────────────────────────────
-
-    #[test]
-    fn color_circle_is_16x16() {
-        let img = color_circle(255, 0, 0);
-        assert_eq!(img.width(), 16);
-        assert_eq!(img.height(), 16);
-    }
-
-    #[test]
-    fn color_circle_center_is_opaque() {
-        let img = color_circle(255, 128, 0);
-        // Center pixel at (7, 7)
-        let i = (7 * 16 + 7) * 4;
-        let rgba = img.rgba();
-        assert_eq!(rgba[i], 255); // R
-        assert_eq!(rgba[i + 1], 128); // G
-        assert_eq!(rgba[i + 2], 0); // B
-        assert_eq!(rgba[i + 3], 255); // A = fully opaque
-    }
-
-    #[test]
-    fn color_circle_corner_is_transparent() {
-        let img = color_circle(255, 0, 0);
-        // Corner pixel at (0, 0) is outside the circle
-        let rgba = img.rgba();
-        assert_eq!(rgba[3], 0); // A = transparent
-    }
-
-    // ── COLOR_DEFS validation ────────────────────────────────
-
-    #[test]
-    fn color_defs_keys_are_unique() {
-        let keys: Vec<&str> = COLOR_DEFS.iter().map(|c| c.key).collect();
-        let mut sorted = keys.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), keys.len(), "COLOR_DEFS has duplicate keys");
-    }
-
-    #[test]
-    fn color_defs_matches_valid_color_check() {
-        // All keys in COLOR_DEFS must pass the validation used in handle_context_menu_event
-        for c in COLOR_DEFS {
-            assert!(COLOR_DEFS.iter().any(|d| d.key == c.key));
-        }
-        // A bogus key must not pass
-        assert!(!COLOR_DEFS.iter().any(|c| c.key == "bogus"));
     }
 }

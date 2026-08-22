@@ -21,7 +21,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         let eid_str = eid.as_ref();
         // Context menu events (ctx_ prefix)
         if eid_str.starts_with("ctx_") {
-            crate::commands::handle_context_menu_event(app, eid_str);
+            crate::context_menu::handle_context_menu_event(app, eid_str);
             return;
         }
         match eid_str {
