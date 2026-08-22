@@ -13,6 +13,7 @@ use std::time::Instant;
 use tauri::{Manager, State};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use i18n::{Lang, Msg};
 use model::{resolve_color, AppState, Note, RecoverMutex, Settings};
@@ -23,20 +24,20 @@ use window::{bring_all_to_front, open_note_window};
 
 pub fn run() {
     let data_dir = persistence::data_dir();
-    let (notes, notes_loaded) = match load_notes(&data_dir) {
-        Loaded::Missing => (Vec::new(), true),
-        Loaded::Ok(v) => (v, true),
-        Loaded::Unreadable => (Vec::new(), false),
+    let (notes, notes_loaded, notes_load_error) = match load_notes(&data_dir) {
+        Loaded::Missing => (Vec::new(), true, None),
+        Loaded::Ok(v) => (v, true, None),
+        Loaded::Unreadable(e) => (Vec::new(), false, Some(e)),
     };
-    let (settings, settings_loaded) = match load_settings(&data_dir) {
-        Loaded::Missing => (Settings::default(), true),
-        Loaded::Ok(v) => (v, true),
-        Loaded::Unreadable => (Settings::default(), false),
+    let (settings, settings_loaded, settings_load_error) = match load_settings(&data_dir) {
+        Loaded::Missing => (Settings::default(), true, None),
+        Loaded::Ok(v) => (v, true, None),
+        Loaded::Unreadable(e) => (Settings::default(), false, Some(e)),
     };
-    let (trash, trash_loaded) = match load_trash(&data_dir) {
-        Loaded::Missing => (Vec::new(), true),
-        Loaded::Ok(v) => (v, true),
-        Loaded::Unreadable => (Vec::new(), false),
+    let (trash, trash_loaded, trash_load_error) = match load_trash(&data_dir) {
+        Loaded::Missing => (Vec::new(), true, None),
+        Loaded::Ok(v) => (v, true, None),
+        Loaded::Unreadable(e) => (Vec::new(), false, Some(e)),
     };
     let state = AppState {
         notes: Mutex::new(notes),
@@ -48,6 +49,9 @@ pub fn run() {
         notes_loaded,
         settings_loaded,
         trash_loaded,
+        notes_load_error,
+        settings_load_error,
+        trash_load_error,
     };
 
     tauri::Builder::default()
@@ -63,6 +67,40 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        // ログは補助機能なので、初期化に失敗しても起動は止めない。
+        // `tauri_plugin_log::Builder::build()` は内部で失敗を setup の Err として
+        // 伝播させ、`app.build().expect(...)` の panic につながる。`split()` +
+        // `attach_logger()` を自前の plugin setup 内で呼び、エラーは握り潰して
+        // 常に `Ok(())` を返すことでこの経路を避ける
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("hattotto-log")
+                .setup(|app_handle, _api| {
+                    let split = tauri_plugin_log::Builder::new()
+                        .targets([
+                            Target::new(TargetKind::LogDir { file_name: None }),
+                            Target::new(TargetKind::Stdout),
+                        ])
+                        .max_file_size(1_000_000)
+                        .rotation_strategy(RotationStrategy::KeepOne)
+                        // 依存クレート（tauri / wry / tao 等）の Info ログで
+                        // 1MB のローテーション上限を食い切ると、追跡したい
+                        // 自アプリの error まで KeepOne で失われる。全体は Warn
+                        // に絞り、自クレートだけ Info まで通す
+                        .level(log::LevelFilter::Warn)
+                        .level_for(env!("CARGO_PKG_NAME"), log::LevelFilter::Info)
+                        .split(app_handle);
+                    match split {
+                        Ok((_plugin, max_level, logger)) => {
+                            if let Err(e) = tauri_plugin_log::attach_logger(max_level, logger) {
+                                eprintln!("Failed to attach logger: {e}");
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to initialize logger: {e}"),
+                    }
+                    Ok(())
+                })
+                .build(),
+        )
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_note,
@@ -86,10 +124,10 @@ pub fn run() {
         .setup(|app| {
             // Set up app menu and system tray
             if let Err(e) = menu::setup_app_menu(app.handle()) {
-                eprintln!("Failed to setup app menu: {e}");
+                log::error!("Failed to setup app menu: {e}");
             }
             if let Err(e) = tray::setup_tray(app.handle()) {
-                eprintln!("Failed to setup tray: {e}");
+                log::error!("Failed to setup tray: {e}");
             }
 
             let state: State<AppState> = app.state();
@@ -106,6 +144,18 @@ pub fn run() {
             .filter(|(_, loaded)| !loaded)
             .map(|(name, _)| *name)
             .collect::<Vec<_>>();
+
+            // 原因をログに残す。ファイルの中身（付箋本文等）は含めず、
+            // io / serde エラーの文字列だけを出す
+            for (name, err) in [
+                ("notes.json", &state.notes_load_error),
+                ("settings.json", &state.settings_load_error),
+                ("trash.json", &state.trash_load_error),
+            ] {
+                if let Some(e) = err {
+                    log::error!("data file unreadable: {name} ({e})");
+                }
+            }
 
             if !unreadable.is_empty() {
                 let lang = i18n::resolve(state.settings.recover().language);
@@ -136,9 +186,9 @@ pub fn run() {
                         .status();
                     match result {
                         Ok(status) if !status.success() => {
-                            eprintln!("Failed to reveal data files: open exited with {status}");
+                            log::error!("Failed to reveal data files: open exited with {status}");
                         }
-                        Err(e) => eprintln!("Failed to reveal data files: {e}"),
+                        Err(e) => log::error!("Failed to reveal data files: {e}"),
                         Ok(_) => {}
                     }
                 }
@@ -169,7 +219,7 @@ pub fn run() {
                 notes.push(note_ja);
                 notes.push(note_en);
                 if let Err(e) = save_notes(&state, &notes) {
-                    eprintln!("save notes error: {}", e);
+                    log::error!("save notes error: {}", e);
                 }
             } else {
                 for note in &notes {

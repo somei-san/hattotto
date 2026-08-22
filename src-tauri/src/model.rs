@@ -224,6 +224,11 @@ pub struct AppState {
     pub(crate) notes_loaded: bool,
     pub(crate) settings_loaded: bool,
     pub(crate) trash_loaded: bool,
+    /// 読み込み失敗時の理由（io / serde エラーの文字列）。ログ用で、`*_loaded` が
+    /// `true` のときは常に `None`。ファイルの内容（付箋本文等）は含まない
+    pub(crate) notes_load_error: Option<String>,
+    pub(crate) settings_load_error: Option<String>,
+    pub(crate) trash_load_error: Option<String>,
 }
 
 #[cfg(test)]

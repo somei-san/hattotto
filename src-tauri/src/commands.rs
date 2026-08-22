@@ -377,10 +377,10 @@ pub(crate) fn update_settings(
     };
     if language_changed {
         if let Err(e) = menu::rebuild_app_menu(&app) {
-            eprintln!("rebuild app menu error: {}", e);
+            log::error!("rebuild app menu error: {}", e);
         }
         if let Err(e) = tray::rebuild_tray(&app) {
-            eprintln!("rebuild tray error: {}", e);
+            log::error!("rebuild tray error: {}", e);
         }
         // ネイティブウィンドウのタイトルは生成時にしか設定されないため、開いていれば組み直す
         let lang = i18n::resolve(snapshot.language);
@@ -430,7 +430,7 @@ pub(crate) fn show_context_menu(
 
     let lang = i18n::resolve(state.settings.recover().language);
     if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color, lang) {
-        eprintln!("context menu error: {}", e);
+        log::error!("context menu error: {}", e);
     }
 }
 
@@ -468,6 +468,9 @@ mod tests {
             notes_loaded: true,
             settings_loaded: true,
             trash_loaded: true,
+            notes_load_error: None,
+            settings_load_error: None,
+            trash_load_error: None,
         }
     }
 

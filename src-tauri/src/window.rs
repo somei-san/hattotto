@@ -61,7 +61,7 @@ pub(crate) fn create_note_with_window(app: &AppHandle, state: &AppState) -> Note
         notes.clone()
     };
     if let Err(e) = save_notes(state, &snapshot) {
-        eprintln!("save notes error: {}", e);
+        log::error!("save notes error: {}", e);
     }
     n
 }
@@ -107,7 +107,7 @@ pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
     let url = format!("note.html?id={}", note.id);
 
     let (x, y) = clamp_to_screen(app, note.x, note.y);
-    let Ok(win) = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let win = match WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("") // No title for Stickies-like feel
         .inner_size(note.width, note.height)
         .min_inner_size(200.0, 150.0)
@@ -118,8 +118,12 @@ pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
         .accept_first_mouse(true)
         .visible(true)
         .build()
-    else {
-        return;
+    {
+        Ok(win) => win,
+        Err(e) => {
+            log::error!("open note window error: note={} err={}", note.id, e);
+            return;
+        }
     };
 
     // Bring other notes to front when this window receives native focus.
@@ -190,13 +194,16 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         None => "settings.html".to_string(),
     };
     let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
+    if let Err(e) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
         .title(i18n::text(lang, Msg::SettingsWindowTitle))
         .inner_size(440.0, 600.0)
         .min_inner_size(380.0, 460.0)
         .resizable(true)
         .visible(true)
-        .build();
+        .build()
+    {
+        log::error!("open settings window error: {}", e);
+    }
 }
 
 pub(crate) fn open_trash_window(app: &AppHandle) {
@@ -205,13 +212,16 @@ pub(crate) fn open_trash_window(app: &AppHandle) {
         return;
     }
     let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
-    let _ = WebviewWindowBuilder::new(app, "trash", WebviewUrl::App("trash.html".into()))
+    if let Err(e) = WebviewWindowBuilder::new(app, "trash", WebviewUrl::App("trash.html".into()))
         .title(i18n::text(lang, Msg::TrashWindowTitle))
         .inner_size(360.0, 480.0)
         .min_inner_size(300.0, 300.0)
         .resizable(true)
         .visible(true)
-        .build();
+        .build()
+    {
+        log::error!("open trash window error: {}", e);
+    }
 }
 
 // ── Bring All Notes to Front ────────────────────────────────

@@ -32,7 +32,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
                         let state: State<AppState> = app.state();
                         if confirm_delete_if_needed(app, &state, note_id) {
                             if let Err(e) = do_delete_note(note_id, app, &state) {
-                                eprintln!("delete note error: {}", e);
+                                log::error!("delete note error: {}", e);
                             }
                         }
                     } else {
