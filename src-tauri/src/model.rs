@@ -126,6 +126,11 @@ pub(crate) fn clamp_opacity(opacity: u32) -> u32 {
 }
 
 impl Note {
+    /// 内容が空（空文字・空白のみ・改行のみを含む）かどうか。
+    pub(crate) fn is_empty(&self) -> bool {
+        self.content.trim().is_empty()
+    }
+
     pub(crate) fn new(color: &str) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -250,6 +255,27 @@ mod tests {
     fn note_new_color_reflected() {
         assert_eq!(Note::new("pink").color, "pink");
         assert_eq!(Note::new("green").color, "green");
+    }
+
+    // ── Note::is_empty() ──
+
+    #[test]
+    fn note_is_empty_for_empty_string() {
+        assert!(Note::new("yellow").is_empty());
+    }
+
+    #[test]
+    fn note_is_empty_for_whitespace_and_newlines_only() {
+        let mut note = Note::new("yellow");
+        note.content = "  \n\t\n  ".to_string();
+        assert!(note.is_empty());
+    }
+
+    #[test]
+    fn note_is_not_empty_with_content() {
+        let mut note = Note::new("yellow");
+        note.content = "hello".to_string();
+        assert!(!note.is_empty());
     }
 
     // ── Settings::default() ──

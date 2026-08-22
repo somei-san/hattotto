@@ -544,7 +544,18 @@ function scheduleSave() {
 function saveNow() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  fireInvoke('update_note_content', { id: noteId, content: rawContent }, I18N.t('toastSaveFailed'));
+  return fireInvoke('update_note_content', { id: noteId, content: rawContent }, I18N.t('toastSaveFailed'));
+}
+
+/**
+ * デバウンス中の入力と生表示中の行を書き戻して保存し、完了を待つ。
+ * 削除の空判定はバックエンドのメモリ上の内容で行われるため、削除前に
+ * これを挟まないと、入力直後の付箋が空とみなされて内容ごと消える。
+ */
+function flushContent() {
+  if (!saveTimer && activeStart == null) return Promise.resolve();
+  snapshotContent();
+  return saveNow();
 }
 
 // ── Raw Editor Bindings ───────────────────────────
@@ -698,7 +709,8 @@ newBtn.addEventListener('click', () => {
   fireInvoke('create_note', undefined, I18N.t('toastCreateFailed'));
 });
 
-document.getElementById('btn-delete').addEventListener('click', () => {
+document.getElementById('btn-delete').addEventListener('click', async () => {
+  await flushContent();
   fireInvoke('delete_note', { id: noteId }, I18N.t('toastDeleteFailed'));
 });
 
@@ -779,9 +791,11 @@ window.addEventListener('beforeunload', () => {
 });
 
 // ── Context Menu (native via Tauri) ──────────────────
-document.addEventListener('contextmenu', (e) => {
+document.addEventListener('contextmenu', async (e) => {
   if (e.shiftKey) return;
   e.preventDefault();
+  // メニューから削除が選ばれてもよいように、開く前に保存を済ませておく
+  await flushContent();
   invoke('show_context_menu', {
     id: noteId,
     isPinned: pinBtn.classList.contains('active'),

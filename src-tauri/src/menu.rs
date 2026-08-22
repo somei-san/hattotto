@@ -30,7 +30,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
                     let label = win.label().to_string();
                     if let Some(note_id) = label.strip_prefix("note-") {
                         let state: State<AppState> = app.state();
-                        if confirm_delete_if_needed(app, &state) {
+                        if confirm_delete_if_needed(app, &state, note_id) {
                             if let Err(e) = do_delete_note(note_id, app, &state) {
                                 eprintln!("delete note error: {}", e);
                             }

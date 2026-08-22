@@ -176,7 +176,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             create_note_with_window(app, &state);
         }
         "ctx_delete" => {
-            if confirm_delete_if_needed(app, &state) {
+            if confirm_delete_if_needed(app, &state, &note_id) {
                 if let Err(e) = do_delete_note(&note_id, app, &state) {
                     eprintln!("delete note error: {}", e);
                 }
