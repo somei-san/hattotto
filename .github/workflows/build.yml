@@ -41,3 +41,40 @@ jobs:
 
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # build ジョブと同じキー系列を使う。debug プロファイル同士で成果物が大きく重なるため、
+      # 別系列にすると 10GB のキャッシュ上限を圧迫して他ワークフローのキャッシュを追い出す
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-v2-
+
+      # cargo install はバイナリの有無を見ないので、cargo-tauri の実体だけ別途キャッシュしてスキップ判定する
+      - uses: actions/cache@v6
+        id: tauri-cli-cache
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ runner.os }}-${{ runner.arch }}-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build (debug bundle)
+        run: cargo tauri build --debug --bundles app
+        working-directory: src-tauri
+
+      - name: Launch smoke test
+        run: bash .github/scripts/smoke-launch.sh
