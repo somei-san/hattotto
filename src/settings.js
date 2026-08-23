@@ -14,6 +14,7 @@ let currentShowColor = true;
 let currentConfirmDelete = true;
 let currentAutostart = false;
 let currentLanguage = 'auto';
+let systemLanguage = 'en'; // get_settings から届く。init で上書きされる
 
 // ── Change Detection ──────────────────────────────
 let saved = {
@@ -143,6 +144,7 @@ saveBtn.addEventListener('click', async () => {
       show_color_button: currentShowColor,
       confirm_before_delete: currentConfirmDelete,
       language: currentLanguage,
+      resolved_language: I18N.resolve(currentLanguage, systemLanguage),
     });
     snapshotSaved();
     getCurrentWebviewWindow().close();
@@ -210,7 +212,7 @@ autostartToggle.addEventListener('change', () => {
 const languageSelect = document.getElementById('language-select');
 languageSelect.addEventListener('change', () => {
   currentLanguage = languageSelect.value;
-  I18N.setLang(I18N.resolve(currentLanguage));
+  I18N.setLang(I18N.resolve(currentLanguage, systemLanguage));
   checkDirty();
 });
 
@@ -227,7 +229,8 @@ async function init() {
   ]);
 
   currentLanguage = s.language ?? 'auto';
-  I18N.setLang(I18N.resolve(currentLanguage));
+  systemLanguage = s.system_language ?? 'en';
+  I18N.setLang(I18N.resolve(currentLanguage, systemLanguage));
   languageSelect.value = currentLanguage;
 
   currentColor = s.default_color;

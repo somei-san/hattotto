@@ -32,6 +32,20 @@ test.describe("設定画面の英語化", () => {
     await settingsPage.selectOption("#language-select", "en");
     await expect(settingsPage.locator("#tab-settings")).toHaveText("Settings");
   });
+
+  test("language: auto + system_language: en で保存すると、settings-changed に resolved_language: en が乗る", async ({ openSettings }) => {
+    const page = await openSettings({ language: "auto", system_language: "en" });
+
+    // 未変更だと保存ボタンが disabled のまま。言語以外の設定を変えて有効化する
+    // （checkbox 本体は不可視なので、見えているトラック側をクリックする）
+    await page.click("#confirm-delete-toggle + .toggle-track");
+    await page.click("#save-btn");
+
+    const emitted = await page.evaluate(() => (window as any).__emitted_events);
+    const settingsChanged = emitted.find((e: any) => e.event === "settings-changed");
+    expect(settingsChanged.payload.language).toBe("auto");
+    expect(settingsChanged.payload.resolved_language).toBe("en");
+  });
 });
 
 test.describe("付箋の英語化", () => {
@@ -56,7 +70,7 @@ test.describe("付箋の英語化", () => {
         payload: {
           default_color: "yellow", opacity: 100, bring_all_to_front: true,
           show_pin_button: true, show_new_button: true, show_color_button: true,
-          confirm_before_delete: true, language: "en",
+          confirm_before_delete: true, language: "en", resolved_language: "en",
         },
       }));
     });
@@ -82,7 +96,7 @@ test.describe("ゴミ箱の英語化", () => {
 
     await page.evaluate(() => {
       const listeners = (window as any).__globalListeners["settings-changed"];
-      listeners?.forEach((fn: any) => fn({ payload: { language: "en" } }));
+      listeners?.forEach((fn: any) => fn({ payload: { language: "en", resolved_language: "en" } }));
     });
 
     await expect(page.locator(".header h1")).toContainText("Trash");
@@ -92,24 +106,20 @@ test.describe("ゴミ箱の英語化", () => {
 });
 
 test.describe("window.I18N.resolve()", () => {
-  test("'auto' と undefined は navigator.language の primary subtag で決まる", async ({ browser }) => {
-    const jaCtx = await browser.newContext({ locale: "ja-JP" });
-    const jaPage = await jaCtx.newPage();
-    await injectNoteMock(jaPage);
-    await jaPage.goto("/note.html?id=test-note-id");
-    await jaPage.waitForLoadState("networkidle");
-    expect(await jaPage.evaluate(() => (window as any).I18N.resolve("auto"))).toBe("ja");
-    expect(await jaPage.evaluate(() => (window as any).I18N.resolve(undefined))).toBe("ja");
-    await jaCtx.close();
+  test("'auto' と undefined は systemLanguage 引数で決まり、'ja'/'en' 指定はそれを無視する", async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await injectNoteMock(page);
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
 
-    const frCtx = await browser.newContext({ locale: "fr-FR" });
-    const frPage = await frCtx.newPage();
-    await injectNoteMock(frPage);
-    await frPage.goto("/note.html?id=test-note-id");
-    await frPage.waitForLoadState("networkidle");
-    expect(await frPage.evaluate(() => (window as any).I18N.resolve("auto"))).toBe("en");
-    expect(await frPage.evaluate(() => (window as any).I18N.resolve(undefined))).toBe("en");
-    await frCtx.close();
+    expect(await page.evaluate(() => (window as any).I18N.resolve("auto", "ja"))).toBe("ja");
+    expect(await page.evaluate(() => (window as any).I18N.resolve(undefined, "ja"))).toBe("ja");
+    expect(await page.evaluate(() => (window as any).I18N.resolve("auto", "en"))).toBe("en");
+    expect(await page.evaluate(() => (window as any).I18N.resolve(undefined, "en"))).toBe("en");
+    expect(await page.evaluate(() => (window as any).I18N.resolve("ja", "en"))).toBe("ja");
+    expect(await page.evaluate(() => (window as any).I18N.resolve("en", "ja"))).toBe("en");
+    await ctx.close();
   });
 });
 

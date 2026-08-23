@@ -337,10 +337,23 @@ pub(crate) fn empty_trash(state: State<AppState>) -> Result<(), String> {
     empty_trash_data(&state)
 }
 
-/// 現在の設定を返す。
+/// `get_settings` の戻り値。`Settings` に OS ロケールから解決した表示言語を添える。
+/// `Settings` 本体には持たせない（`settings.json` へ解決結果が永続化されるのを防ぐため）。
+#[derive(serde::Serialize)]
+pub(crate) struct SettingsResponse {
+    #[serde(flatten)]
+    settings: Settings,
+    system_language: i18n::Lang,
+}
+
+/// 現在の設定を返す。フロントエンドの `auto` 解決は OS ロケールを直接参照せず、
+/// ここで返す `system_language`（Rust 側の解決結果）に一本化している。
 #[tauri::command]
-pub(crate) fn get_settings(state: State<AppState>) -> Settings {
-    state.settings.recover().clone()
+pub(crate) fn get_settings(state: State<AppState>) -> SettingsResponse {
+    SettingsResponse {
+        settings: state.settings.recover().clone(),
+        system_language: i18n::system_language(),
+    }
 }
 
 /// 設定を更新して保存する。数値は範囲内にクランプされる。
@@ -482,6 +495,21 @@ mod tests {
     fn read_trash_json(dir: &TempDir) -> Vec<Note> {
         let s = std::fs::read_to_string(dir.path().join("trash.json")).unwrap();
         serde_json::from_str(&s).unwrap()
+    }
+
+    // ── SettingsResponse ──────────────────────────────────────
+
+    #[test]
+    fn settings_response_flattens_system_language_alongside_settings() {
+        let response = SettingsResponse {
+            settings: Settings::default(),
+            system_language: i18n::Lang::Ja,
+        };
+
+        let value = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(value["language"], serde_json::json!("auto"));
+        assert_eq!(value["system_language"], serde_json::json!("ja"));
     }
 
     // ── delete_note_data ──────────────────────────────────────

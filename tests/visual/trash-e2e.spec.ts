@@ -18,7 +18,7 @@ async function injectTrashMockWithCapture(
           switch (cmd) {
             case "get_trash":     return items;
             case "get_trash_max": return 200;
-            case "get_settings":  return { language: "ja" };
+            case "get_settings":  return { language: "ja", system_language: "ja" };
             case "restore_note": {
               items = items.filter((n: any) => n.id !== args?.id);
               return null;

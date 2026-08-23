@@ -55,6 +55,8 @@ test.describe("設定反映: settings-changed イベント", () => {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            language: "ja",
+            resolved_language: "ja",
           },
         }));
       }
@@ -83,6 +85,8 @@ test.describe("設定反映: settings-changed イベント", () => {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            language: "ja",
+            resolved_language: "ja",
           },
         }));
       }
