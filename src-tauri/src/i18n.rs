@@ -8,7 +8,12 @@ use sys_locale::get_locale;
 use crate::model::LanguageSetting;
 
 /// 表示に使う言語。`LanguageSetting::Auto` を OS のロケールで解決した結果でもある。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// シリアライズ結果の `"ja"` / `"en"` は `get_settings` の `system_language` として
+/// フロントエンドへ渡り、`src/i18n.js` の `resolve` が文字列比較する。
+/// variant 名や rename 規則を変えるときはフロントエンド側も揃えること。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Lang {
     Ja,
     En,

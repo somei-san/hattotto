@@ -90,7 +90,7 @@ document.addEventListener('keydown', (e) => {
 
 // ── Listen for settings changes ──────────────────
 listen('settings-changed', (e) => {
-  I18N.setLang(I18N.resolve(e.payload.language));
+  I18N.setLang(e.payload.resolved_language);
   // 復元ボタン・空メッセージ・日付書式は render() が生成する DOM なので
   // applyDom では届かない
   render();
@@ -104,7 +104,7 @@ async function init() {
   } catch (e) {
     console.error('get_settings failed:', e);
   }
-  I18N.setLang(I18N.resolve(settings?.language));
+  I18N.setLang(I18N.resolve(settings?.language, settings?.system_language));
   render();
 }
 

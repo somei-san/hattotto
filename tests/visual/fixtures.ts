@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   show_color_button: true,
   confirm_before_delete: true,
   language: "ja",
+  system_language: "ja",
 };
 
 // ── Note mock ──────────────────────────────────────────────
@@ -112,6 +113,8 @@ async function injectSettingsMock(
   await page.addInitScript((data) => {
     const shellOpenCalls: string[] = [];
     (window as any).__shell_open_calls = shellOpenCalls;
+    const emittedEvents: { event: string; payload: unknown }[] = [];
+    (window as any).__emitted_events = emittedEvents;
 
     (window as any).__TAURI__ = {
       core: {
@@ -127,7 +130,7 @@ async function injectSettingsMock(
         },
       },
       event: {
-        emit: async () => {},
+        emit: async (event: string, payload: unknown) => { emittedEvents.push({ event, payload }); },
         listen: async () => () => {},
       },
       app: {

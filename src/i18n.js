@@ -121,11 +121,10 @@ for (const [key, entry] of Object.entries(I18N_TABLE)) {
 
 let currentLang = 'ja';
 
-/** setting（"auto" | "ja" | "en"）を表示言語へ解決する。auto は navigator.language の primary subtag が ja なら日本語、それ以外は英語。 */
-function resolve(setting) {
+/** setting（"auto" | "ja" | "en"）を表示言語へ解決する。auto は systemLanguage（get_settings が返す OS ロケールの解決結果）に従う。 */
+function resolve(setting, systemLanguage) {
   if (setting === 'ja' || setting === 'en') return setting;
-  const primary = (navigator.language || 'en').split('-')[0].toLowerCase();
-  return primary === 'ja' ? 'ja' : 'en';
+  return systemLanguage === 'ja' ? 'ja' : 'en';
 }
 
 function t(key) {

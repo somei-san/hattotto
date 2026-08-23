@@ -106,7 +106,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 - `Note`: id, content, color, x, y, width, height, zoom, pinned, deleted_at
 - `Settings`: default_color, opacity, bring_all_to_front, show_pin_button, show_new_button, show_color_button, confirm_before_delete, language
 
-表示言語は `Settings.language`（`auto` / `ja` / `en`）で決まる。`auto` は OS のロケール（フロントエンドは `navigator.language`）の primary subtag が `ja` なら日本語、それ以外はすべて英語。文言テーブルはネイティブ側 `src-tauri/src/i18n.rs` とフロントエンド側 `src/i18n.js` に分かれて存在する。
+表示言語は `Settings.language`（`auto` / `ja` / `en`）で決まる。OS ロケールの解釈は Rust 側の `i18n::system_language()` に一本化されており、`get_settings` コマンドが `Settings` に `system_language`（`"ja"` / `"en"`）を添えて返す。フロントエンドは `navigator.language` を直接見ず、`I18N.resolve(language, systemLanguage)` にこの値を渡して `auto` を解決する。文言テーブルはネイティブ側 `src-tauri/src/i18n.rs` とフロントエンド側 `src/i18n.js` に分かれて存在する。
 
 ### データフロー
 - 各付箋は独立したウィンドウ（`note-{uuid}` ラベル）として開かれる

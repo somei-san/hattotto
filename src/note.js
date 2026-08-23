@@ -99,7 +99,7 @@ async function loadNote() {
     return;
   }
 
-  I18N.setLang(I18N.resolve(settings?.language));
+  I18N.setLang(I18N.resolve(settings?.language, settings?.system_language));
 
   rawContent = note.content;
   renderAll();
@@ -770,7 +770,7 @@ unlisteners.push(appWindow.listen('ctx-apply-color', (e) => applyColor(e.payload
 // ── Listen for settings changes ──────────────────
 unlisteners.push(listen('settings-changed', (e) => {
   applySettings(e.payload);
-  I18N.setLang(I18N.resolve(e.payload.language));
+  I18N.setLang(e.payload.resolved_language);
   // ピンボタンはピン状態に応じてラベルを出し分けるため data-i18n* を持たず、
   // applyDom の対象外。ここで明示的にラベルを更新する
   applyPinState(pinBtn.classList.contains('active'));
