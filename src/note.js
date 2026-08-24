@@ -28,7 +28,7 @@ let composing = false;
 // `save_pasted_image`（Rust 側）が生成するパスの形状（`images/<uuid v4>.<ext>`）とだけ一致させる。
 // asset protocol の scope（$APPDATA/images/**/*）を信じきらず、`images/../notes.json` のような
 // 細工パスを resolveImageSrc で asset URL に変換してしまわないための最終防衛ライン。
-const IMAGE_REL_PATH_RE = /^images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpe?g|gif)$/i;
+const IMAGE_REL_PATH_RE = /^images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpe?g|gif|webp)$/i;
 function isValidImageRelPath(path) {
   return typeof path === 'string' && IMAGE_REL_PATH_RE.test(path);
 }

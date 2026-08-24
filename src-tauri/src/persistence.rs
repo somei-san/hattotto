@@ -206,7 +206,7 @@ pub(crate) fn enforce_trash_limit(trash: &mut Vec<Note>) -> Vec<Note> {
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
 /// 対応する画像形式の拡張子一覧。`is_valid_image_rel_path` の形状チェックと対応させる。
-const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif"];
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 /// 先頭バイト（マジックバイト）から画像形式を判定し、拡張子を返す。
 /// 対応外の形式（TIFF 等）は `None`。WKWebView は TIFF を `<img>` として描画できないため対応しない。
@@ -217,6 +217,8 @@ fn detect_image_ext(bytes: &[u8]) -> Option<&'static str> {
         Some("jpg")
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         Some("gif")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("webp")
     } else {
         None
     }
@@ -653,6 +655,31 @@ mod tests {
 
         assert!(rel_path.ends_with(".gif"));
         assert!(is_valid_image_rel_path(&rel_path));
+    }
+
+    #[test]
+    fn save_pasted_image_detects_webp_extension() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&[0x24, 0x00, 0x00, 0x00]);
+        bytes.extend_from_slice(b"WEBP");
+        bytes.extend_from_slice(b"rest-of-the-fake-webp-data");
+
+        let rel_path = save_pasted_image(dir.path(), &bytes).unwrap();
+
+        assert!(rel_path.ends_with(".webp"));
+        assert!(is_valid_image_rel_path(&rel_path));
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_riff_without_webp_marker() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&[0x24, 0x00, 0x00, 0x00]);
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"this-is-audio-not-an-image");
+
+        assert!(save_pasted_image(dir.path(), &bytes).is_err());
     }
 
     #[test]
