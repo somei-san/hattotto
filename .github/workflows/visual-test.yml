@@ -3,8 +3,8 @@ name: Visual Regression Tests
 on:
   push:
     branches: [main]
+  # base を絞らない（main 宛だけに絞ると、スタック PR（base が別 PR のブランチ）で CI が走らない）
   pull_request:
-    branches: [main]
 
 # 同じブランチへ push を重ねたら古い実行を打ち切る
 concurrency:
