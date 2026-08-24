@@ -120,6 +120,7 @@ pub fn run() {
             commands::empty_trash,
             commands::open_trash,
             commands::show_context_menu,
+            commands::save_pasted_image,
         ])
         .setup(|app| {
             // Set up app menu and system tray

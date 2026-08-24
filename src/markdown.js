@@ -7,6 +7,15 @@
 // This is intentional — HTML entities (e.g. &amp;) are treated as plain text
 // within Markdown syntax, and code blocks store the escaped form as-is,
 // avoiding double-escaping when placed inside <code> tags.
+
+// escapeHtml() (utils.js) only escapes & < > — safe for element content, but an
+// attribute value (href, data-url, img alt/src) also needs " and ' escaped, or
+// a crafted markdown source (e.g. `!["  onerror=alert(1) x="](images/a.png)`)
+// can break out of the attribute and inject event handlers.
+function escapeAttr(s) {
+  return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function inlineMarkdown(escaped) {
   // `code` → placeholder (protect from bold/italic/strikethrough)
   const codeBlocks = [];
@@ -20,15 +29,22 @@ function inlineMarkdown(escaped) {
   escaped = escaped.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   // ~~strikethrough~~ → <del>
   escaped = escaped.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  // ![alt](src) → <img> (before the link regex; `!` prefix distinguishes it from a link)
+  escaped = escaped.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
+    const resolved = (typeof window !== 'undefined' && typeof window.resolveImageSrc === 'function')
+      ? window.resolveImageSrc(src)
+      : src;
+    return `<img alt="${escapeAttr(alt)}" src="${escapeAttr(resolved)}">`;
+  });
   // [text](url) → <a>
   escaped = escaped.replace(
     /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
-    '<a href="$2" data-url="$2">$1</a>'
+    (_, text, url) => `<a href="${escapeAttr(url)}" data-url="${escapeAttr(url)}">${text}</a>`
   );
   // Bare URLs → <a> (skip URLs already inside an <a> tag)
   escaped = escaped.replace(
     /((?:^|[^"=]))((https?:\/\/)[^\s<]+)/g,
-    (_, pre, url) => `${pre}<a href="${url}" data-url="${url}">${url}</a>`
+    (_, pre, url) => `${pre}<a href="${escapeAttr(url)}" data-url="${escapeAttr(url)}">${url}</a>`
   );
   // Restore code blocks
   // eslint-disable-next-line no-control-regex -- \x00 is the placeholder marker

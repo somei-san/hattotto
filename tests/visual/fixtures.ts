@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   confirm_before_delete: true,
   language: "ja",
   system_language: "ja",
+  data_dir: "/mock/data-dir",
 };
 
 // ── Note mock ──────────────────────────────────────────────
@@ -48,6 +49,7 @@ export async function injectNoteMock(
         case "update_settings":       return null;
         case "delete_note":           return null;
         case "create_note":           return null;
+        case "save_pasted_image":     return "images/00000000-0000-4000-8000-000000000001.png";
         default:                      return null;
       }
     };
@@ -70,7 +72,10 @@ export async function injectNoteMock(
     (window as any).__appWindowListeners = appWindowListeners;
 
     (window as any).__TAURI__ = {
-      core: { invoke },
+      core: {
+        invoke,
+        convertFileSrc: (path: string) => `asset://localhost/${path}`,
+      },
       event: {
         listen: async (event: string, handler: EventHandler) => {
           if (!globalListeners[event]) globalListeners[event] = [];

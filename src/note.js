@@ -25,6 +25,14 @@ let activeStart = null;
 let activeEnd = null;
 let composing = false;
 
+// `save_pasted_image`（Rust 側）が生成するパスの形状（`images/<uuid v4>.<ext>`）とだけ一致させる。
+// asset protocol の scope（$APPDATA/images/**/*）を信じきらず、`images/../notes.json` のような
+// 細工パスを resolveImageSrc で asset URL に変換してしまわないための最終防衛ライン。
+const IMAGE_REL_PATH_RE = /^images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpe?g|gif)$/i;
+function isValidImageRelPath(path) {
+  return typeof path === 'string' && IMAGE_REL_PATH_RE.test(path);
+}
+
 /** 失敗を握り潰してよい操作向けの invoke。エラーはログとトーストに出す。 */
 function fireInvoke(cmd, args, failMessage) {
   return invoke(cmd, args).catch(e => {
@@ -100,6 +108,15 @@ async function loadNote() {
   }
 
   I18N.setLang(I18N.resolve(settings?.language, settings?.system_language));
+
+  // 貼り付け画像の asset protocol URL 組み立て。data_dir は起動のたびに変わらないので一度だけ設定する
+  if (settings?.data_dir) {
+    const { convertFileSrc } = window.__TAURI__.core;
+    // 形状が一致しないパスは asset URL に変換せずそのまま返す（存在しないファイルとして扱われるだけで済む）
+    window.resolveImageSrc = (relPath) => isValidImageRelPath(relPath)
+      ? convertFileSrc(`${settings.data_dir}/${relPath}`)
+      : relPath;
+  }
 
   rawContent = note.content;
   renderAll();
@@ -487,7 +504,37 @@ function insertIntoEditor(ed, inserted) {
   applyLines(lines, line + parts.length - 1, tailCol);
 }
 
-function onEditorPaste(e) {
+/**
+ * クリップボード画像を保存し、生成された相対パスを Markdown 画像記法として挿入する。
+ * 保存待ちの `await` 中に生表示が閉じられる／別行へ移ることがあり得るため、戻ってきた時点で
+ * ed がまだ同じ行の生表示のままかを確認する。ずれていたら ed への挿入を諦め、元の行
+ * （無ければ末尾）へ直接書き戻して保存する。黙って捨てると保存先の無い孤児画像になる。
+ */
+async function pasteImage(ed, file) {
+  const lineAtPaste = activeStart;
+  let relPath;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    relPath = await invoke('save_pasted_image', bytes);
+  } catch (err) {
+    console.error('save_pasted_image failed:', err);
+    showToast(I18N.t('toastSaveFailed'));
+    return;
+  }
+  const markdown = `![](${relPath})`;
+  if (ed.isConnected && activeStart === lineAtPaste) {
+    insertIntoEditor(ed, markdown);
+    return;
+  }
+  const lines = getLines();
+  const target = Math.min(Math.max(lineAtPaste ?? lines.length - 1, 0), lines.length - 1);
+  lines[target] += markdown;
+  rawContent = lines.join('\n');
+  renderAll();
+  await saveNow();
+}
+
+async function onEditorPaste(e) {
   e.preventDefault();
   const ed = e.currentTarget;
   const text = e.clipboardData.getData('text/plain');
@@ -500,6 +547,15 @@ function onEditorPaste(e) {
     snapshotContent();
     scheduleSave();
     return;
+  }
+
+  if (!text) {
+    const imageItem = Array.from(e.clipboardData.items)
+      .find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (imageItem) {
+      await pasteImage(ed, imageItem.getAsFile());
+      return;
+    }
   }
 
   insertIntoEditor(ed, toMarkdown(text, e.clipboardData.getData('text/html')));

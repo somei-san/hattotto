@@ -1,5 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
@@ -9,7 +10,10 @@ use crate::model::{
     clamp_opacity, clamp_zoom, is_valid_color_key, is_valid_default_color, resolve_color, AppState,
     LanguageSetting, Note, RecoverMutex, Settings, TRASH_MAX,
 };
-use crate::persistence::{enforce_trash_limit, save_notes, save_settings, save_trash};
+use crate::persistence::{
+    self, enforce_trash_limit, extract_image_paths, gc_images, save_notes, save_settings,
+    save_trash,
+};
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
 };
@@ -173,10 +177,12 @@ pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, Strin
         }
         save_notes(state, &notes_snapshot)?;
         *state.notes.recover() = notes_snapshot;
+        // note.is_empty() は content.trim() が空であることを意味し、画像記法（非空白）を
+        // 含む content では成立しない。この経路に画像 GC は不要（呼んでも常に空振りする）
         return Ok(true);
     }
 
-    let trash_snapshot = {
+    let (trash_snapshot, drained) = {
         note.deleted_at = Some(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -188,8 +194,8 @@ pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, Strin
         // ゴミ箱に同じ id が並ばないようにする
         trash_snap.retain(|n| n.id != id);
         trash_snap.push(note);
-        enforce_trash_limit(&mut trash_snap);
-        trash_snap
+        let drained = enforce_trash_limit(&mut trash_snap);
+        (trash_snap, drained)
     };
     // 付箋側を先に消すと、間で中断したときにどちらのファイルからも消える。
     // この順なら両方に残るので捨て直せる
@@ -199,6 +205,19 @@ pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, Strin
     *state.notes.recover() = notes_snapshot.clone();
     *state.trash.recover() = trash_snapshot.clone();
     save_notes(state, &notes_snapshot)?;
+    // FIFO で溢れて完全に消えた付箋（trash からも drop 済み）が参照していた画像を GC する
+    let candidates: Vec<String> = drained
+        .iter()
+        .flat_map(|n| extract_image_paths(&n.content))
+        .collect();
+    if !candidates.is_empty() {
+        gc_images(
+            &state.data_dir,
+            &candidates,
+            &notes_snapshot,
+            &trash_snapshot,
+        );
+    }
     Ok(true)
 }
 
@@ -326,8 +345,18 @@ pub(crate) fn restore_note(
 /// 保存が成功してからメモリを clear する。先に clear すると、保存失敗時に
 /// メモリだけ空になりディスクの trash.json には付箋が残ったままになる。
 pub(crate) fn empty_trash_data(state: &AppState) -> Result<(), String> {
+    let old_trash = state.trash.recover().clone();
     save_trash(state, &[])?;
     state.trash.recover().clear();
+    // ゴミ箱ごと消えた付箋が参照していた画像を GC する
+    let candidates: Vec<String> = old_trash
+        .iter()
+        .flat_map(|n| extract_image_paths(&n.content))
+        .collect();
+    if !candidates.is_empty() {
+        let notes_snapshot = state.notes.recover().clone();
+        gc_images(&state.data_dir, &candidates, &notes_snapshot, &[]);
+    }
     Ok(())
 }
 
@@ -337,13 +366,15 @@ pub(crate) fn empty_trash(state: State<AppState>) -> Result<(), String> {
     empty_trash_data(&state)
 }
 
-/// `get_settings` の戻り値。`Settings` に OS ロケールから解決した表示言語を添える。
-/// `Settings` 本体には持たせない（`settings.json` へ解決結果が永続化されるのを防ぐため）。
+/// `get_settings` の戻り値。`Settings` に OS ロケールから解決した表示言語と、
+/// 貼り付け画像の asset protocol URL 組み立てに使うデータディレクトリを添える。
+/// いずれも `Settings` 本体には持たせない（`settings.json` への永続化を防ぐため）。
 #[derive(serde::Serialize)]
 pub(crate) struct SettingsResponse {
     #[serde(flatten)]
     settings: Settings,
     system_language: i18n::Lang,
+    data_dir: String,
 }
 
 /// 現在の設定を返す。フロントエンドの `auto` 解決は OS ロケールを直接参照せず、
@@ -353,7 +384,22 @@ pub(crate) fn get_settings(state: State<AppState>) -> SettingsResponse {
     SettingsResponse {
         settings: state.settings.recover().clone(),
         system_language: i18n::system_language(),
+        data_dir: state.data_dir.to_string_lossy().into_owned(),
     }
+}
+
+/// クリップボードから貼り付けられた画像を `images/<uuid v4>.png` として保存し、
+/// content に埋め込む相対パスを返す。JS 側は `Uint8Array` を渡し、raw payload
+/// (`InvokeBody::Raw`) として届く。
+#[tauri::command]
+pub(crate) fn save_pasted_image(
+    request: Request<'_>,
+    state: State<AppState>,
+) -> Result<String, String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("save_pasted_image expects a raw byte payload".to_string());
+    };
+    persistence::save_pasted_image(&state.data_dir, bytes)
 }
 
 /// 設定を更新して保存する。数値は範囲内にクランプされる。
@@ -497,6 +543,29 @@ mod tests {
         serde_json::from_str(&s).unwrap()
     }
 
+    /// テスト用の有効な uuid 形状パス（`persistence::is_valid_image_rel_path` の形状に一致）。
+    fn uuid_image_path(n: u8) -> String {
+        format!("images/00000000-0000-4000-8000-00000000000{}.png", n)
+    }
+
+    /// `dir/images/<filename>` にダミーの画像ファイルを置く。
+    fn write_dummy_image(dir: &TempDir, image_path: &str) {
+        let images_dir = dir.path().join("images");
+        std::fs::create_dir_all(&images_dir).unwrap();
+        std::fs::write(
+            images_dir.join(image_path.strip_prefix("images/").unwrap()),
+            b"data",
+        )
+        .unwrap();
+    }
+
+    fn image_exists(dir: &TempDir, image_path: &str) -> bool {
+        dir.path()
+            .join("images")
+            .join(image_path.strip_prefix("images/").unwrap())
+            .exists()
+    }
+
     // ── SettingsResponse ──────────────────────────────────────
 
     #[test]
@@ -504,12 +573,14 @@ mod tests {
         let response = SettingsResponse {
             settings: Settings::default(),
             system_language: i18n::Lang::Ja,
+            data_dir: "/tmp/hattotto".to_string(),
         };
 
         let value = serde_json::to_value(&response).unwrap();
 
         assert_eq!(value["language"], serde_json::json!("auto"));
         assert_eq!(value["system_language"], serde_json::json!("ja"));
+        assert_eq!(value["data_dir"], serde_json::json!("/tmp/hattotto"));
     }
 
     // ── delete_note_data ──────────────────────────────────────
@@ -568,6 +639,43 @@ mod tests {
         assert_eq!(trash.len(), TRASH_MAX);
         assert_eq!(trash[0].id, "1"); // oldest ("0") dropped
         assert_eq!(trash.last().unwrap().id, "new");
+    }
+
+    /// FIFO で完全にゴミ箱から溢れた付箋（＝もうどこにも残らない）が参照していた画像は消える。
+    #[test]
+    fn delete_note_data_fifo_overflow_gc_removes_drained_notes_image() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(1);
+        write_dummy_image(&dir, &image_path);
+
+        let mut existing_trash: Vec<Note> = (0..TRASH_MAX)
+            .map(|i| make_note(&i.to_string(), ""))
+            .collect();
+        existing_trash[0].content = format!("![]({})", image_path); // oldest → FIFO で drop される
+        let state = make_state(&dir, vec![make_note("new", "hello")], existing_trash);
+
+        delete_note_data(&state, "new").unwrap();
+
+        assert!(!image_exists(&dir, &image_path));
+    }
+
+    /// drop された付箋の画像でも、残っている別の付箋がまだ参照していれば消さない。
+    #[test]
+    fn delete_note_data_fifo_overflow_gc_keeps_image_referenced_by_remaining_note() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(2);
+        write_dummy_image(&dir, &image_path);
+
+        let mut existing_trash: Vec<Note> = (0..TRASH_MAX)
+            .map(|i| make_note(&i.to_string(), ""))
+            .collect();
+        existing_trash[0].content = format!("![]({})", image_path); // drop される
+        existing_trash[1].content = format!("![]({})", image_path); // drop されずに残る
+        let state = make_state(&dir, vec![make_note("new", "hello")], existing_trash);
+
+        delete_note_data(&state, "new").unwrap();
+
+        assert!(image_exists(&dir, &image_path));
     }
 
     #[test]
@@ -807,6 +915,35 @@ mod tests {
 
         assert!(state.trash.recover().is_empty());
         assert!(read_trash_json(&dir).is_empty());
+    }
+
+    /// ゴミ箱ごと消えた付箋が参照していた画像は GC される。
+    #[test]
+    fn empty_trash_data_gc_removes_unreferenced_image() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(3);
+        write_dummy_image(&dir, &image_path);
+        let trash = vec![make_note("t", &format!("![]({})", image_path))];
+        let state = make_state(&dir, vec![], trash);
+
+        empty_trash_data(&state).unwrap();
+
+        assert!(!image_exists(&dir, &image_path));
+    }
+
+    /// notes 側にまだ参照が残っていれば、ゴミ箱を空にしても画像は消さない。
+    #[test]
+    fn empty_trash_data_gc_keeps_image_still_referenced_by_notes() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(4);
+        write_dummy_image(&dir, &image_path);
+        let notes = vec![make_note("n", &format!("![]({})", image_path))];
+        let trash = vec![make_note("t", &format!("![]({})", image_path))];
+        let state = make_state(&dir, notes, trash);
+
+        empty_trash_data(&state).unwrap();
+
+        assert!(image_exists(&dir, &image_path));
     }
 
     // ── delete → restore round-trip ───────────────────────────

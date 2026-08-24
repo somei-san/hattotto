@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "unstable", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "unstable", "macos-private-api", "protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
