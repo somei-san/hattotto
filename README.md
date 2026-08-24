@@ -13,33 +13,27 @@
 </p>
 
 ## Highlights
-Where it differs from macOS Stickies
 
-- Markdown support
+The main differences from macOS Stickies
+
+- You can write Markdown
 - Clicking one note brings every note to the front
-  - Handy when you open it from a launcher (Alfred and friends) or Mission Control
+  - Handy when you open it from a launcher (Alfred and friends) or Mission Control!
 - Deleted notes can be restored from the trash
-- The things you reach for are one click away
-  - New note
-  - Pin
-  - Color picker
-- It looks a bit nicer
+- The buttons you reach for can be shown right on the note
 
 ## Features
 
-- 📝 Each note is its own frameless window
-- 🎨 Six color themes (yellow, blue, green, pink, purple, gray)
-- 💾 Autosave for text, position, size and zoom
-- 🔄 Notes come back where you left them on the next launch
-- ➕ New notes from the button, the tray menu, or ⌘N
+- 📋 Markdown support
+  - 👀 While you edit, only the line under the cursor turns back into raw Markdown — the rest stays rendered
+  - ✏️ Input help, such as continuing a list on Enter
+  - 🔗 Pasted rich text becomes Markdown
+- 🪟 Clicking one note brings every note to the front
+- 🎨 Six color themes
 - 🗑️ Trash that keeps up to 200 deleted notes for restoring
 - 🔍 Per-note zoom (⌘+ / ⌘- / ⌘0)
-- 📋 Markdown is always rendered (headings, bullet and numbered lists, checkboxes, bold, italic, strikethrough, code, quotes, rules and links). While you edit, only the line under the caret turns back into raw Markdown — the rest stays rendered
-- ✏️ Markdown input help, such as continuing a list on Enter
-- 🔗 Rich text pasted from a browser becomes Markdown
-- 🖱️ Custom right-click menu
 - 🌐 Japanese and English UI, following the OS locale or pinned in settings
-- ⚙️ Settings for the default color, opacity, which buttons to show, delete confirmation, language and start at login
+- ⚙️ Settings for the default color, opacity, which buttons to show, delete confirmation and start at login
 
 ## Install
 
@@ -65,7 +59,7 @@ brew install --cask somei-san/tap/hattotto
 
 ## Links
 
-- [Development guide](DEVELOPMENT.md)
+- [Development guide](DEVELOPMENT.md) (Japanese only)
 - [Homebrew tap repository](https://github.com/somei-san/homebrew-tap)
 
 ## Support

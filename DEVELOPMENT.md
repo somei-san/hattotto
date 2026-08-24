@@ -26,12 +26,38 @@ cargo tauri build
 npm install
 npx playwright install chromium
 
-# テスト実行（VRT + UT + E2E）
+# テスト実行（node の単体テスト → Playwright の順）
 npm test
+
+# 単体テストだけ（ブラウザを起動しないので速い）
+npm run test:unit
 
 # スナップショット更新（UI 変更後）
 npm run test:update
+
+# レポート表示
+npm run test:report
 ```
+
+## コミット前の検証
+
+Rust を変更したら:
+
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+```
+
+フロントエンド（`src/*`）を変更したら:
+
+```bash
+npm run lint
+npm test
+```
+
+警告も整形の崩れも CI で落ちるため、手元で通してからコミットする。UI 変更でスクリーンショットのベースラインが変わったら `npm run test:update` で更新し、差分画像を確認してからコミットに含める。
 
 ## ログ
 
