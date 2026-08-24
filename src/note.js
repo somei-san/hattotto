@@ -15,6 +15,18 @@ const pinBtn    = document.getElementById('btn-pin');
 const newBtn    = document.getElementById('btn-new');
 const colorBtn  = document.getElementById('btn-color');
 
+/** File を含むドラッグかどうか。dragover 時点でも `types` は（protected mode でも）参照できる。 */
+function isFileDrag(e) {
+  return e.dataTransfer.types.includes('Files');
+}
+
+// Tauri の drag-drop ハンドラは付箋ウィンドウだけ無効化している（src-tauri/src/window.rs）ため、
+// ファイルドラッグは HTML5 API に委ねられる。preventDefault が無いと WKWebView がドロップされた
+// ファイルを file:// として開いてしまう。ファイル以外のドラッグ（テキスト選択など）の既定動作は
+// 奪わないよう、File を含むドラッグだけを止める。挿入処理の本体は別の場所にある
+document.addEventListener('dragover', (e) => { if (isFileDrag(e)) e.preventDefault(); });
+document.addEventListener('drop', (e) => { if (isFileDrag(e)) e.preventDefault(); });
+
 let saveTimer = null;
 
 // ── Editor State ──────────────────────────────────
@@ -505,12 +517,13 @@ function insertIntoEditor(ed, inserted) {
 }
 
 /**
- * クリップボード画像を保存し、生成された相対パスを Markdown 画像記法として挿入する。
+ * クリップボード画像・ドロップ画像を保存し、生成された相対パスを Markdown 画像記法として挿入する。
  * 保存待ちの `await` 中に生表示が閉じられる／別行へ移ることがあり得るため、戻ってきた時点で
- * ed がまだ同じ行の生表示のままかを確認する。ずれていたら ed への挿入を諦め、元の行
- * （無ければ末尾）へ直接書き戻して保存する。黙って捨てると保存先の無い孤児画像になる。
+ * ed がまだ同じ行の生表示のままかを確認する。ずれていたら ed への挿入を諦め、fallbackLine
+ * （無ければ元の行、それも無ければ末尾）へ直接書き戻して保存する。黙って捨てると保存先の無い
+ * 孤児画像になる。ed は null 許容（最初からフォールバック挿入になる）。
  */
-async function pasteImage(ed, file) {
+async function pasteImage(ed, file, fallbackLine) {
   const lineAtPaste = activeStart;
   let relPath;
   try {
@@ -522,12 +535,12 @@ async function pasteImage(ed, file) {
     return;
   }
   const markdown = `![](${relPath})`;
-  if (ed.isConnected && activeStart === lineAtPaste) {
+  if (ed?.isConnected && activeStart === lineAtPaste) {
     insertIntoEditor(ed, markdown);
     return;
   }
   const lines = getLines();
-  const target = Math.min(Math.max(lineAtPaste ?? lines.length - 1, 0), lines.length - 1);
+  const target = Math.min(Math.max(fallbackLine ?? lineAtPaste ?? lines.length - 1, 0), lines.length - 1);
   lines[target] += markdown;
   rawContent = lines.join('\n');
   renderAll();
@@ -561,14 +574,60 @@ async function onEditorPaste(e) {
   insertIntoEditor(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
 }
 
-function onEditorDrop(e) {
+/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。 */
+async function pasteImageFiles(ed, files, fallbackLine) {
+  for (const file of files) {
+    await pasteImage(ed, file, fallbackLine);
+  }
+}
+
+async function onEditorDrop(e) {
   e.preventDefault();
   const ed = e.currentTarget;
+  const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  if (imageFiles.length) {
+    await pasteImageFiles(ed, imageFiles);
+    return;
+  }
+  // File を含むのに画像が無いドロップは、黙って無視すると無反応に見えるので知らせる
+  //（WKWebView は画像以外のファイルドラッグを drop イベントの発火前に拒否するため、
+  // この分岐に届くのはブラウザ由来など File はあるが画像でないドロップに限られる）
+  if (isFileDrag(e)) {
+    showToast(I18N.t('toastImageDropUnsupported'));
+    return;
+  }
   const text = e.dataTransfer.getData('text/plain');
   if (!text) return;
   // drop 位置ではなく現在のキャレット位置へ入れる
   insertIntoEditor(ed, toMarkdown(text, e.dataTransfer.getData('text/html')));
 }
+
+/** ドロップ先の要素から挿入対象の行番号を求める。フェンスは行単位のマッピングを持たないので末尾に置く。 */
+function dropTargetLine(target) {
+  const el = target.closest('[data-line]');
+  if (!el) return null;
+  return el.dataset.lineEnd != null ? Number(el.dataset.lineEnd) : Number(el.dataset.line);
+}
+
+// ── Drop on non-editing note area ─────────────────
+// 生表示中でない付箋（.raw-editor が無い状態）へのドロップも画像だけは受ける。
+// preventDefault（File ドラッグのみ）は先頭の dragover/drop リスナーが担う
+document.addEventListener('drop', async (e) => {
+  if (!isFileDrag(e)) return;
+  // 生エディタ上のドロップは onEditorDrop が処理する（二重処理を避ける）
+  if (e.target.closest('.raw-editor')) return;
+  const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  // renderAll() で DOM が作り直される前に、ドロップ先の行番号を確定させておく
+  const fallbackLine = dropTargetLine(e.target);
+  // 別行が生表示中だった場合に備えて確定させる。これをしないと、生表示ブロックの
+  // 先頭行末へ誤挿入されたり、activeStart/composing が生表示 DOM ごと取り残されたりする
+  commitActive();
+  if (!imageFiles.length) {
+    showToast(I18N.t('toastImageDropUnsupported'));
+    return;
+  }
+  await pasteImageFiles(null, imageFiles, fallbackLine);
+});
 
 // ── Checkbox autocomplete ────────────────────────
 function autocompleteCheckbox(ed) {
@@ -724,6 +783,8 @@ document.addEventListener('keydown', (e) => {
 
 for (const type of ['cut', 'paste', 'drop']) {
   document.addEventListener(type, (e) => {
+    // 画像ドロップは行をまたぐ選択が残っていても許可する（選択範囲への破壊的な書き込みではない）
+    if (type === 'drop' && isFileDrag(e)) return;
     if (!selectionSpansLines()) return;
     e.preventDefault();
     e.stopPropagation();
