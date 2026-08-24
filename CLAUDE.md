@@ -8,28 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## ビルド・開発コマンド
 
-```bash
-# 開発起動。frontendDist が ../src の静的ファイルを指しており
-# devUrl も beforeDevCommand も無いため、tauri-cli を介さず直接起動できる
-cargo run --manifest-path src-tauri/Cargo.toml
-
-# プロダクションビルド（DMG生成）。こちらは tauri-cli が要る
-cargo install tauri-cli --version "^2"
-cargo tauri build
-
-# Rust 側のチェック・テスト
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo fmt --manifest-path src-tauri/Cargo.toml --check
-```
+ビルド・テスト・コミット前検証のコマンドは [DEVELOPMENT.md](DEVELOPMENT.md) に集約している。開発起動は「ソースからビルド」、テストは「テスト」、lint / clippy / fmt は「コミット前の検証」の節を参照。
 
 前提条件: Rust 1.77+、Xcode Command Line Tools、Node.js（テスト用）
 
 ## コミット前の検証
 
-- Rust を変更したら上記の clippy / test / fmt --check を通す。警告も整形の崩れも CI で落ちる
-- フロントエンド（`src/*`）を変更したら `npm run lint` と `npm test` を通す。UI 変更でベースラインが変わったら `npm run test:update` で更新し、差分画像を見て意図どおりか確かめてからコミットに含める
+- DEVELOPMENT.md「コミット前の検証」のコマンドを、変更した側（Rust / フロントエンド）に応じてすべて通す
 - フォーマッターは未導入。CSS と `tests/visual/*.ts` も lint 対象外
 
 `.claude/settings.json` に登録したフックが一部を自動で回す。`.rs` を編集すると `rust-check.sh` が fmt / clippy を実行し、失敗すれば内容を返す。`tests/visual/__screenshots__/` への書き込みは `guard-vrt-baseline.sh` が止める（ベースラインは再生成でしか正しく作れない）。`cargo test` と `npm test` と `npm run lint` は自分で流す。
@@ -40,30 +25,12 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
 ## テスト（VRT + UT + E2E）
 
-```bash
-# Playwright インストール（初回のみ）
-npm install
-npx playwright install chromium
-
-# テスト実行（node の単体テスト → Playwright の順）
-npm test
-
-# 単体テストだけ（ブラウザを起動しないので速い）
-npm run test:unit
-
-# スナップショット更新（UI変更後）
-npm run test:update
-
-# レポート表示
-npm run test:report
-```
-
-**重要**: フロントエンド（`src/note.js`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
+実行コマンドは DEVELOPMENT.md「テスト」を参照。フロントエンド（`src/note.js`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
 
 ### テストファイル構成
 `tests/unit/` は node の単体テスト（`node --test`）、`tests/visual/` は Playwright（全一覧は `ls tests/visual/*.spec.ts` を参照）。Playwright 側でファイル名から区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
 
-- 単体テスト — `tests/unit/*.test.js`。ブラウザを起動せず `src/` の関数を `require` して呼ぶ。対象は DOM にもアプリの状態にも触らない関数だけ
+- 単体テスト — `tests/unit/*.test.js`。ブラウザを起動しない node のテスト。`src/` の関数（DOM にもアプリの状態にも触らないものだけ）を `require` して呼ぶものと、リポジトリ内ファイルの整合性照合（Tauri コマンド名・日英 README の構成）がある
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
   - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
 - UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
