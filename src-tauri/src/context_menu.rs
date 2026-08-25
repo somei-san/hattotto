@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{confirm_delete_if_needed, do_delete_note};
 use crate::i18n::{self, Lang, Msg};
+use crate::image_actions;
 use crate::model::{is_valid_color_key, AppState, RecoverMutex, COLOR_DEFS};
 use crate::persistence::save_notes;
 use crate::window::{create_note_with_window, open_settings_window, open_trash_window};
@@ -35,6 +36,7 @@ pub(crate) fn build_context_menu(
     webview_win: &tauri::WebviewWindow,
     is_pinned: bool,
     current_color: &str,
+    image_path: Option<&str>,
     lang: Lang,
 ) -> tauri::Result<()> {
     let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
@@ -58,6 +60,35 @@ pub(crate) fn build_context_menu(
 
     let copy = PredefinedMenuItem::copy(app, None)?;
     let paste = PredefinedMenuItem::paste(app, None)?;
+    // 画像上で開いたときだけ「画像を開く」「Finder で表示」「画像をコピー」を足す
+    let image_items = image_path
+        .map(|_| {
+            Ok::<_, tauri::Error>((
+                PredefinedMenuItem::separator(app)?,
+                MenuItem::with_id(
+                    app,
+                    "ctx_open_image",
+                    i18n::text(lang, Msg::CtxOpenImage),
+                    true,
+                    None::<&str>,
+                )?,
+                MenuItem::with_id(
+                    app,
+                    "ctx_reveal_image",
+                    i18n::text(lang, Msg::CtxRevealImage),
+                    true,
+                    None::<&str>,
+                )?,
+                MenuItem::with_id(
+                    app,
+                    "ctx_copy_image",
+                    i18n::text(lang, Msg::CtxCopyImage),
+                    true,
+                    None::<&str>,
+                )?,
+            ))
+        })
+        .transpose()?;
     let sep0 = PredefinedMenuItem::separator(app)?;
     let pin_label = if is_pinned {
         Msg::CtxUnpin
@@ -128,10 +159,15 @@ pub(crate) fn build_context_menu(
     )?;
     let sep3 = PredefinedMenuItem::separator(app)?;
 
-    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-        &copy,
-        &paste,
-        &sep0,
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&copy, &paste];
+    if let Some((sep_img, open_image, reveal_image, copy_image)) = &image_items {
+        items.push(sep_img);
+        items.push(open_image);
+        items.push(reveal_image);
+        items.push(copy_image);
+    }
+    items.extend([
+        &sep0 as &dyn tauri::menu::IsMenuItem<tauri::Wry>,
         &pin,
         &sep1,
         &new_note,
@@ -144,7 +180,7 @@ pub(crate) fn build_context_menu(
         &sep2,
         &settings,
         &sep3,
-    ];
+    ]);
     for ci in &color_items {
         items.push(ci as &dyn tauri::menu::IsMenuItem<tauri::Wry>);
     }
@@ -201,6 +237,27 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
         "ctx_zoom_reset" => {
             if let Some(w) = &win {
                 let _ = w.emit_to(w.label(), "ctx-zoom", "reset");
+            }
+        }
+        "ctx_open_image" => {
+            if let Some(path) = state.context_menu_image_path.recover().clone() {
+                if let Err(e) = image_actions::open_image(app, &state.data_dir, &path) {
+                    log::error!("open image error: {}", e);
+                }
+            }
+        }
+        "ctx_reveal_image" => {
+            if let Some(path) = state.context_menu_image_path.recover().clone() {
+                if let Err(e) = image_actions::reveal_image_in_finder(app, &state.data_dir, &path) {
+                    log::error!("reveal image error: {}", e);
+                }
+            }
+        }
+        "ctx_copy_image" => {
+            if let Some(path) = state.context_menu_image_path.recover().clone() {
+                if let Err(e) = image_actions::copy_image_to_clipboard(&state.data_dir, &path) {
+                    log::error!("copy image error: {}", e);
+                }
             }
         }
         _ if event_id.starts_with("ctx_color_") => {

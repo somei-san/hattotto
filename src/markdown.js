@@ -30,11 +30,15 @@ function inlineMarkdown(escaped) {
   // ~~strikethrough~~ → <del>
   escaped = escaped.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   // ![alt](src) → <img> (before the link regex; `!` prefix distinguishes it from a link)
+  // data-rel-src は resolve 前の相対パス。ダブルクリック・右クリックのハンドラは
+  // asset URL 化された src ではなくこちらから元の相対パスを取り出す
   escaped = escaped.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
     const resolved = (typeof window !== 'undefined' && typeof window.resolveImageSrc === 'function')
       ? window.resolveImageSrc(src)
       : src;
-    return `<img alt="${escapeAttr(alt)}" src="${escapeAttr(resolved)}">`;
+    // title はダブルクリックで開けることを伝えるアフォーダンス（クリックしても反応が無いため）
+    const hint = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('imageOpenHint') : 'ダブルクリックで開く';
+    return `<img alt="${escapeAttr(alt)}" src="${escapeAttr(resolved)}" data-rel-src="${escapeAttr(src)}" title="${escapeAttr(hint)}">`;
   });
   // [text](url) → <a>
   escaped = escaped.replace(

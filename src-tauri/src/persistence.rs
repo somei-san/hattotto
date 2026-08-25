@@ -242,6 +242,26 @@ pub(crate) fn is_valid_image_rel_path(path: &str) -> bool {
         && IMAGE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
 }
 
+/// 相対パスを検証したうえで `data_dir` と結合し、実在確認まで済ませた絶対パスを返す。
+/// 「画像を開く」「Finder で表示」「画像をコピー」の 3 コマンド共通の関所で、
+/// `is_valid_image_rel_path` の形状チェックに加えてファイルの実在も確認する。
+pub(crate) fn resolve_existing_image_path(dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
+    if !is_valid_image_rel_path(rel_path) {
+        return Err(format!("invalid image path: {}", rel_path));
+    }
+    let full = dir.join(rel_path);
+    // シンボリックリンクは追わない。`images/` 配下に細工したリンクを置かれても、
+    // リンク先が data_dir の外を指す実ファイルを開いたりコピーしたりできないようにする
+    let is_regular_file = full
+        .symlink_metadata()
+        .map(|m| m.is_file())
+        .unwrap_or(false);
+    if !is_regular_file {
+        return Err(format!("image not found: {}", full.display()));
+    }
+    Ok(full)
+}
+
 /// クリップボード画像を `images/<uuid v4>.<ext>` として保存し、相対パスを返す。
 /// 拡張子はマジックバイトから判定する（クライアントの MIME 型は信用しない）。
 pub(crate) fn save_pasted_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
@@ -365,6 +385,7 @@ mod tests {
             trash: Mutex::new(Vec::new()),
             last_bring_to_front: Mutex::new(Instant::now()),
             context_menu_note_id: Mutex::new(String::new()),
+            context_menu_image_path: Mutex::new(None),
             data_dir: data_dir.to_path_buf(),
             notes_loaded,
             settings_loaded,

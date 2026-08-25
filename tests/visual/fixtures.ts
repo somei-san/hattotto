@@ -50,6 +50,8 @@ export async function injectNoteMock(
         case "delete_note":           return null;
         case "create_note":           return null;
         case "save_pasted_image":     return "images/00000000-0000-4000-8000-000000000001.png";
+        case "show_context_menu":     return null;
+        case "open_image":            return null;
         default:                      return null;
       }
     };

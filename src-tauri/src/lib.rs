@@ -1,6 +1,7 @@
 mod commands;
 mod context_menu;
 mod i18n;
+mod image_actions;
 mod menu;
 pub mod model;
 mod persistence;
@@ -45,6 +46,7 @@ pub fn run() {
         trash: Mutex::new(trash),
         last_bring_to_front: Mutex::new(Instant::now() - std::time::Duration::from_secs(10)),
         context_menu_note_id: Mutex::new(String::new()),
+        context_menu_image_path: Mutex::new(None),
         data_dir,
         notes_loaded,
         settings_loaded,
@@ -67,6 +69,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // ログは補助機能なので、初期化に失敗しても起動は止めない。
         // `tauri_plugin_log::Builder::build()` は内部で失敗を setup の Err として
         // 伝播させ、`app.build().expect(...)` の panic につながる。`split()` +
@@ -121,6 +124,7 @@ pub fn run() {
             commands::open_trash,
             commands::show_context_menu,
             commands::save_pasted_image,
+            commands::open_image,
         ])
         .setup(|app| {
             // Set up app menu and system tray

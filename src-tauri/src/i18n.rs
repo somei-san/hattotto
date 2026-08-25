@@ -56,6 +56,9 @@ pub(crate) enum Msg {
     CtxOpenTrash,
     CtxZoomReset,
     CtxOpenSettings,
+    CtxOpenImage,
+    CtxRevealImage,
+    CtxCopyImage,
 
     ColorYellow,
     ColorBlue,
@@ -103,6 +106,9 @@ pub(crate) fn text(lang: Lang, msg: Msg) -> &'static str {
         Msg::CtxOpenTrash => ("ゴミ箱を開く", "Open Trash"),
         Msg::CtxZoomReset => ("ズームリセット", "Reset Zoom"),
         Msg::CtxOpenSettings => ("設定を開く", "Open Settings"),
+        Msg::CtxOpenImage => ("画像を開く", "Open Image"),
+        Msg::CtxRevealImage => ("Finder で表示", "Show in Finder"),
+        Msg::CtxCopyImage => ("画像をコピー", "Copy Image"),
 
         Msg::ColorYellow => ("イエロー", "Yellow"),
         Msg::ColorBlue => ("ブルー", "Blue"),
