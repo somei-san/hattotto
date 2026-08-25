@@ -191,4 +191,289 @@ test.describe("ペースト処理", () => {
 
     await ctx.close();
   });
+
+  test("リッチテキスト内の data: 画像ペースト → save_pasted_image 経由で画像記法が挿入される", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "caption");
+      dt.setData(
+        "text/html",
+        '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat">caption',
+      );
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toBe("![cat](images/00000000-0000-4000-8000-000000000001.png)caption");
+
+    await ctx.close();
+  });
+
+  test("リッチテキスト内の https 画像ペースト → リンクに変換され save_pasted_image は呼ばれない", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "cat");
+      dt.setData("text/html", '<img src="https://example.com/cat.png" alt="cat">');
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    const content = await getContent(page);
+    expect(content).toBe("[cat](https://example.com/cat.png)");
+
+    const saveCalls = await page.evaluate(() =>
+      (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+    );
+    expect(saveCalls).toBe(0);
+
+    await ctx.close();
+  });
+
+  test("画像を含まないリッチテキストペースト → Markdown に変換される", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "bold text");
+      dt.setData("text/html", "<strong>bold text</strong>");
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    const content = await getContent(page);
+    expect(content).toBe("**bold text**");
+  });
+
+  test("1回のペースト内で同じ data: URI が複数回出てきても保存は1回だけ", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    const html = '<img src="data:image/png;base64,iVBORw0KGgo=" alt="a">'
+      + '<img src="data:image/png;base64,iVBORw0KGgo=" alt="b">';
+    await page.evaluate((h) => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "ab");
+      dt.setData("text/html", h);
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    }, html);
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toBe(
+      "![a](images/00000000-0000-4000-8000-000000000001.png)"
+      + "![b](images/00000000-0000-4000-8000-000000000001.png)",
+    );
+
+    await ctx.close();
+  });
+
+  test("同じ data: URI を2回ペースト → ペーストのたびに保存し直す（重複排除はペースト単位）", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    const dispatchPaste = () => page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "cat");
+      dt.setData("text/html", '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat">');
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await dispatchPaste();
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    await dispatchPaste();
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(2);
+
+    const content = await getContent(page);
+    expect(content).toBe(
+      "![cat](images/00000000-0000-4000-8000-000000000001.png)".repeat(2),
+    );
+
+    await ctx.close();
+  });
+
+  test("blob: 画像のみ（alt無し）+ text/plain が非空 → 変換結果が空にならず text が挿入される", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "pasted from google docs");
+      dt.setData("text/html", '<img src="blob:https://docs.google.com/xyz">');
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    const content = await getContent(page);
+    expect(content).toBe("pasted from google docs");
+  });
+
+  test("data: 画像を含むペースト中に生表示が閉じる → fallbackLine（元の行）へ書き戻される", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "line0" }, {}, { captureInvokes: true });
+    // save_pasted_image を遅延させ、resolve 前に生表示を閉じる猶予を作る
+    await page.addInitScript(() => {
+      const prevInvoke = (window as any).__TAURI__.core.invoke;
+      (window as any).__TAURI__.core.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "save_pasted_image") {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return prevInvoke(cmd, args);
+      };
+    });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page, 0);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "cat");
+      dt.setData("text/html", '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat">');
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    // save_pasted_image の resolve を待たず、生表示を閉じて確定させる
+    // （relatedTarget が null になるように blur を発火し、生表示のクローズ処理を確定させる）
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      editor.dispatchEvent(new FocusEvent("blur", { relatedTarget: null }));
+    });
+    await expect(page.locator("#editor")).toHaveCount(0);
+
+    await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
+      "line0![cat](images/00000000-0000-4000-8000-000000000001.png)",
+    );
+
+    await ctx.close();
+  });
+
+  test("data: 画像の保存が失敗 → alt テキストのみ挿入されトーストが出る", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.addInitScript(() => {
+      const prevInvoke = (window as any).__TAURI__.core.invoke;
+      (window as any).__TAURI__.core.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "save_pasted_image") throw new Error("disk full");
+        return prevInvoke(cmd, args);
+      };
+    });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "cat");
+      dt.setData("text/html", '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat">');
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await expect(page.locator(".toast")).toBeVisible();
+
+    const content = await getContent(page);
+    expect(content).toBe("cat");
+
+    await ctx.close();
+  });
 });
