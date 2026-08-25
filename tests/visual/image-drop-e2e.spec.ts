@@ -26,8 +26,12 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
       { timeout: 3000 },
     ).toBe(1);
 
+    // 画像記法の直後で行が割れ、キャレットは次の（空の）行にある
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)");
+    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\n");
+
+    const activeLine = await page.evaluate(() => document.getElementById("editor")!.textContent);
+    expect(activeLine).toBe("");
 
     await ctx.close();
   });
@@ -107,10 +111,11 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     const timeline = await page.evaluate(() => (window as any).__invoke_timeline);
     expect(timeline).toEqual(["start:0", "end:0", "start:1", "end:1"]);
 
-    // 挿入自体は2回行われている（モックは同一パスを返すため2回連結される）
+    // 挿入自体は2回行われている（モックは同一パスを返すため2回連結される）。
+    // 画像ごとに改行して次の行へ移るため、2枚目の後にも空行が残る
     const content = await getContent(page);
     expect(content).toBe(
-      "![](images/00000000-0000-4000-8000-000000000001.png)".repeat(2),
+      "![](images/00000000-0000-4000-8000-000000000001.png)\n".repeat(2),
     );
 
     await ctx.close();
