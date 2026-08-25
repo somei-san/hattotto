@@ -155,6 +155,9 @@ const activeEditor = () => mdView.querySelector('.raw-editor');
 const editorText = (ed) => ed.textContent.replace(/\u00A0/g, ' ');
 
 function renderAll() {
+  // 描画済み DOM を丸ごと差し替えるため、直前まで指していた画像の参照ごとハンドルを消す
+  // （放置すると detached な img へ書き込む・別画像の上にハンドルが残る事故になる）
+  hideHandle();
   mdView.innerHTML = renderMarkdown(rawContent);
 }
 
@@ -287,6 +290,8 @@ function rawColFromPoint(el, line, e) {
 
 // mouseup で拾う（mousedown を潰すとドラッグでの範囲選択ができなくなるため）
 mdView.addEventListener('mouseup', (e) => {
+  // 画像リサイズのドラッグ確定はここでは扱わない（別のリスナーが担当。生表示に入らせない）
+  if (dragState) return;
   if (e.target.closest('.raw-editor')) return;
   if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]') || e.target.closest('img')) return;
   // 範囲選択したときは生表示に入らない（コピーの邪魔をしない）
@@ -313,6 +318,8 @@ mdView.addEventListener('click', (e) => {
 
 // 画像ダブルクリック → OS の既定アプリで開く
 mdView.addEventListener('dblclick', (e) => {
+  // 画像リサイズのドラッグ中は open_image を発火させない
+  if (dragState) return;
   const img = e.target.closest('img[data-rel-src]');
   if (!img) return;
   // リンクの中の画像（[![alt](img)](url)）はリンク側のクリック処理に一本化する。
@@ -348,6 +355,8 @@ mdView.addEventListener('change', (e) => {
 // ── Zoom ──────────────────────────────────────────
 function applyZoom(zoom) {
   document.getElementById('note').style.zoom = zoom / 100;
+  // ズーム変更でハンドルの座標系（rect と画面 px の対応）が変わるので位置合わせをやり直す
+  hideHandle();
 }
 
 let currentZoom = 100;
@@ -359,6 +368,164 @@ async function changeZoom(delta) {
   applyZoom(next);
   fireInvoke('update_note_zoom', { id: noteId, zoom: next }, I18N.t('toastSaveFailed'));
 }
+
+// ── Image Resize ──────────────────────────────────
+// markdown.js の IMAGE_WIDTH_MIN/MAX（40〜2000）と揃える。ここより広い値を保存すると
+// markdown.js が幅指定を無視し、再描画のたびに幅が消えてしまう
+const IMAGE_RESIZE_MIN = 40;
+const IMAGE_RESIZE_MAX = 2000;
+
+// 共有 1 要素を画像ごとに位置だけ動かして使い回す（img 自体は置換要素で ::after が使えない）。
+// mdView.innerHTML を丸ごと差し替える renderAll() で消えないよう mdView の外（body 直下）に置き、
+// position: fixed でビューポート座標に直接置く（mdView のスクロールの影響を受けない）。
+const resizeHandle = document.createElement('div');
+resizeHandle.className = 'img-resize-handle';
+document.body.appendChild(resizeHandle);
+
+let dragState = null; // { img, relSrc, startX, startWidth, zoomFactor, maxWidth, currentWidth }
+let hoverImg = null; // ハンドル表示中に位置合わせした画像（ドラッグ対象の特定に使う）
+
+function positionHandle(img) {
+  const rect = img.getBoundingClientRect();
+  resizeHandle.style.left = `${rect.right - 5}px`;
+  resizeHandle.style.top = `${rect.bottom - 5}px`;
+}
+
+function hideHandle() {
+  hoverImg = null;
+  resizeHandle.classList.remove('visible');
+}
+
+// mouseenter/leave は bubble しないので、mdView での委譲は mouseover を使う
+mdView.addEventListener('mouseover', (e) => {
+  if (dragState) return;
+  const img = e.target.closest('img[data-rel-src]');
+  // リモート URL 等、書き戻し先を特定できない画像にはハンドルを出さない
+  if (!img || !isValidImageRelPath(img.dataset.relSrc)) return;
+  hoverImg = img;
+  positionHandle(img);
+  resizeHandle.classList.add('visible');
+});
+
+// mdView から出た場合の隠し忘れをケアする。ハンドルは mdView の外（body 直下）にあるので、
+// 画像の右下からハンドルへ移動する経路は mdView を一度離れる（relatedTarget がハンドルならまだ隠さない）
+mdView.addEventListener('mouseleave', (e) => {
+  if (dragState || e.relatedTarget === resizeHandle) return;
+  hideHandle();
+});
+
+// ハンドルから離れた先が画像でなければ隠す（mdView の mouseover では拾えない遷移）
+resizeHandle.addEventListener('mouseleave', (e) => {
+  if (dragState) return;
+  if (e.relatedTarget?.closest?.('img[data-rel-src]')) return;
+  hideHandle();
+});
+
+// スクロールすると画像とハンドルの対応がずれるので、位置合わせをやり直す前提で一旦隠す
+mdView.addEventListener('scroll', () => hideHandle());
+
+/** 行 lineIdx の Markdown 記法のうち、relSrc と一致する occurrence 番目（0始まり）の画像記法だけ `|width` を追加・置換する。 */
+function rewriteImageWidth(line, relSrc, width, occurrence) {
+  let seen = -1;
+  return line.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, alt, src) => {
+    if (src !== relSrc) return whole;
+    seen++;
+    if (seen !== occurrence) return whole;
+    const base = alt.replace(/\|\d+$/, '');
+    return `![${base}|${width}](${src})`;
+  });
+}
+
+/** 行 lineEl 内で、relSrc が一致する img のうち img が何番目か（0始まり）。 */
+function imageOccurrenceInLine(lineEl, img, relSrc) {
+  const sameSrcImages = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
+    .filter(el => el.dataset.relSrc === relSrc);
+  return Math.max(0, sameSrcImages.indexOf(img));
+}
+
+/** ドラッグ確定時の書き戻し。別行が生表示中なら先に確定してから該当行を書き換える。 */
+function applyImageWidth(img, relSrc, width) {
+  const lineEl = img.closest('[data-line]');
+  const lineIdx = lineEl ? Number(lineEl.dataset.line) : null;
+  const occurrence = lineEl ? imageOccurrenceInLine(lineEl, img, relSrc) : 0;
+  commitActive();
+  if (lineIdx == null) return;
+  const lines = getLines();
+  if (lineIdx < 0 || lineIdx >= lines.length) return;
+  const rewritten = rewriteImageWidth(lines[lineIdx], relSrc, width, occurrence);
+  if (rewritten === lines[lineIdx]) return;
+  lines[lineIdx] = rewritten;
+  rawContent = lines.join('\n');
+  renderAll();
+  saveNow();
+}
+
+/**
+ * 画像の現在の canonical 幅（ズーム影響を除いた値）。width 属性を優先しつつ、
+ * max-width: 100% で実表示が切り詰められている場合は実測幅（の canonical 換算）を使う。
+ * ここがずれるとハンドルの表示位置とドラッグ開始幅が食い違い、ドラッグ開始直後に
+ * 画像が無反応/ジャンプして見える。
+ */
+function currentImageWidth(img, zoomFactor) {
+  const attrWidth = parseInt(img.getAttribute('width'), 10);
+  const rect = img.getBoundingClientRect();
+  const renderedWidth = rect.width > 0 ? rect.width / zoomFactor : null;
+  if (Number.isFinite(attrWidth) && attrWidth > 0) {
+    return renderedWidth != null ? Math.min(attrWidth, renderedWidth) : attrWidth;
+  }
+  if (renderedWidth != null) return renderedWidth;
+  return 200; // 読み込み前・壊れた画像などで実測幅が取れない場合のフォールバック
+}
+
+function onResizeMouseMove(e) {
+  if (!dragState) return;
+  // mouseup を取りこぼした（ウィンドウ外での release 等）場合の自己回復。
+  // 残ったままだと dragState 非 null のガードでクリック・dblclick・ホバーが全部無反応になる
+  if (e.buttons === 0) {
+    onResizeMouseUp();
+    return;
+  }
+  const dx = e.clientX - dragState.startX;
+  const raw = dragState.startWidth + dx / dragState.zoomFactor;
+  dragState.currentWidth = Math.round(Math.min(Math.max(raw, IMAGE_RESIZE_MIN), dragState.maxWidth));
+  dragState.img.style.width = `${dragState.currentWidth}px`;
+  positionHandle(dragState.img);
+}
+
+function onResizeMouseUp() {
+  const state = dragState;
+  document.removeEventListener('mousemove', onResizeMouseMove);
+  dragState = null;
+  hideHandle();
+  if (!state || state.currentWidth == null) return; // 実質的な移動が無ければ書き換えない
+  applyImageWidth(state.img, state.relSrc, state.currentWidth);
+}
+
+// ウィンドウ外へドラッグしたまま release される等で mouseup が届かないケースの保険
+window.addEventListener('blur', () => {
+  if (dragState) onResizeMouseUp();
+});
+
+resizeHandle.addEventListener('mousedown', (e) => {
+  if (!hoverImg) return;
+  const relSrc = hoverImg.dataset.relSrc;
+  if (!isValidImageRelPath(relSrc)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const zoomFactor = currentZoom / 100;
+  dragState = {
+    img: hoverImg,
+    relSrc,
+    startX: e.clientX,
+    startWidth: currentImageWidth(hoverImg, zoomFactor),
+    zoomFactor,
+    // 付箋が極端に狭いとき clientWidth が下限を割り込むことがあるため、上限は必ず下限以上にする
+    maxWidth: Math.max(IMAGE_RESIZE_MIN, Math.min(mdView.clientWidth || IMAGE_RESIZE_MAX, IMAGE_RESIZE_MAX)),
+    currentWidth: null,
+  };
+  document.addEventListener('mousemove', onResizeMouseMove);
+  document.addEventListener('mouseup', onResizeMouseUp, { once: true });
+});
 
 // ── Markdown auto-continue on Enter ─────────────
 /** Enter で行を分割する。リスト・引用の途中なら次の行へプレフィックスを引き継ぐ。 */
@@ -465,6 +632,16 @@ const DATA_URI_TOO_LARGE = Symbol('data-uri-too-large');
  */
 function sanitizeAltText(text) {
   return text.replace(/\r\n|\r|\n/g, ' ').replace(/]/g, '');
+}
+
+/**
+ * 画像記法（`![alt](src)`）の alt にだけ適用する追加の無害化。末尾が `|数字` になると
+ * markdown.js の parseImageAlt が表示幅指定と誤解釈するため `|` を除去する。
+ * リンクテキストとして使う場合（https 画像のフォールバックなど）は幅記法と無関係なので
+ * sanitizeAltText のみを使い、`|` はそのまま残す。
+ */
+function sanitizeImageAlt(text) {
+  return sanitizeAltText(text).replace(/\|/g, '');
 }
 
 /** URL 側（href / src）に改行が入ると Markdown 記法が複数行に割れるため取り除く。 */
@@ -591,17 +768,19 @@ function nodeToMd(node, imageMap) {
     // data: は resolveDataImages が保存済みの相対パスに解決済み（未解決なら alt のみ残す）。
     // blob: / file: 等はそもそも取り込まず alt のみ残す。
     case 'img': {
-      const alt = sanitizeAltText(node.getAttribute('alt') || '');
+      const rawAlt = node.getAttribute('alt') || '';
       const src = node.getAttribute('src') || '';
       if (isDataUri(src)) {
         const relPath = imageMap.get(src);
-        return relPath ? `![${alt}](${relPath})` : alt;
+        // 画像記法として出す場合のみ `|` も除去する（幅指定との誤解釈を防ぐため）
+        return relPath ? `![${sanitizeImageAlt(rawAlt)}](${relPath})` : sanitizeAltText(rawAlt);
       }
       if (/^https?:\/\//i.test(src)) {
         const url = sanitizeUrl(src);
+        const alt = sanitizeAltText(rawAlt);
         return `[${alt || url}](${url})`;
       }
-      return alt;
+      return sanitizeAltText(rawAlt);
     }
     default:                   return inner;
   }

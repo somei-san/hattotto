@@ -205,6 +205,21 @@
     cursor: pointer;
     filter: brightness(0.94);
   }
+  /* 画像ホバー時に右下へ出すリサイズハンドル。共有 1 要素を画像ごとに位置だけ動かして使い回す。
+     mdView.innerHTML の再描画（renderAll）で消されないよう、mdView の外（body 直下）に置く。
+     position: fixed でビューポート座標に直接置くので、mdView のスクロール位置の影響を受けない */
+  .img-resize-handle {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--bar);
+    border: 1px solid rgba(0,0,0,0.3);
+    cursor: nwse-resize;
+    z-index: 1;
+    display: none;
+  }
+  .img-resize-handle.visible { display: block; }
   .md-h1 { font-size: 17px; font-weight: 700; line-height: 1.4; margin: 4px 0 2px; }
   .md-h2 { font-size: 15px; font-weight: 600; line-height: 1.4; margin: 3px 0 1px; }
   .md-h3 { font-size: 14px; font-weight: 600; line-height: 1.4; margin: 2px 0 1px; }

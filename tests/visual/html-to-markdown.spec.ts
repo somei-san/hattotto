@@ -219,6 +219,20 @@ test.describe("htmlToMarkdown", () => {
       .toBe("[https://example.com/cat.png](https://example.com/cat.png)");
   });
 
+  // https image は `[alt](url)` というリンク記法になり画像記法（![alt|300](...)）にはならないため、
+  // alt に | が含まれていても幅指定と誤解釈されない。除去してはいけない
+  test("alt に | を含む https image → リンクテキストの | は保持される", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="https://example.com/cat.png" alt="cat|300">'))
+      .toBe("[cat|300](https://example.com/cat.png)");
+  });
+
+  // 一方、data: image は `![alt](path)` という画像記法になるため、alt 末尾の |数字 は
+  // markdown.js の parseImageAlt に幅指定と誤解釈される。ここでは除去して意図しない幅指定を防ぐ
+  test("alt に | を含む data: image → 画像記法の | は除去される", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat|300">'))
+      .toBe("![cat300](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
   // ── img: blob: / file: など → alt テキストのみ残す ───────
   test("blob: image → alt テキストのみ", async ({ notePage }) => {
     expect(await convert(notePage, '<img src="blob:https://example.com/xyz" alt="cat">'))

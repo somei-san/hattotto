@@ -525,6 +525,14 @@ mod tests {
     }
 
     #[test]
+    fn extract_image_paths_finds_reference_with_width_syntax() {
+        // `![alt|300](...)` — alt 内の `|` はスキャンに影響しない（alt は最初の `]` までを丸ごと読むだけ）
+        let path = uuid_image_path(1);
+        let content = format!("![alt|300]({})", path);
+        assert_eq!(extract_image_paths(&content), vec![path]);
+    }
+
+    #[test]
     fn extract_image_paths_ignores_non_image_links() {
         let content = "[link](https://example.com) and ![alt](https://example.com/pic.png)";
         assert!(extract_image_paths(content).is_empty());

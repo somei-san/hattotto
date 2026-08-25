@@ -278,6 +278,74 @@ describe("renderMarkdown — image syntax", () => {
   });
 });
 
+describe("renderMarkdown — image width syntax (![alt|300](src))", () => {
+  test("alt末尾が |数字 → width 属性を出し、alt から除去する", () => {
+    const html = renderMarkdown("![説明|300](images/a.png)");
+    assert.match(html, /<img alt="説明" src="images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く" width="300">/);
+  });
+
+  test("alt が |数字 のみ（ベースなし） → alt は空、width だけ付く", () => {
+    const html = renderMarkdown("![|300](images/a.png)");
+    assert.match(html, /<img alt="" src="images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く" width="300">/);
+  });
+
+  test("末尾セグメントが数字以外 → 幅指定とみなさず alt をそのまま残す", () => {
+    const html = renderMarkdown("![a|b](images/a.png)");
+    assert.match(html, /<img alt="a\|b" src="images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く">/);
+    assert.doesNotMatch(html, /width=/);
+  });
+
+  test("alt に | が複数（![a|b|300]） → 末尾の |300 だけを幅として分離し alt は 'a|b'", () => {
+    const html = renderMarkdown("![a|b|300](images/a.png)");
+    assert.match(html, /<img alt="a\|b" src="images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く" width="300">/);
+  });
+
+  test("|0 は無視される（width 属性なし）", () => {
+    const html = renderMarkdown("![説明|0](images/a.png)");
+    assert.doesNotMatch(html, /width=/);
+  });
+
+  test("下限未満（|39）は無視される", () => {
+    const html = renderMarkdown("![説明|39](images/a.png)");
+    assert.doesNotMatch(html, /width=/);
+  });
+
+  test("下限（|40）は採用される", () => {
+    const html = renderMarkdown("![説明|40](images/a.png)");
+    assert.match(html, /width="40"/);
+  });
+
+  test("上限（|2000）は採用される", () => {
+    const html = renderMarkdown("![説明|2000](images/a.png)");
+    assert.match(html, /width="2000"/);
+  });
+
+  test("上限超過（|2001）は無視される", () => {
+    const html = renderMarkdown("![説明|2001](images/a.png)");
+    assert.doesNotMatch(html, /width=/);
+  });
+
+  test("width 指定と data-rel-src・title は共存する", () => {
+    global.window = { resolveImageSrc: (src) => `asset://localhost/${src}` };
+    try {
+      const html = renderMarkdown("![説明|300](images/a.png)");
+      assert.match(
+        html,
+        /<img alt="説明" src="asset:\/\/localhost\/images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く" width="300">/
+      );
+    } finally {
+      delete global.window;
+    }
+  });
+
+  test("エスケープ対象の alt に |数字 が付いていても、幅分離後の属性エスケープは維持される", () => {
+    const html = renderMarkdown('!["x|300](images/a.png)');
+    // `"` はそのまま alt に残り（末尾は数字だが直前が \| ではなく通常文字なので幅指定として分離される）
+    // その上で属性値としてエスケープされていることを確認する
+    assert.match(html, /<img alt="&quot;x" src="images\/a\.png" data-rel-src="images\/a\.png" title="ダブルクリックで開く" width="300">/);
+  });
+});
+
 describe("renderMarkdown — NBSP (U+00A0) normalization", () => {
   test("checkbox with NBSP: - [ ] task", () => {
     const html = renderMarkdown("- [ ] task");
