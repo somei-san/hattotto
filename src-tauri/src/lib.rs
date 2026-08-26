@@ -125,6 +125,7 @@ pub fn run() {
             commands::show_context_menu,
             commands::save_pasted_image,
             commands::open_image,
+            commands::delete_image,
         ])
         .setup(|app| {
             // Set up app menu and system tray

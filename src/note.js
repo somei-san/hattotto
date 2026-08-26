@@ -159,6 +159,7 @@ function renderAll() {
   // （放置すると detached な img へ書き込む・別画像の上にハンドルが残る事故になる）
   hideHandle();
   mdView.innerHTML = renderMarkdown(rawContent);
+  applySelectionHighlight();
 }
 
 /** 行 lineIdx を含む描画済みブロックを返す。フェンスは複数行を 1 ブロックとして持つ。 */
@@ -261,6 +262,61 @@ function buildImagePreview(block) {
   return preview;
 }
 
+// ── Image Selection ───────────────────────────────
+// 画像のみの行（前後空白のみの `![alt|width](images/...)`）は生表示に入らず、代わりに
+// 「選択状態」を持つ（enterLine が唯一の入口）。選択は 1 画像のみ（複数選択なし）で、
+// { line, occurrence, relSrc } を保持する。line/occurrence は Rust 側の画像削除
+// （`delete_image` コマンド）が対象を 1 箇所だけに絞るのと同じ単位（rewriteImageWidth /
+// imageOccurrenceInLine と同じ考え方）。
+let selectedImage = null;
+
+/** 選択を解除し、ハイライト用クラスも剥がす。 */
+function clearImageSelection() {
+  if (!selectedImage) return;
+  selectedImage = null;
+  // querySelectorAll で念のため複数剥がす（1 画像のみの不変条件を守る側の防御）
+  mdView.querySelectorAll('.img-selected').forEach(el => el.classList.remove('img-selected'));
+}
+
+/**
+ * selectedImage が指す img 要素に選択枠（.img-selected）を付け直す。renderAll() の直後
+ * （mdView.innerHTML を丸ごと差し替えた直後）に呼び、選択状態を新しい DOM へ引き継ぐ。
+ * 対象がもう存在しない（行が消えた・画像が無くなった等）場合は選択そのものを解除する。
+ */
+function applySelectionHighlight() {
+  if (!selectedImage) return;
+  const lineEl = mdView.querySelector(`[data-line="${selectedImage.line}"]`);
+  if (!lineEl) { selectedImage = null; return; }
+  const imgs = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
+    .filter(el => el.dataset.relSrc === selectedImage.relSrc);
+  const img = imgs[selectedImage.occurrence];
+  if (!img) { selectedImage = null; return; }
+  img.classList.add('img-selected');
+}
+
+/** 行テキスト中で最初に出てくる画像記法の src を取り出す。無ければ null。 */
+function firstImageRelSrc(lineText) {
+  const m = lineText.match(/!\[[^\]]*\]\(([^)\s]+)\)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * 行 line の occurrence 番目（relSrc と一致する画像のうち何番目か。imageOccurrenceInLine と
+ * 同じ定義）の画像を選択状態にする。relSrc は呼び出し元が特定して渡す（行テキストを
+ * 記法の出現順に数え直すと、混在する別画像の occurrence 定義とずれるため、ここでは数え直さない）。
+ * 生表示中なら書き戻して閉じる。
+ */
+function selectImage(line, occurrence, relSrc) {
+  commitActive();
+  // 選択は 1 画像のみ。次の選択を立てる前に必ず前の選択を解除する
+  // （↑↓ で画像のみの行から画像のみの行へ直接移る経路は enterLine の
+  // 「非画像なら clearImageSelection」を通らないため、ここで解除しないと 2 つ同時に残る）
+  clearImageSelection();
+  if (!relSrc || !isValidImageRelPath(relSrc)) return;
+  selectedImage = { line, occurrence, relSrc };
+  applySelectionHighlight();
+}
+
 /** 行 lineIdx を生 Markdown に差し替え、col 列にキャレットを置く（col が null なら行末）。 */
 function enterLine(lineIdx, col) {
   commitActive();
@@ -270,6 +326,15 @@ function enterLine(lineIdx, col) {
   const lines = getLines();
   const i = Math.max(0, Math.min(lineIdx, lines.length - 1));
   const block = findBlock(i);
+  // 画像のみの行は生表示に入らず、選択状態になる（enterLine の入口での唯一の関所）。
+  // ただし未終端フェンスの中では行の見た目が画像のみでも実際には画像として描画されない
+  // （<pre> の中の生テキスト）ため、単独ブロック（フェンスでない）のときだけ対象にする
+  const isStandalone = !block || block.start === block.end;
+  if (isStandalone && isImageOnlyLine(lines[i] ?? '')) {
+    selectImage(i, 0, firstImageRelSrc(lines[i]));
+    return;
+  }
+  clearImageSelection();
   activeStart = block ? block.start : i;
   activeEnd = block ? block.end : i;
 
@@ -362,19 +427,34 @@ mdView.addEventListener('mouseup', (e) => {
   // 無視しないと「余白クリック」扱いになり、キャレットが最終行へ飛んでしまう
   if (e.target.closest('.raw-editor-preview')) return;
   if (e.target.closest('.raw-editor')) return;
-  if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]') || e.target.closest('img')) return;
+  // リンクの中（画像を包むリンクも含む）はリンク側のクリック処理に一本化する
+  if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]')) return;
   // 範囲選択したときは生表示に入らない（コピーの邪魔をしない）
   if (!window.getSelection().isCollapsed) return;
+
+  // 画像本体のクリックは選択状態にする（ダブルクリックで開く・右クリックメニュー・
+  // リサイズハンドルとは独立に共存する）
+  const img = e.target.closest('img[data-rel-src]');
+  if (img) {
+    const relSrc = img.dataset.relSrc;
+    const lineEl = img.closest('[data-line]');
+    if (isValidImageRelPath(relSrc) && lineEl) {
+      selectImage(Number(lineEl.dataset.line), imageOccurrenceInLine(lineEl, img, relSrc), relSrc);
+    }
+    return;
+  }
 
   const el = e.target.closest('[data-line]');
   const lines = getLines();
   if (!el) {
-    enterLine(lines.length - 1, null); // 余白クリックは最終行の行末へ
+    // 余白クリックは最終行の行末へ。最終行が画像のみの行なら enterLine が選択状態にする
+    enterLine(lines.length - 1, null);
     return;
   }
   // フェンスは行単位のマッピングを持たないので末尾に置く
   if (el.dataset.lineEnd != null) { enterLine(Number(el.dataset.lineEnd), null); return; }
   const lineIdx = Number(el.dataset.line);
+  // 画像のみの行の余白クリックも enterLine が選択状態にする
   enterLine(lineIdx, rawColFromPoint(el, lines[lineIdx] ?? '', e));
 });
 
@@ -493,10 +573,32 @@ resizeHandle.addEventListener('mouseleave', (e) => {
 // スクロールすると画像とハンドルの対応がずれるので、位置合わせをやり直す前提で一旦隠す
 mdView.addEventListener('scroll', () => hideHandle());
 
+/**
+ * line 中でバッククォート 1 組（`...`）に囲まれた区間（開始・終了のバッククォートを含む）を
+ * 列挙する。markdown.js の inlineMarkdown が code を先に保護してから画像記法を解釈するのと
+ * 同じ解釈で、区間内の `![alt](src)` は画像記法として数えない（occurrence の定義を DOM 側
+ * ＝実際に <img> として描画されるものと一致させる）。
+ */
+function codeSpanRanges(line) {
+  const ranges = [];
+  const re = /`[^`]+`/g;
+  let m;
+  while ((m = re.exec(line))) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+function isInCodeSpan(ranges, pos) {
+  return ranges.some(([start, end]) => pos >= start && pos < end);
+}
+
 /** 行 lineIdx の Markdown 記法のうち、relSrc と一致する occurrence 番目（0始まり）の画像記法だけ `|width` を追加・置換する。 */
 function rewriteImageWidth(line, relSrc, width, occurrence) {
+  const codeSpans = codeSpanRanges(line);
   let seen = -1;
-  return line.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, alt, src) => {
+  return line.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, alt, src, offset) => {
+    if (isInCodeSpan(codeSpans, offset)) return whole;
     if (src !== relSrc) return whole;
     seen++;
     if (seen !== occurrence) return whole;
@@ -1102,6 +1204,10 @@ function bindEditor(ed) {
     if (composing || e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') {
       e.preventDefault();
+      // 分割結果の新しい行が画像のみの行になり enterLine が選択状態にすることがある
+      // （selectImage が selectedImage を立てる）。この 1 回の keydown が document まで
+      // 伝播すると、画像選択用のキー処理が同じキーで二重発火してしまうため止める
+      e.stopPropagation();
       splitLine(ed);
       return;
     }
@@ -1124,19 +1230,23 @@ function bindEditor(ed) {
     }
     if (e.key === 'ArrowUp' && activeStart > 0) {
       const { line, col } = caretLineCol(ed);
-      if (line === activeStart) { e.preventDefault(); enterLine(activeStart - 1, col); }
+      // 移動先が画像のみの行なら enterLine が選択状態に切り替える（スキップはしない）。
+      // selectedImage を立てる呼び出しなので、後段の画像選択用キー処理へ二重に届かせない
+      if (line === activeStart) { e.preventDefault(); e.stopPropagation(); enterLine(activeStart - 1, col); }
       return;
     }
     if (e.key === 'ArrowDown') {
       const { line, col } = caretLineCol(ed);
       if (line === activeEnd && activeEnd < getLines().length - 1) {
         e.preventDefault();
+        e.stopPropagation();
         enterLine(activeEnd + 1, col);
       }
       return;
     }
     if ((e.key === 'Backspace' || e.key === 'Delete') && window.getSelection().isCollapsed) {
-      if (mergeLine(ed, e.key === 'Backspace')) e.preventDefault();
+      // 結合結果の行が画像のみの行になり enterLine が選択状態にすることがある。同じ理由で止める
+      if (mergeLine(ed, e.key === 'Backspace')) { e.preventDefault(); e.stopPropagation(); }
     }
   });
 
@@ -1204,6 +1314,103 @@ for (const type of ['cut', 'paste', 'drop']) {
     e.stopPropagation();
   }, true);
 }
+
+// ── Image Selection: keyboard ──────────────────────
+// 画像選択中は生エディタが無い（フォーカス先の contenteditable が存在しない）ため、
+// document レベルの keydown で拾う。selectedImage が無いときは即 return するので、
+// 色ドットの矢印キーナビゲーションや ⌘W 等、他のキー処理とは衝突しない。
+// 削除処理中の多重発火ガード（キーリピートでの確認ダイアログ多重表示・二重削除を防ぐ）
+let deletingImage = false;
+
+async function deleteSelectedImage(key) {
+  if (!selectedImage || deletingImage) return;
+  deletingImage = true;
+  try {
+    // 別行の未保存入力（デバウンス窓の中）が残っていると、Rust 側は古い content を基に
+    // 削除後の内容を計算してしまい、その戻り値で rawContent を丸ごと置き換えるときに
+    // 未保存分が黙って消える。削除対象を Rust に渡す前に必ず確定させる
+    await flushContent();
+    // flush の await 中に選択が変わった／消えた可能性を考慮し、ここで再確認する
+    if (!selectedImage) return;
+    const { line, occurrence, relSrc } = selectedImage;
+    let newContent;
+    try {
+      newContent = await invoke('delete_image', {
+        id: noteId,
+        imagePath: relSrc,
+        imageLine: line,
+        imageOccurrence: occurrence,
+      });
+    } catch (err) {
+      console.error('delete_image failed:', err);
+      showToast(I18N.t('toastDeleteImageFailed'));
+      return;
+    }
+    // キャンセル（confirm_before_delete で拒否）・対象が既に無い場合は選択を保ったまま何もしない
+    if (newContent == null) return;
+    clearImageSelection();
+    rawContent = newContent;
+    renderAll();
+    const lines = getLines();
+    // 削除後のキャレット位置: 来た方向（押されたキー）の逆側優先。Backspace は前の行
+    // （mergeLine の「前の行へ戻る」と同じ向き）。先頭行を消した場合は前が無いので
+    // 先頭（0）に留まる（末尾へは飛ばさない）。Delete はそのまま同じ index
+    // （消えた行の次が繰り上がってくる）。それも無ければ末尾へ
+    const preferred = key === 'Backspace' ? Math.max(0, line - 1) : line;
+    const target = (preferred >= 0 && preferred < lines.length) ? preferred : lines.length - 1;
+    enterLine(target, null);
+  } finally {
+    deletingImage = false;
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!selectedImage) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    clearImageSelection();
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    // 選択を解除して隣の行へ（隣も画像のみの行なら enterLine が連続して選択状態にする）。
+    // 端で行が無ければ選択を維持する（何もしない）
+    if (selectedImage.line > 0) enterLine(selectedImage.line - 1, null);
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (selectedImage.line < getLines().length - 1) enterLine(selectedImage.line + 1, null);
+    return;
+  }
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    e.preventDefault();
+    deleteSelectedImage(e.key);
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Enter は画像の行の直下、Shift+Enter は直上に空行を挿入し、そこへキャレットを置く
+    // （画像が先頭行でも Shift+Enter で上に行を作れるよう、挿入位置は画像の行インデックス自体）。
+    // applyLines が rawContent 更新 → renderAll → enterLine → scheduleSave の順で
+    // 行挿入の作法（splitLine 等）に揃えて処理する
+    const lines = getLines();
+    const insertAt = e.shiftKey ? selectedImage.line : selectedImage.line + 1;
+    lines.splice(insertAt, 0, '');
+    clearImageSelection();
+    applyLines(lines, insertAt, 0);
+  }
+  // その他の印字キーは何もしない
+});
+
+// 別の場所をクリックすると選択解除（選択中の画像自身・リサイズハンドルへのクリックは除く。
+// mousedown で先に消しておくことで、別画像をクリックした場合も mouseup 側の選択処理と
+// 素直に入れ替わる）
+document.addEventListener('mousedown', (e) => {
+  if (!selectedImage) return;
+  if (e.target.closest('.img-selected') || e.target.closest('.img-resize-handle')) return;
+  clearImageSelection();
+});
 
 // ── Drag Window ───────────────────────────────────
 titlebar.addEventListener('mousedown', (e) => {

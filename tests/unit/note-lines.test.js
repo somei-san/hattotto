@@ -7,6 +7,7 @@ const {
   getAutoPrefix,
   isEmptyListItem,
   CHECKBOX_RE,
+  isImageOnlyLine,
 } = require("../../src/note-lines.js");
 
 describe("getAutoPrefix", () => {
@@ -261,5 +262,74 @@ describe("blockOffset", () => {
 
   test("空行も改行 1 文字として数える", () => {
     assert.equal(blockOffset(["", "x"], 1, 1), 2);
+  });
+});
+
+describe("isImageOnlyLine", () => {
+  const PATH = "images/00000000-0000-4000-8000-000000000001.png";
+
+  test("画像記法だけの行 → true", () => {
+    assert.equal(isImageOnlyLine(`![](${PATH})`), true);
+  });
+
+  test("alt 付き → true", () => {
+    assert.equal(isImageOnlyLine(`![説明](${PATH})`), true);
+  });
+
+  test("幅指定付き → true", () => {
+    assert.equal(isImageOnlyLine(`![|300](${PATH})`), true);
+  });
+
+  test("alt + 幅指定付き → true", () => {
+    assert.equal(isImageOnlyLine(`![説明|300](${PATH})`), true);
+  });
+
+  test("前後に空白のみ → true", () => {
+    assert.equal(isImageOnlyLine(`  ![](${PATH})  `), true);
+  });
+
+  test("拡張子違い（jpg/jpeg/gif/webp）も true", () => {
+    for (const ext of ["jpg", "jpeg", "gif", "webp"]) {
+      const path = `images/00000000-0000-4000-8000-000000000001.${ext}`;
+      assert.equal(isImageOnlyLine(`![](${path})`), true, ext);
+    }
+  });
+
+  test("テキストと混在 → false", () => {
+    assert.equal(isImageOnlyLine(`text ![](${PATH})`), false);
+    assert.equal(isImageOnlyLine(`![](${PATH}) text`), false);
+  });
+
+  test("複数画像 → false", () => {
+    assert.equal(isImageOnlyLine(`![](${PATH})![](${PATH})`), false);
+  });
+
+  test("リモート URL の画像 → false（images/ 相対パスのみ対象）", () => {
+    assert.equal(isImageOnlyLine("![](https://example.com/pic.png)"), false);
+  });
+
+  test("プレーンテキスト → false", () => {
+    assert.equal(isImageOnlyLine("plain text"), false);
+  });
+
+  test("空行 → false", () => {
+    assert.equal(isImageOnlyLine(""), false);
+  });
+
+  test("alt が「リンク」を含む文字列でも、リンクではなく画像記法単体なら true", () => {
+    // alt はただの文字列。「リンク先」という語が入っていても記法自体は ![alt](images/...) のまま
+    assert.equal(isImageOnlyLine(`![リンク先](${PATH})`), true);
+  });
+
+  test("リンクで包まれた画像（[![](p)](url)）は画像記法単体ではないので false", () => {
+    assert.equal(isImageOnlyLine(`[![](${PATH})](https://example.com)`), false);
+  });
+
+  test("不正な uuid 形状のパス → false", () => {
+    assert.equal(isImageOnlyLine("![](images/not-a-uuid.png)"), false);
+  });
+
+  test("パストラバーサル細工 → false", () => {
+    assert.equal(isImageOnlyLine("![](images/../notes.json)"), false);
   });
 });

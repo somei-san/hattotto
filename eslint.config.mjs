@@ -16,6 +16,7 @@ const noteLines = {
   getAutoPrefix: "readonly",
   isEmptyListItem: "readonly",
   CHECKBOX_RE: "readonly",
+  isImageOnlyLine: "readonly",
 };
 
 export default [

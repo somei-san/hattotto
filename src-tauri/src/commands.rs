@@ -12,8 +12,8 @@ use crate::model::{
     LanguageSetting, Note, RecoverMutex, Settings, TRASH_MAX,
 };
 use crate::persistence::{
-    self, enforce_trash_limit, extract_image_paths, gc_images, save_notes, save_settings,
-    save_trash,
+    self, enforce_trash_limit, extract_image_paths, gc_images,
+    remove_image_occurrence_from_content, save_notes, save_settings, save_trash,
 };
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
@@ -131,6 +131,31 @@ pub(crate) fn confirm_delete_if_needed(app: &AppHandle, state: &AppState, id: &s
     }
     app.dialog()
         .message(i18n::text(lang, Msg::DeleteConfirmMessage))
+        .title(i18n::app_name(lang))
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            i18n::text(lang, Msg::DeleteConfirmOk).into(),
+            i18n::text(lang, Msg::DeleteConfirmCancel).into(),
+        ))
+        .blocking_show()
+}
+
+/// 画像削除の確認。`confirm_before_delete` が有効な場合のみダイアログを出す
+/// （無効なら従来どおり即実行）。基盤は `confirm_delete_if_needed` と共通だが、対象が
+/// 付箋そのものではなく画像 1 個なので専用の文言（`Msg::DeleteImageConfirmMessage`）を使う。
+/// 付箋削除と違って「空なら確認しない」特例は無い（画像の有無と付箋の空判定は無関係）。
+pub(crate) fn confirm_delete_image_if_needed(app: &AppHandle, state: &AppState) -> bool {
+    let (confirm, lang) = {
+        let settings = state.settings.recover();
+        (
+            settings.confirm_before_delete,
+            i18n::resolve(settings.language),
+        )
+    };
+    if !confirm {
+        return true;
+    }
+    app.dialog()
+        .message(i18n::text(lang, Msg::DeleteImageConfirmMessage))
         .title(i18n::app_name(lang))
         .buttons(MessageDialogButtons::OkCancelCustom(
             i18n::text(lang, Msg::DeleteConfirmOk).into(),
@@ -505,6 +530,59 @@ pub(crate) fn show_context_menu(
     }
 }
 
+/// 画像削除の実処理。note の content の `line_idx` 行目にある `rel_path` の
+/// `occurrence` 番目の画像記法だけを取り除いて保存し、参照が無くなった画像ファイルを GC する。
+/// note が見つからない・対象の 1 箇所が content の現在値と噛み合わない（呼び出し元の
+/// 状態が古い等）場合は `Ok(None)`。戻り値は保存後の content で、呼び出し元（`delete_image`
+/// コマンド）がフロントエンドの `rawContent` をそのまま置き換えるのに使う。
+///
+/// `delete_note_data` と同じく「ディスク確定 → メモリ反映」の順序を守る。先にメモリを
+/// 書き換えてから保存すると、保存失敗時にメモリだけディスクより先に進んでしまう。
+pub(crate) fn delete_image_data(
+    state: &AppState,
+    note_id: &str,
+    rel_path: &str,
+    line_idx: usize,
+    occurrence: usize,
+) -> Result<Option<String>, String> {
+    let (new_content, notes_snapshot) = {
+        let notes = state.notes.recover();
+        let Some(note) = notes.iter().find(|n| n.id == note_id) else {
+            log::warn!("delete_image: note not found: {}", note_id);
+            return Ok(None);
+        };
+        let Some(new_content) =
+            remove_image_occurrence_from_content(&note.content, rel_path, line_idx, occurrence)
+        else {
+            log::warn!(
+                "delete_image: target does not match current content (note={}, line={}, occurrence={})",
+                note_id,
+                line_idx,
+                occurrence
+            );
+            return Ok(None);
+        };
+        let mut snapshot = notes.clone();
+        drop(notes);
+        let pos = snapshot
+            .iter()
+            .position(|n| n.id == note_id)
+            .expect("note found above still present in snapshot");
+        snapshot[pos].content = new_content.clone();
+        (new_content, snapshot)
+    };
+    save_notes(state, &notes_snapshot)?;
+    *state.notes.recover() = notes_snapshot.clone();
+    let trash_snapshot = state.trash.recover().clone();
+    gc_images(
+        &state.data_dir,
+        std::slice::from_ref(&rel_path.to_string()),
+        &notes_snapshot,
+        &trash_snapshot,
+    );
+    Ok(Some(new_content))
+}
+
 /// 画像を OS の既定アプリで開く。
 #[tauri::command]
 pub(crate) fn open_image(
@@ -513,6 +591,29 @@ pub(crate) fn open_image(
     state: State<AppState>,
 ) -> Result<(), String> {
     image_actions::open_image(&app, &state.data_dir, &image_path)
+}
+
+/// 選択中の画像を Backspace / Delete で削除する（右クリックメニューには削除項目を
+/// 置かず、選択状態からのキー操作だけが入口）。`confirm_before_delete` が有効なら
+/// 付箋削除と同じ確認ダイアログ基盤で確認し、キャンセルされたら `Ok(None)`。
+/// 削除処理そのものは `delete_image_data` を使う。フロント側の data 属性は DOM 改変で
+/// 偽装され得るため、`image_path` の形状はここでも検証する。
+#[tauri::command]
+pub(crate) fn delete_image(
+    id: String,
+    image_path: String,
+    image_line: usize,
+    image_occurrence: usize,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<Option<String>, String> {
+    if !persistence::is_valid_image_rel_path(&image_path) {
+        return Ok(None);
+    }
+    if !confirm_delete_image_if_needed(&app, &state) {
+        return Ok(None);
+    }
+    delete_image_data(&state, &id, &image_path, image_line, image_occurrence)
 }
 
 #[cfg(test)]
@@ -967,6 +1068,153 @@ mod tests {
         empty_trash_data(&state).unwrap();
 
         assert!(image_exists(&dir, &image_path));
+    }
+
+    // ── delete_image_data ─────────────────────────────────────
+
+    #[test]
+    fn delete_image_data_removes_image_only_line_and_persists() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(1);
+        write_dummy_image(&dir, &image_path);
+        let content = format!("見出し\n![]({})\n本文", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &image_path, 1, 0).unwrap();
+
+        assert_eq!(result, Some("見出し\n本文".to_string()));
+        assert_eq!(state.notes.recover()[0].content, "見出し\n本文");
+        assert_eq!(read_notes_json(&dir)[0].content, "見出し\n本文");
+    }
+
+    #[test]
+    fn delete_image_data_gc_removes_now_unreferenced_image() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(2);
+        write_dummy_image(&dir, &image_path);
+        let content = format!("![]({})", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        delete_image_data(&state, "a", &image_path, 0, 0).unwrap();
+
+        assert!(!image_exists(&dir, &image_path));
+    }
+
+    /// 他の付箋がまだ同じ画像を参照していれば、そちらは触らずファイルも消さない。
+    #[test]
+    fn delete_image_data_keeps_image_still_referenced_by_another_note() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(3);
+        write_dummy_image(&dir, &image_path);
+        let content_a = format!("![]({})", image_path);
+        let content_b = format!("別の付箋 ![]({})", image_path);
+        let state = make_state(
+            &dir,
+            vec![make_note("a", &content_a), make_note("b", &content_b)],
+            vec![],
+        );
+
+        let result = delete_image_data(&state, "a", &image_path, 0, 0).unwrap();
+
+        assert_eq!(result, Some(String::new()));
+        let notes = state.notes.recover();
+        assert_eq!(
+            notes.iter().find(|n| n.id == "b").unwrap().content,
+            content_b
+        );
+        assert!(image_exists(&dir, &image_path));
+    }
+
+    #[test]
+    fn delete_image_data_strips_syntax_only_from_mixed_line() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(4);
+        write_dummy_image(&dir, &image_path);
+        let content = format!("テキスト ![]({}) 続き", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &image_path, 0, 0).unwrap();
+
+        assert_eq!(result, Some("テキスト  続き".to_string()));
+    }
+
+    /// クリックされた 1 箇所だけを取り除く。同じ画像を参照する他の行は無傷のまま残り、
+    /// その参照が残っている限り画像ファイルも GC されない。
+    #[test]
+    fn delete_image_data_only_removes_targeted_occurrence_and_keeps_other_lines() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(8);
+        write_dummy_image(&dir, &image_path);
+        let content = format!(
+            "![]({})\nテキスト ![別alt]({}) 続き",
+            image_path, image_path
+        );
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &image_path, 0, 0).unwrap();
+
+        let expected = format!("テキスト ![別alt]({}) 続き", image_path);
+        assert_eq!(result, Some(expected.clone()));
+        assert_eq!(state.notes.recover()[0].content, expected);
+        // 2 行目にまだ参照が残っているので画像ファイルは消えない
+        assert!(image_exists(&dir, &image_path));
+    }
+
+    #[test]
+    fn delete_image_data_unknown_note_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(5);
+        let state = make_state(&dir, vec![], vec![]);
+
+        let result = delete_image_data(&state, "missing", &image_path, 0, 0).unwrap();
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn delete_image_data_no_matching_reference_returns_none_and_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (present, absent) = (uuid_image_path(6), uuid_image_path(7));
+        let content = format!("![]({})", present);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &absent, 0, 0).unwrap();
+
+        assert_eq!(result, None);
+        assert_eq!(state.notes.recover()[0].content, content);
+        assert!(!dir.path().join("notes.json").exists());
+    }
+
+    /// occurrence が実在しない（フロントの状態が content の現在値とずれていた等）場合も
+    /// 何も変えずに None を返す。
+    #[test]
+    fn delete_image_data_stale_occurrence_returns_none_and_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(9);
+        let content = format!("![]({})", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &image_path, 0, 1).unwrap();
+
+        assert_eq!(result, None);
+        assert_eq!(state.notes.recover()[0].content, content);
+        assert!(!dir.path().join("notes.json").exists());
+    }
+
+    /// 保存が失敗したときはメモリを書き換えない（`delete_note_data` と同じ
+    /// 「ディスク確定 → メモリ反映」の順序であることの確認）。
+    #[test]
+    fn delete_image_data_save_failure_leaves_memory_untouched() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("notes.json")).unwrap();
+        let image_path = uuid_image_path(10);
+        let content = format!("![]({})", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = delete_image_data(&state, "a", &image_path, 0, 0);
+
+        assert!(result.is_err());
+        assert_eq!(state.notes.recover()[0].content, content);
     }
 
     // ── delete → restore round-trip ───────────────────────────

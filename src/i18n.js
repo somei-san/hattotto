@@ -112,6 +112,7 @@ const I18N_TABLE = {
   toastDeleteFailed: { ja: '付箋の削除に失敗しました', en: 'Failed to delete note' },
   toastImageDropUnsupported: { ja: '画像として扱えないファイルです', en: 'This file cannot be added as an image' },
   toastOpenImageFailed: { ja: '画像を開けませんでした', en: 'Failed to open the image' },
+  toastDeleteImageFailed: { ja: '画像の削除に失敗しました', en: 'Failed to delete the image' },
   imageOpenHint: { ja: 'ダブルクリックで開く', en: 'Double-click to open' },
 };
 
