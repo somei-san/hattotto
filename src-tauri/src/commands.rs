@@ -177,8 +177,7 @@ pub(crate) fn delete_note_data(state: &AppState, id: &str) -> Result<bool, Strin
         }
         save_notes(state, &notes_snapshot)?;
         *state.notes.recover() = notes_snapshot;
-        // note.is_empty() は content.trim() が空であることを意味し、画像記法（非空白）を
-        // 含む content では成立しない。この経路に画像 GC は不要（呼んでも常に空振りする）
+        // 画像記法を含む content は空白のみにならず、この分岐には来ないため画像 GC は不要
         return Ok(true);
     }
 

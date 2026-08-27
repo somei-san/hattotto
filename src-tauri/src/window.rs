@@ -117,6 +117,10 @@ pub(crate) fn open_note_window(app: &AppHandle, note: &Note) {
         .always_on_top(note.pinned)
         .accept_first_mouse(true)
         .visible(true)
+        // Tauri の既定 drag-drop ハンドラは WKWebView 標準の HTML5 drag/drop を握りつぶし、
+        // Finder / ブラウザからドラッグした画像が DataTransfer.files に届かなくなる。
+        // 付箋ウィンドウだけ無効化し、ドロップは note.js 側の HTML5 API で処理する
+        .disable_drag_drop_handler()
         .build()
     {
         Ok(win) => win,
