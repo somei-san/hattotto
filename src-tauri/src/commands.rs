@@ -532,10 +532,15 @@ pub(crate) fn show_context_menu(
 }
 
 /// 画像削除の実処理。note の content の `line_idx` 行目にある `rel_path` の
-/// `occurrence` 番目の画像記法だけを取り除いて保存し、参照が無くなった画像ファイルを GC する。
-/// note が見つからない・対象の 1 箇所が content の現在値と噛み合わない（呼び出し元の
-/// 状態が古い等）場合は `Ok(None)`。戻り値は保存後の content で、呼び出し元（`delete_image`
-/// コマンド）がフロントエンドの `rawContent` をそのまま置き換えるのに使う。
+/// `occurrence` 番目の画像記法だけを取り除いて保存する。note が見つからない・対象の
+/// 1 箇所が content の現在値と噛み合わない（呼び出し元の状態が古い等）場合は `Ok(None)`。
+/// 戻り値は保存後の content で、呼び出し元（`delete_image` コマンド）がフロントエンドの
+/// `rawContent` をそのまま置き換えるのに使う。
+///
+/// 画像ファイルはここでは消さない。undo は JS 側ウィンドウローカルの履歴で、この
+/// content 変更を取り消せば同じ画像参照が復活しうる。即時に GC すると、その復活の
+/// 瞬間にファイルが既に無くて壊れた画像参照になる。孤児ファイルは起動時スイープ
+/// （`persistence::sweep_orphaned_images`）でまとめて片付ける。
 ///
 /// `delete_note_data` と同じく「ディスク確定 → メモリ反映」の順序を守る。先にメモリを
 /// 書き換えてから保存すると、保存失敗時にメモリだけディスクより先に進んでしまう。
@@ -574,13 +579,6 @@ pub(crate) fn delete_image_data(
     };
     save_notes(state, &notes_snapshot)?;
     *state.notes.recover() = notes_snapshot.clone();
-    let trash_snapshot = state.trash.recover().clone();
-    gc_images(
-        &state.data_dir,
-        std::slice::from_ref(&rel_path.to_string()),
-        &notes_snapshot,
-        &trash_snapshot,
-    );
     Ok(Some(new_content))
 }
 
@@ -1181,8 +1179,11 @@ mod tests {
         assert_eq!(read_notes_json(&dir)[0].content, "見出し\n本文");
     }
 
+    /// 画像削除は content から参照を消すだけで、ファイル自体は残す。undo で参照が
+    /// 復活しても壊れた画像にならないようにするための挙動。孤児化したファイルは
+    /// 起動時スイープ（`persistence::sweep_orphaned_images`）が片付ける。
     #[test]
-    fn delete_image_data_gc_removes_now_unreferenced_image() {
+    fn delete_image_data_keeps_file_after_last_reference_removed() {
         let dir = TempDir::new().unwrap();
         let image_path = uuid_image_path(2);
         write_dummy_image(&dir, &image_path);
@@ -1191,7 +1192,7 @@ mod tests {
 
         delete_image_data(&state, "a", &image_path, 0, 0).unwrap();
 
-        assert!(!image_exists(&dir, &image_path));
+        assert!(image_exists(&dir, &image_path));
     }
 
     /// 他の付箋がまだ同じ画像を参照していれば、そちらは触らずファイルも消さない。

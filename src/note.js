@@ -37,6 +37,9 @@ let activeStart = null;
 let activeEnd = null;
 let composing = false;
 
+// ⌘Z/⌘⇧Z の undo/redo 履歴。loadNote() が最初の content で初期化する
+let editHistory = null;
+
 // `save_pasted_image`（Rust 側）が生成するパスの形状（`images/<uuid v4>.<ext>`）とだけ一致させる。
 // asset protocol の scope（$APPDATA/images/**/*）を信じきらず、`images/../notes.json` のような
 // 細工パスを resolveImageSrc で asset URL に変換してしまわないための最終防衛ライン。
@@ -131,6 +134,7 @@ async function loadNote() {
   }
 
   rawContent = note.content;
+  editHistory = createHistory(rawContent);
   renderAll();
   applyColor(note.color);
 
@@ -1191,9 +1195,15 @@ function scheduleSave() {
   saveTimer = setTimeout(saveNow, 300);
 }
 
+// 不変条件: rawContent を書き換える経路は、必ずここ（saveNow の commit）か
+// 明示的な editHistory.commit 呼び出し（removeSelectedImage 等）のどちらかを通ること。
+// どちらも通らない経路があると、その変更へは undo/redo で戻れない
 function saveNow() {
   clearTimeout(saveTimer);
   saveTimer = null;
+  // 保存が確定するたびに undo 履歴へ積む（undo/redo 自身の書き戻しは commit と同値になるため
+  // 履歴側の同値ガードで無視される）
+  editHistory?.commit(rawContent);
   return fireInvoke('update_note_content', { id: noteId, content: rawContent }, I18N.t('toastSaveFailed'));
 }
 
@@ -1207,6 +1217,60 @@ function flushContent() {
   snapshotContent();
   return saveNow();
 }
+
+// ── Undo / Redo ────────────────────────────────────────────
+// 適用中の多重発火を防ぐ（deletingImage と同じ考え方）。⌘Z の押しっぱなしや
+// メニューイベントの二重到達があっても history の巻き戻りが 1 回で済むようにする
+let applyingHistory = false;
+
+/** history から返った content を適用し、差分行にキャレットを置いて保存する共通処理。 */
+async function applyHistoryContent(prevContent, content) {
+  if (content == null) return;
+  clearImageSelection();
+  rawContent = content;
+  // renderAll() は生表示中の行を書き戻さない（DOM を丸ごと差し替えるだけ）ため、
+  // 古い activeStart/activeEnd を残したままにしない（commitActive と同じ作法）
+  activeStart = activeEnd = null;
+  renderAll();
+  const diffLine = firstDiffLine(prevContent, content);
+  if (diffLine != null) {
+    enterLine(Math.min(diffLine, getLines().length - 1), null);
+  }
+  await saveNow();
+}
+
+// deletingImage 中（画像削除の確認ダイアログ待ち・invoke 待ち）は rawContent が
+// removeSelectedImage の完了を待たずに undo/redo で上書きされると内容が乖離するため、
+// 完了するまで no-op にする（相互チェックは removeSelectedImage 側の applyingHistory 判定と対）
+async function performUndo() {
+  if (composing || applyingHistory || deletingImage || !editHistory) return;
+  applyingHistory = true;
+  try {
+    await flushContent();
+    const prevContent = rawContent;
+    await applyHistoryContent(prevContent, editHistory.undo(prevContent));
+  } finally {
+    applyingHistory = false;
+  }
+}
+
+async function performRedo() {
+  if (composing || applyingHistory || deletingImage || !editHistory) return;
+  applyingHistory = true;
+  try {
+    await flushContent();
+    const prevContent = rawContent;
+    await applyHistoryContent(prevContent, editHistory.redo(prevContent));
+  } finally {
+    applyingHistory = false;
+  }
+}
+
+// WebView 標準の undo/redo（NSUndoManager 経由）は edit_submenu をカスタム MenuItem に
+// 置き換えたことで発火経路が無いはずだが、念のための保険として二重に止める
+document.addEventListener('beforeinput', (e) => {
+  if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') e.preventDefault();
+});
 
 // ── Raw Editor Bindings ───────────────────────────
 function bindEditor(ed) {
@@ -1349,7 +1413,10 @@ let deletingImage = false;
  * （行番号が無効なら末尾へフォールバックする）。
  */
 async function removeSelectedImage(cmd, preferredLineAfter, failMessageKey) {
-  if (!selectedImage || deletingImage) return;
+  // applyingHistory 中は undo/redo が rawContent を巻き戻している最中なので、
+  // 確認ダイアログ・invoke 待ちの間に対象がすり替わらないよう避ける
+  // （performUndo/performRedo 側も deletingImage を見て相互に避け合う）
+  if (!selectedImage || deletingImage || applyingHistory) return;
   deletingImage = true;
   try {
     // 別行の未保存入力（デバウンス窓の中）が残っていると、Rust 側は古い content を基に
@@ -1376,6 +1443,8 @@ async function removeSelectedImage(cmd, preferredLineAfter, failMessageKey) {
     if (newContent == null) return;
     clearImageSelection();
     rawContent = newContent;
+    // saveNow を経由しない書き換えなので、ここで明示的に commit する（不変条件はコメント参照）
+    editHistory?.commit(rawContent);
     renderAll();
     const lines = getLines();
     const preferred = preferredLineAfter(line);
@@ -1565,6 +1634,11 @@ unlisteners.push(listen('zoom', (e) => {
   else if (e.payload === 'out') changeZoom(-1);
   else if (e.payload === 'reset') resetZoom();
 }));
+unlisteners.push(listen('edit-history', (e) => {
+  if (!document.hasFocus()) return;
+  if (e.payload === 'undo') performUndo();
+  else if (e.payload === 'redo') performRedo();
+}));
 
 // Listen for context menu events (targeted to this window via emit_to)
 unlisteners.push(appWindow.listen('ctx-toggle-pin', () => togglePin()));
@@ -1624,6 +1698,8 @@ window.enterLine = enterLine;
 window.renderMarkdown = renderMarkdown;
 window.changeZoom = changeZoom;
 window.resetZoom = resetZoom;
+window.performUndo = performUndo;
+window.performRedo = performRedo;
 
 
 // ── Keyboard: color dots (Enter/Space/Arrow) ───────

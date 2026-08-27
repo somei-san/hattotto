@@ -50,6 +50,12 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
             "open_trash" => {
                 open_trash_window(app);
             }
+            "undo" => {
+                let _ = app.emit("edit-history", "undo");
+            }
+            "redo" => {
+                let _ = app.emit("edit-history", "redo");
+            }
             "zoom_in" => {
                 let _ = app.emit("zoom", "in");
             }
@@ -143,13 +149,28 @@ fn build_menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
         ],
     )?;
 
+    // PredefinedMenuItem::undo/redo は macOS の NSUndoManager と結び付いており、⌘Z/⌘⇧Z を
+    // WebView 側の keydown より先に奪う。付箋は独自の undo/redo 履歴（history.js）を持つため、
+    // ここは通常の MenuItem にして edit-history イベント経由でフロントへ委ねる
     let edit_submenu = Submenu::with_items(
         app,
         i18n::text(lang, Msg::MenuEdit),
         true,
         &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
+            &MenuItem::with_id(
+                app,
+                "undo",
+                i18n::text(lang, Msg::MenuUndo),
+                true,
+                Some("CmdOrCtrl+Z"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "redo",
+                i18n::text(lang, Msg::MenuRedo),
+                true,
+                Some("CmdOrCtrl+Shift+Z"),
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::cut(app, None)?,
             &PredefinedMenuItem::copy(app, None)?,
