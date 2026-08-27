@@ -2,6 +2,7 @@ mod commands;
 mod context_menu;
 mod i18n;
 mod image_actions;
+mod macos_prefs;
 mod menu;
 pub mod model;
 mod persistence;
@@ -24,6 +25,8 @@ use window::{bring_all_to_front, open_note_window};
 // ── App Entry ───────────────────────────────────────────────
 
 pub fn run() {
+    macos_prefs::disable_press_and_hold();
+
     let data_dir = persistence::data_dir();
     let (notes, notes_loaded, notes_load_error) = match load_notes(&data_dir) {
         Loaded::Missing => (Vec::new(), true, None),

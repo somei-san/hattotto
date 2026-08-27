@@ -51,6 +51,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/menu.rs` — アプリメニュー
 - `src/tray.rs` — システムトレイ
 - `src/i18n.rs` — ネイティブ側 UI 文言の言語ごとの表記（`Msg` の表）と表示言語の解決。`Msg` を増やすと訳の付け忘れがコンパイルエラーになる
+- `src/macos_prefs.rs` — 起動時にこのアプリだけ press-and-hold（キー長押しでのアクセント文字ポップアップ）を無効化し、キーリピートを有効にする
 - `tauri.conf.json` — Tauri 設定。`frontendDist` は `../src` を指す。`withGlobalTauri: true` で `window.__TAURI__` を使用
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
