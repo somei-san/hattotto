@@ -270,17 +270,35 @@ function buildImagePreview(block) {
 // imageOccurrenceInLine と同じ考え方）。
 let selectedImage = null;
 
-/** 選択を解除し、ハイライト用クラスも剥がす。 */
+/** 選択を解除し、ハイライト用クラスと DOM 選択（Range）も剥がす。 */
 function clearImageSelection() {
   if (!selectedImage) return;
   selectedImage = null;
   // querySelectorAll で念のため複数剥がす（1 画像のみの不変条件を守る側の防御）
   mdView.querySelectorAll('.img-selected').forEach(el => el.classList.remove('img-selected'));
+  // 画像に張った DOM 選択も一緒に外す（張ったままだと次に別行を生表示するときに
+  // 「範囲選択中は生表示に入らない」ガードへ誤って引っかかる）
+  const sel = window.getSelection();
+  if (sel.rangeCount) sel.removeAllRanges();
 }
 
 /**
- * selectedImage が指す img 要素に選択枠（.img-selected）を付け直す。renderAll() の直後
- * （mdView.innerHTML を丸ごと差し替えた直後）に呼び、選択状態を新しい DOM へ引き継ぐ。
+ * img 要素を DOM 選択（Range）で覆う。ネイティブの Edit メニュー（PredefinedMenuItem::copy/cut）
+ * は「テキスト選択が無いと項目自体が無効」になり keydown も届かないため、⌘C/⌘X をメニュー経由で
+ * 機能させるには DOM 選択を張って項目を有効化しておく必要がある。実際のコピー/カット処理は
+ * document の copy/cut イベント（copySelectedImage 等）で拾う。
+ */
+function selectImageRange(img) {
+  const range = document.createRange();
+  range.selectNode(img);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/**
+ * selectedImage が指す img 要素に選択枠（.img-selected）と DOM 選択を付け直す。renderAll() の
+ * 直後（mdView.innerHTML を丸ごと差し替えた直後）に呼び、選択状態を新しい DOM へ引き継ぐ。
  * 対象がもう存在しない（行が消えた・画像が無くなった等）場合は選択そのものを解除する。
  */
 function applySelectionHighlight() {
@@ -292,6 +310,7 @@ function applySelectionHighlight() {
   const img = imgs[selectedImage.occurrence];
   if (!img) { selectedImage = null; return; }
   img.classList.add('img-selected');
+  selectImageRange(img);
 }
 
 /** 行テキスト中で最初に出てくる画像記法の src を取り出す。無ければ null。 */
@@ -1322,7 +1341,14 @@ for (const type of ['cut', 'paste', 'drop']) {
 // 削除処理中の多重発火ガード（キーリピートでの確認ダイアログ多重表示・二重削除を防ぐ）
 let deletingImage = false;
 
-async function deleteSelectedImage(key) {
+/**
+ * 選択中の画像を取り除く共通処理。`cmd` は 'delete_image'（Backspace/Delete、
+ * confirm_before_delete に従う）または 'cut_image'（⌘X、コピー成功後に確認なしで削除）。
+ * どちらも Rust 側が新しい content（`Option<String>`）を返し、成功時はここで
+ * rawContent に反映してキャレットを置く。`preferredLineAfter` は削除後のキャレット候補行
+ * （行番号が無効なら末尾へフォールバックする）。
+ */
+async function removeSelectedImage(cmd, preferredLineAfter, failMessageKey) {
   if (!selectedImage || deletingImage) return;
   deletingImage = true;
   try {
@@ -1335,15 +1361,15 @@ async function deleteSelectedImage(key) {
     const { line, occurrence, relSrc } = selectedImage;
     let newContent;
     try {
-      newContent = await invoke('delete_image', {
+      newContent = await invoke(cmd, {
         id: noteId,
         imagePath: relSrc,
         imageLine: line,
         imageOccurrence: occurrence,
       });
     } catch (err) {
-      console.error('delete_image failed:', err);
-      showToast(I18N.t('toastDeleteImageFailed'));
+      console.error(`${cmd} failed:`, err);
+      showToast(I18N.t(failMessageKey));
       return;
     }
     // キャンセル（confirm_before_delete で拒否）・対象が既に無い場合は選択を保ったまま何もしない
@@ -1352,16 +1378,40 @@ async function deleteSelectedImage(key) {
     rawContent = newContent;
     renderAll();
     const lines = getLines();
-    // 削除後のキャレット位置: 来た方向（押されたキー）の逆側優先。Backspace は前の行
-    // （mergeLine の「前の行へ戻る」と同じ向き）。先頭行を消した場合は前が無いので
-    // 先頭（0）に留まる（末尾へは飛ばさない）。Delete はそのまま同じ index
-    // （消えた行の次が繰り上がってくる）。それも無ければ末尾へ
-    const preferred = key === 'Backspace' ? Math.max(0, line - 1) : line;
+    const preferred = preferredLineAfter(line);
     const target = (preferred >= 0 && preferred < lines.length) ? preferred : lines.length - 1;
     enterLine(target, null);
   } finally {
     deletingImage = false;
   }
+}
+
+function deleteSelectedImage(key) {
+  // 削除後のキャレット位置: 来た方向（押されたキー）の逆側優先。Backspace は前の行
+  // （mergeLine の「前の行へ戻る」と同じ向き）。先頭行を消した場合は前が無いので
+  // 先頭（0）に留まる（末尾へは飛ばさない）。Delete はそのまま同じ index
+  // （消えた行の次が繰り上がってくる）。それも無ければ末尾へ
+  const preferredLineAfter = (line) => key === 'Backspace' ? Math.max(0, line - 1) : line;
+  return removeSelectedImage('delete_image', preferredLineAfter, 'toastDeleteImageFailed');
+}
+
+/** ⌘C。選択中の画像をクリップボードへコピーする。選択は維持する。 */
+async function copySelectedImage() {
+  if (!selectedImage) return;
+  try {
+    await invoke('copy_image', { imagePath: selectedImage.relSrc });
+  } catch (err) {
+    console.error('copy_image failed:', err);
+    showToast(I18N.t('toastCopyImageFailed'));
+  }
+}
+
+/**
+ * ⌘X。選択中の画像をカット（コピー→削除）する。
+ * キャレット配置は Backspace と同じ（前の行優先、先頭行なら先頭に留まる）。
+ */
+function cutSelectedImage() {
+  return removeSelectedImage('cut_image', (line) => Math.max(0, line - 1), 'toastCutImageFailed');
 }
 
 document.addEventListener('keydown', (e) => {
@@ -1385,9 +1435,14 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Backspace' || e.key === 'Delete') {
     e.preventDefault();
+    if (e.repeat) return; // 押しっぱなしでの多重削除・確認ダイアログ多重表示を防ぐ
     deleteSelectedImage(e.key);
     return;
   }
+  // ⌘C/⌘X はここでは拾わない。実アプリではネイティブ Edit メニューの
+  // PredefinedMenuItem::copy/cut がショートカットを先取りし、DOM の keydown まで
+  // 届かないため（メニュー項目は DOM 選択が無いと無効化もされる）。DOM 選択を張った上で
+  // document の copy/cut イベント（下記）を拾う経路に一本化する
   if (e.key === 'Enter') {
     e.preventDefault();
     // Enter は画像の行の直下、Shift+Enter は直上に空行を挿入し、そこへキャレットを置く
@@ -1410,6 +1465,22 @@ document.addEventListener('mousedown', (e) => {
   if (!selectedImage) return;
   if (e.target.closest('.img-selected') || e.target.closest('.img-resize-handle')) return;
   clearImageSelection();
+});
+
+// 画像選択中の ⌘C/⌘X はネイティブ Edit メニューのショートカットとして処理される
+// （keydown まで届かない）。selectImage が張った DOM 選択のおかげでメニュー項目が有効になり、
+// メニュー経由の Copy/Cut が WebKit の copy/cut イベントとして DOM に届く。selectedImage が
+// 無いとき（通常のテキスト選択）は preventDefault せず、ブラウザ既定のコピー/カットに任せる
+document.addEventListener('copy', (e) => {
+  if (!selectedImage) return;
+  e.preventDefault();
+  copySelectedImage();
+});
+
+document.addEventListener('cut', (e) => {
+  if (!selectedImage) return;
+  e.preventDefault();
+  cutSelectedImage();
 });
 
 // ── Drag Window ───────────────────────────────────

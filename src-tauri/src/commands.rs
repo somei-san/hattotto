@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::ipc::{InvokeBody, Request};
@@ -616,6 +617,99 @@ pub(crate) fn delete_image(
     delete_image_data(&state, &id, &image_path, image_line, image_occurrence)
 }
 
+/// `run_on_main_thread` からの結果待ちが万一戻ってこなくても UI を無限にフリーズさせない
+/// ための上限。
+const COPY_IMAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// arboard 呼び出しをメインスレッドで実行し、結果を待ち合わせて返す。arboard は macOS で
+/// NSPasteboard をメインスレッド外から操作するとクラッシュしうる
+/// （`image_actions::copy_image_to_clipboard` の doc 参照）。この関数を呼ぶ `copy_image` /
+/// `cut_image` は非 async コマンドで、Tauri の IPC はメッセージを受け取ったスレッド上で
+/// そのままインライン実行する（別スレッドへディスパッチしない）。macOS ではその IPC 受信
+/// 自体がメインスレッド（WKWebView のコールバック）で起きるため、コマンド本体はすでに
+/// メインスレッド上で動いている。`run_on_main_thread` はメインスレッドから呼べば即時実行
+/// されるため、ここでの委譲は安全に完結する。同メソッドはクロージャの戻り値を返さないため、
+/// 結果は `std::sync::mpsc` で待ち合わせる（コマンドを async 化するとこのインライン実行の
+/// 前提が崩れ、待ち合わせがイベントループの周回待ちになる点に注意）。
+fn copy_image_on_main_thread(
+    app: &AppHandle,
+    data_dir: &Path,
+    rel_path: &str,
+) -> Result<(), String> {
+    let data_dir = data_dir.to_path_buf();
+    let rel_path = rel_path.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let result = image_actions::copy_image_to_clipboard(&data_dir, &rel_path);
+        let _ = tx.send(result);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv_timeout(COPY_IMAGE_TIMEOUT)
+        .map_err(|e| e.to_string())?
+}
+
+/// 選択中の画像をクリップボードにコピーする。`image_path` の形状・実在検証は
+/// `copy_image_to_clipboard` が行う。
+#[tauri::command]
+pub(crate) fn copy_image(
+    image_path: String,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<(), String> {
+    copy_image_on_main_thread(&app, &state.data_dir, &image_path)
+}
+
+/// `cut_image` の早期 return 条件（不正な画像パスなら実行せず `Ok(None)` として扱う）。
+/// フロント側の data 属性は DOM 改変で偽装され得るため、コマンド側でも検証する。
+/// `AppHandle` を要らない形に切り出しているのは、この判定単体をユニットテストするため。
+fn cut_image_should_skip(image_path: &str) -> bool {
+    !persistence::is_valid_image_rel_path(image_path)
+}
+
+/// カット（コピー → 削除）の削除側のロジック。`copy_result` は先に行ったコピーの成否
+/// （`cut_image` では `copy_image_on_main_thread` の戻り値を渡す）。コピーに失敗していれば
+/// 削除せずそのエラーを返す（消えて戻せない方が最悪なため、コピー成功が前提）。
+/// `AppHandle` を要らない形に分けているのは、コピーの成否をここへ注入することでコピー→削除の
+/// 順序をユニットテストできるようにするため（`copy_image_on_main_thread` 自体は
+/// メインスレッド委譲が要るため単体テストできない）。
+fn cut_image_after_copy(
+    state: &AppState,
+    note_id: &str,
+    rel_path: &str,
+    line_idx: usize,
+    occurrence: usize,
+    copy_result: Result<(), String>,
+) -> Result<Option<String>, String> {
+    copy_result?;
+    delete_image_data(state, note_id, rel_path, line_idx, occurrence)
+}
+
+/// 選択中の画像を ⌘X でカットする（コピー → 削除）。macOS のカットの慣習に合わせて
+/// 確認ダイアログは出さない（`delete_image` の `confirm_before_delete` 確認は経由しない。
+/// クリップボードに載るためペーストで復元できる）。
+#[tauri::command]
+pub(crate) fn cut_image(
+    id: String,
+    image_path: String,
+    image_line: usize,
+    image_occurrence: usize,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<Option<String>, String> {
+    if cut_image_should_skip(&image_path) {
+        return Ok(None);
+    }
+    let copy_result = copy_image_on_main_thread(&app, &state.data_dir, &image_path);
+    cut_image_after_copy(
+        &state,
+        &id,
+        &image_path,
+        image_line,
+        image_occurrence,
+        copy_result,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1215,6 +1309,61 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(state.notes.recover()[0].content, content);
+    }
+
+    // ── cut_image_after_copy ───────────────────────────────────
+    // コピー処理はメインスレッド委譲が要るため単体テストできない。その戻り値を模した
+    // Result<(), String> を直接注入して「コピー成功→削除」「コピー失敗→削除しない」の
+    // 順序だけを検証する。
+
+    #[test]
+    fn cut_image_after_copy_deletes_when_copy_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(11);
+        write_dummy_image(&dir, &image_path);
+        let content = format!("見出し\n![]({})\n本文", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = cut_image_after_copy(&state, "a", &image_path, 1, 0, Ok(()));
+
+        assert_eq!(result, Ok(Some("見出し\n本文".to_string())));
+        assert_eq!(state.notes.recover()[0].content, "見出し\n本文");
+    }
+
+    /// コピーに失敗した場合は削除処理そのものを呼ばない（消えて戻せない方が最悪なため）。
+    #[test]
+    fn cut_image_after_copy_does_not_delete_when_copy_fails() {
+        let dir = TempDir::new().unwrap();
+        let image_path = uuid_image_path(12);
+        write_dummy_image(&dir, &image_path);
+        let content = format!("![]({})", image_path);
+        let state = make_state(&dir, vec![make_note("a", &content)], vec![]);
+
+        let result = cut_image_after_copy(
+            &state,
+            "a",
+            &image_path,
+            0,
+            0,
+            Err("clipboard error".to_string()),
+        );
+
+        assert_eq!(result, Err("clipboard error".to_string()));
+        assert_eq!(state.notes.recover()[0].content, content);
+        assert!(image_exists(&dir, &image_path));
+    }
+
+    // ── cut_image_should_skip ────────────────────────────────
+
+    #[test]
+    fn cut_image_should_skip_rejects_invalid_path() {
+        assert!(cut_image_should_skip("images/../notes.json"));
+        assert!(cut_image_should_skip("not-an-image-path"));
+    }
+
+    #[test]
+    fn cut_image_should_skip_accepts_valid_path() {
+        assert!(!cut_image_should_skip(&uuid_image_path(3)));
     }
 
     // ── delete → restore round-trip ───────────────────────────
