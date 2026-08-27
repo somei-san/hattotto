@@ -28,20 +28,23 @@ pub fn run() {
     macos_prefs::disable_press_and_hold();
 
     let data_dir = persistence::data_dir();
-    let (notes, notes_loaded, notes_load_error) = match load_notes(&data_dir) {
-        Loaded::Missing => (Vec::new(), true, None),
-        Loaded::Ok(v) => (v, true, None),
-        Loaded::Unreadable(e) => (Vec::new(), false, Some(e)),
+    // `notes_source_ok` / `trash_source_ok` は「実ファイルから読めた（Loaded::Ok）」かどうか。
+    // `notes_loaded` 等（Missing も true）と合わせて、スイープの可否判定
+    // （`persistence::should_sweep_images`）に渡す
+    let (notes, notes_loaded, notes_load_error, notes_source_ok) = match load_notes(&data_dir) {
+        Loaded::Missing => (Vec::new(), true, None, false),
+        Loaded::Ok(v) => (v, true, None, true),
+        Loaded::Unreadable(e) => (Vec::new(), false, Some(e), false),
     };
     let (settings, settings_loaded, settings_load_error) = match load_settings(&data_dir) {
         Loaded::Missing => (Settings::default(), true, None),
         Loaded::Ok(v) => (v, true, None),
         Loaded::Unreadable(e) => (Settings::default(), false, Some(e)),
     };
-    let (trash, trash_loaded, trash_load_error) = match load_trash(&data_dir) {
-        Loaded::Missing => (Vec::new(), true, None),
-        Loaded::Ok(v) => (v, true, None),
-        Loaded::Unreadable(e) => (Vec::new(), false, Some(e)),
+    let (trash, trash_loaded, trash_load_error, trash_source_ok) = match load_trash(&data_dir) {
+        Loaded::Missing => (Vec::new(), true, None, false),
+        Loaded::Ok(v) => (v, true, None, true),
+        Loaded::Unreadable(e) => (Vec::new(), false, Some(e), false),
     };
     let state = AppState {
         notes: Mutex::new(notes),
@@ -132,7 +135,7 @@ pub fn run() {
             commands::copy_image,
             commands::cut_image,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             // Set up app menu and system tray
             if let Err(e) = menu::setup_app_menu(app.handle()) {
                 log::error!("Failed to setup app menu: {e}");
@@ -205,6 +208,22 @@ pub fn run() {
                 }
                 // Tauri の終了処理を通さずに落とす。この状態では何も書き込ませたくない
                 std::process::exit(0);
+            }
+
+            // single-instance プラグインは他のプラグインより先に登録してあり、2 個目の
+            // インスタンスはここへ来る前に exit している。全プラグイン登録後のこの
+            // setup 内でスイープすることで、1 個目のインスタンスの undo 履歴にしか
+            // 参照が無い画像や、ペースト直後でデバウンス保存前の画像を
+            // 2 個目のインスタンスが誤って消す事故を避ける
+            if persistence::should_sweep_images(
+                state.notes_loaded,
+                state.trash_loaded,
+                notes_source_ok,
+                trash_source_ok,
+            ) {
+                let notes_guard = state.notes.recover();
+                let trash_guard = state.trash.recover();
+                persistence::sweep_orphaned_images(&state.data_dir, &notes_guard, &trash_guard);
             }
 
             // Restore saved notes

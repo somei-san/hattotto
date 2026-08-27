@@ -479,6 +479,83 @@ pub(crate) fn gc_images(data_dir: &Path, candidates: &[String], notes: &[Note], 
     }
 }
 
+/// 起動時スイープを実行してよいか。`*_loaded` は「ロードに失敗していない」（Ok または
+/// Missing）、`*_source_ok` は「実ファイルから読めた」（Ok のみ）。
+///
+/// false になるのは (1) どちらかが Unreadable（読めなかった側の参照が集合から欠け、
+/// 参照中ファイルを全消ししうる）、(2) 両方とも実ファイルが無い（初回起動なら `images/`
+/// も空だが、データ移行途中なら `images/` だけ残っている可能性がある）とき。片方だけ
+/// Missing（例: ゴミ箱を一度も使っておらず trash.json が無い）は正常な状態なので true。
+/// スキップしたときのコストは孤児が残るだけで、次回起動時にまた判定される
+pub(crate) fn should_sweep_images(
+    notes_loaded: bool,
+    trash_loaded: bool,
+    notes_source_ok: bool,
+    trash_source_ok: bool,
+) -> bool {
+    notes_loaded && trash_loaded && (notes_source_ok || trash_source_ok)
+}
+
+/// 大文字小文字を無視した比較用に正規化する。`images/` 配下は uuid v4 の hex 部と
+/// 拡張子（`is_valid_image_rel_path` は大文字も許容する）で構成され非 ASCII を含まないため
+/// `to_ascii_lowercase` で足りる。
+fn normalize_image_rel_path(path: &str) -> String {
+    path.to_ascii_lowercase()
+}
+
+/// 起動時に呼ぶ全孤児スイープ。`images/` を走査し、uuid + 許可拡張子の形状
+/// （`is_valid_image_rel_path`）に合うファイルのうち notes / trash のどこからも
+/// 参照されていないものを削除する。形状に合わないファイルには触らない。
+///
+/// `delete_image_data` は画像削除のたびには GC せず、この起動時スイープに一本化している。
+/// undo は JS 側ウィンドウローカルの履歴でアプリ終了と共に消えるため、起動した時点で
+/// 未参照のファイルはその後もう二度と参照されない。即時 GC と違い、undo で参照が復活する
+/// 前にファイルが消えている、という壊れ方が起きない。
+///
+/// 呼び出し元は `should_sweep_images` で「参照集合が信頼できるか」を判定してから呼ぶこと。
+/// `images/` が無ければ何もしない。走査・削除の失敗は起動を止めず warn ログに残すだけ。
+pub(crate) fn sweep_orphaned_images(data_dir: &Path, notes: &[Note], trash: &[Note]) {
+    let images = images_dir(data_dir);
+    let entries = match fs::read_dir(&images) {
+        Ok(e) => e,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(e) => {
+            log::warn!("failed to read images dir {}: {}", images.display(), e);
+            return;
+        }
+    };
+    // APFS は大文字小文字を区別しない（が保持はする）ため、content 中の記法と実ファイル名の
+    // 大文字小文字が食い違っても同一ファイルを指しうる。正規化してから比較する
+    let referenced: HashSet<String> = referenced_image_paths(notes, trash)
+        .iter()
+        .map(|p| normalize_image_rel_path(p))
+        .collect();
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("failed to read images dir entry: {}", e);
+                continue;
+            }
+        };
+        let rel_path = format!("images/{}", entry.file_name().to_string_lossy());
+        if !is_valid_image_rel_path(&rel_path)
+            || referenced.contains(&normalize_image_rel_path(&rel_path))
+        {
+            continue;
+        }
+        if let Err(e) = fs::remove_file(entry.path()) {
+            if e.kind() != io::ErrorKind::NotFound {
+                log::warn!(
+                    "failed to remove orphaned image {}: {}",
+                    entry.path().display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,6 +1041,155 @@ mod tests {
         gc_images(dir.path(), &["images/../notes.json".to_string()], &[], &[]);
 
         assert!(dir.path().join("notes.json").exists());
+    }
+
+    // ── sweep_orphaned_images ──
+
+    #[test]
+    fn sweep_orphaned_images_removes_unreferenced_file() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+
+        sweep_orphaned_images(dir.path(), &[], &[]);
+
+        assert!(!images.join(filename).exists());
+    }
+
+    #[test]
+    fn sweep_orphaned_images_keeps_file_referenced_by_notes() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+        let notes = vec![make_note("a", "yellow", &format!("![]({})", path))];
+
+        sweep_orphaned_images(dir.path(), &notes, &[]);
+
+        assert!(images.join(filename).exists());
+    }
+
+    #[test]
+    fn sweep_orphaned_images_keeps_file_referenced_by_trash() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+        let trash = vec![make_note("t", "yellow", &format!("![]({})", path))];
+
+        sweep_orphaned_images(dir.path(), &[], &trash);
+
+        assert!(images.join(filename).exists());
+    }
+
+    /// uuid + 許可拡張子の形状に合わないファイルには触らない
+    /// （`.DS_Store` のような無関係ファイルが images/ に紛れ込んでいても消さない）。
+    #[test]
+    fn sweep_orphaned_images_ignores_files_with_unexpected_shape() {
+        let dir = TempDir::new().unwrap();
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        fs::write(images.join(".DS_Store"), b"data").unwrap();
+        fs::write(images.join("readme.txt"), b"data").unwrap();
+
+        sweep_orphaned_images(dir.path(), &[], &[]);
+
+        assert!(images.join(".DS_Store").exists());
+        assert!(images.join("readme.txt").exists());
+    }
+
+    #[test]
+    fn sweep_orphaned_images_missing_dir_does_not_error() {
+        let dir = TempDir::new().unwrap();
+        // images/ を作らないまま呼んでも panic しない
+        sweep_orphaned_images(dir.path(), &[], &[]);
+    }
+
+    /// 参照中のファイルと孤児が同じディレクトリに同居していても、孤児だけを消し
+    /// 参照中のファイルは残す。
+    #[test]
+    fn sweep_orphaned_images_removes_only_the_orphan_among_mixed_files() {
+        let dir = TempDir::new().unwrap();
+        let (referenced_path, orphan_path) = (uuid_image_path(1), uuid_image_path(2));
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let referenced_filename = referenced_path.strip_prefix("images/").unwrap();
+        let orphan_filename = orphan_path.strip_prefix("images/").unwrap();
+        fs::write(images.join(referenced_filename), b"data").unwrap();
+        fs::write(images.join(orphan_filename), b"data").unwrap();
+        let notes = vec![make_note(
+            "a",
+            "yellow",
+            &format!("![]({})", referenced_path),
+        )];
+
+        sweep_orphaned_images(dir.path(), &notes, &[]);
+
+        assert!(images.join(referenced_filename).exists());
+        assert!(!images.join(orphan_filename).exists());
+    }
+
+    /// APFS は大文字小文字を区別しないので、content の記法と実ファイル名で大文字小文字が
+    /// 食い違っていても同一ファイルとして残す。
+    #[test]
+    fn sweep_orphaned_images_matches_reference_case_insensitively() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+        // "images/" プレフィックスは `is_valid_image_rel_path` が大文字小文字を区別するので
+        // 保ったまま、ファイル名部分（uuid + 拡張子）だけを大文字化する
+        let uppercase_path = format!("images/{}", filename.to_ascii_uppercase());
+        let notes = vec![make_note(
+            "a",
+            "yellow",
+            &format!("![]({})", uppercase_path),
+        )];
+
+        sweep_orphaned_images(dir.path(), &notes, &[]);
+
+        assert!(images.join(filename).exists());
+    }
+
+    // ── should_sweep_images ──
+
+    #[test]
+    fn should_sweep_images_true_when_both_sources_ok() {
+        assert!(should_sweep_images(true, true, true, true));
+    }
+
+    #[test]
+    fn should_sweep_images_true_when_only_notes_ok() {
+        assert!(should_sweep_images(true, true, true, false));
+    }
+
+    #[test]
+    fn should_sweep_images_true_when_only_trash_ok() {
+        assert!(should_sweep_images(true, true, false, true));
+    }
+
+    /// 両方 Missing（実ファイルが無い）状態では、データ移行途中の可能性があり
+    /// 参照集合を信頼できないため false（消さない）。
+    #[test]
+    fn should_sweep_images_false_when_neither_source_ok() {
+        assert!(!should_sweep_images(true, true, false, false));
+    }
+
+    /// どちらかが Unreadable なら、もう一方が読めていても参照集合が欠けているため
+    /// false（消さない）。
+    #[test]
+    fn should_sweep_images_false_when_either_side_unreadable() {
+        assert!(!should_sweep_images(false, true, false, true));
+        assert!(!should_sweep_images(true, false, true, false));
     }
 
     // ── save_pasted_image ──
