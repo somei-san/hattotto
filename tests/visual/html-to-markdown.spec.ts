@@ -174,4 +174,97 @@ test.describe("htmlToMarkdown", () => {
     expect(await convert(notePage, "<blockquote><p>line1</p><p>line2</p></blockquote>"))
       .toBe("> line1\n> line2\n");
   });
+
+  // ── img: data: URI → save_pasted_image 経由で画像記法 ────
+  test("data: image → save_pasted_image で保存した相対パスの画像記法", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="cat">'))
+      .toBe("![cat](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
+  test("data: image (URL エンコード形式) → alt テキストのみ", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="data:image/png,%89PNG" alt="cat">'))
+      .toBe("cat");
+  });
+
+  test("data: image に charset パラメータが付いていても base64 部分をデコードする", async ({ notePage }) => {
+    expect(await convert(
+      notePage,
+      '<img src="data:image/png;charset=utf-8;base64,iVBORw0KGgo=" alt="cat">',
+    )).toBe("![cat](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
+  test("BASE64,（大文字）も base64 部分をデコードする", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="data:image/png;BASE64,iVBORw0KGgo=" alt="cat">'))
+      .toBe("![cat](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
+  test("DATA:（大文字接頭辞）も data: URI として扱う", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="DATA:image/png;base64,iVBORw0KGgo=" alt="cat">'))
+      .toBe("![cat](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
+  // ── img: https:// URL → 通常リンク（画像記法にしない） ───
+  test("https image → 通常リンク", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="https://example.com/cat.png" alt="cat">'))
+      .toBe("[cat](https://example.com/cat.png)");
+  });
+
+  test("http image → 通常リンク", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="http://example.com/cat.png" alt="cat">'))
+      .toBe("[cat](http://example.com/cat.png)");
+  });
+
+  test("alt が空の https image → URL 自体をリンクテキストにする", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="https://example.com/cat.png">'))
+      .toBe("[https://example.com/cat.png](https://example.com/cat.png)");
+  });
+
+  // ── img: blob: / file: など → alt テキストのみ残す ───────
+  test("blob: image → alt テキストのみ", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="blob:https://example.com/xyz" alt="cat">'))
+      .toBe("cat");
+  });
+
+  test("blob: image で alt も無ければ何も残さない", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="blob:https://example.com/xyz">'))
+      .toBe("");
+  });
+
+  test("file: image → alt テキストのみ", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="file:///tmp/cat.png" alt="cat">'))
+      .toBe("cat");
+  });
+
+  // ── img: alt の無害化（] は下流が \] を解釈しないため除去する） ──
+  test("alt に ] を含む data: image → ] を除去する", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="a[b]c">'))
+      .toBe("![a[bc](images/00000000-0000-4000-8000-000000000001.png)");
+  });
+
+  test("alt に ] を含む data: image → renderMarkdown が <img> を描画する", async ({ notePage }) => {
+    const markdown = await convert(notePage, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="a[b]c">');
+    const html = await notePage.evaluate(
+      (md: string) => (window as any).renderMarkdown(md),
+      markdown,
+    );
+    // `]` をエスケープではなく除去しているので alt="a[bc" として <img> が描画される
+    // （\] のまま残すと markdown.js の `[^\]]*` が途中で終端と誤認し <img> にならない）
+    expect(html).toContain("<img");
+    expect(html).toContain('alt="a[bc"');
+  });
+
+  test("alt に改行を含む https image → 空白に置換", async ({ notePage }) => {
+    expect(await convert(notePage, '<img src="https://example.com/cat.png" alt="line1\nline2">'))
+      .toBe("[line1 line2](https://example.com/cat.png)");
+  });
+
+  // ── img: 同一 data: URI の重複 ────────────────────────────
+  test("同じ data: URI が複数回出てきても1回だけ保存し同じパスを使い回す", async ({ notePage }) => {
+    const html = '<img src="data:image/png;base64,iVBORw0KGgo=" alt="a">'
+      + '<img src="data:image/png;base64,iVBORw0KGgo=" alt="b">';
+    expect(await convert(notePage, html)).toBe(
+      "![a](images/00000000-0000-4000-8000-000000000001.png)"
+      + "![b](images/00000000-0000-4000-8000-000000000001.png)",
+    );
+  });
 });

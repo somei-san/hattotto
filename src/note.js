@@ -438,27 +438,123 @@ function indentLine(ed, outdent) {
 }
 
 // ── Paste: rich text links → markdown, otherwise plain ──
-function htmlToMarkdown(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  let result = '';
-  for (const node of doc.body.childNodes) {
-    result += nodeToMd(node);
+const EMPTY_IMAGE_MAP = new Map();
+
+// Rust 側 save_pasted_image の上限（src-tauri/src/persistence.rs の MAX_IMAGE_BYTES）と揃える。
+// atob() でのデコードは全体をメモリ上に展開するため、送る前に base64 の文字数から概算して弾く。
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DATA_URI_TOO_LARGE = Symbol('data-uri-too-large');
+
+/**
+ * alt / リンクテキストとして使う HTML 属性値を Markdown として安全な形に無害化する。
+ * `]` を残すと `![alt](src)` / `[alt](src)` の終端と衝突し記法ごと壊れるため取り除く
+ * （エスケープではなく除去。markdown.js の `[^\]]*` も Rust 側の extract_image_paths も
+ * バックスラッシュエスケープを解釈しない）。改行は 1 行の記法を壊すため空白に置換する。
+ */
+function sanitizeAltText(text) {
+  return text.replace(/\r\n|\r|\n/g, ' ').replace(/]/g, '');
+}
+
+/** URL 側（href / src）に改行が入ると Markdown 記法が複数行に割れるため取り除く。 */
+function sanitizeUrl(url) {
+  return url.replace(/\r\n|\r|\n/g, '');
+}
+
+/** `src` 属性値が `data:` スキームかどうか（大文字小文字を無視）。 */
+function isDataUri(src) {
+  return /^data:/i.test(src);
+}
+
+/**
+ * `data:<media-type>;base64,<data>` 形式をデコードする（`;charset=...;base64,` のような
+ * 追加パラメータや `BASE64,` / `DATA:` の大文字小文字表記も許容）。
+ * 戻り値: 成功時は Uint8Array、base64 でない・デコード不能なら null（無言で alt にフォールバック）、
+ * デコード後サイズが Rust 側の上限を超える見込みなら DATA_URI_TOO_LARGE（呼び出し側でトースト対象）。
+ */
+function decodeDataUri(src) {
+  const match = /^data:([^,]*);base64,([\s\S]*)$/i.exec(src);
+  if (!match) return null;
+  const base64 = match[2];
+  if (Math.floor((base64.length * 3) / 4) > MAX_IMAGE_BYTES) return DATA_URI_TOO_LARGE;
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * `<img src="data:...">` を `save_pasted_image` へ流し、src → 相対パスの Map を返す。
+ * 同じ src が複数回出てきても保存は 1 回だけ。デコード不能（URL エンコード形式等）な src は
+ * 無言で null を積み、呼び出し側で alt テキストのみのフォールバックに回す。サイズ超過・保存失敗は
+ * 件数をまとめて数え、ループ終了後にトーストを 1 回だけ出す（画像ごとに出すとうるさいため）。
+ */
+async function resolveDataImages(srcs) {
+  const map = new Map();
+  let failures = 0;
+  for (const src of srcs) {
+    if (map.has(src)) continue;
+    const decoded = decodeDataUri(src);
+    if (decoded === null) {
+      map.set(src, null);
+      continue;
+    }
+    if (decoded === DATA_URI_TOO_LARGE) {
+      console.error('data: image exceeds size limit, skipping:', src.slice(0, 32));
+      failures++;
+      map.set(src, null);
+      continue;
+    }
+    try {
+      map.set(src, await invoke('save_pasted_image', decoded));
+    } catch (err) {
+      console.error('save_pasted_image failed:', err);
+      failures++;
+      map.set(src, null);
+    }
+  }
+  if (failures) showToast(I18N.t('toastSaveFailed'));
+  return map;
+}
+
+function renderNodesToMd(nodes, imageMap) {
+  let result = '';
+  for (const node of nodes) result += nodeToMd(node, imageMap);
   return result;
 }
 
-function nodeToMd(node) {
+/**
+ * HTML 内に `<img src="data:...">` が無ければ同期で文字列を返す。ある場合だけ
+ * `save_pasted_image` の待ち合わせが必要になるため Promise<string> を返す。
+ * 呼び出し側（toMarkdown 経由）は戻り値が Promise かどうかで同期/非同期を分岐する。
+ */
+function htmlToMarkdown(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const dataImgSrcs = Array.from(doc.querySelectorAll('img'))
+    .map(img => img.getAttribute('src') || '')
+    .filter(isDataUri);
+  if (!dataImgSrcs.length) {
+    return renderNodesToMd(doc.body.childNodes, EMPTY_IMAGE_MAP);
+  }
+  return resolveDataImages(dataImgSrcs).then(map => renderNodesToMd(doc.body.childNodes, map));
+}
+
+function nodeToMd(node, imageMap) {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent;
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const tag = node.tagName.toLowerCase();
   // Strip script/style tags entirely — their text content is never useful
   if (tag === 'script' || tag === 'style') return '';
-  const inner = Array.from(node.childNodes).map(nodeToMd).join('');
+  const inner = Array.from(node.childNodes).map(child => nodeToMd(child, imageMap)).join('');
   switch (tag) {
     case 'a': {
       const href = node.getAttribute('href') || '';
       if (!href || /^javascript:/i.test(href)) return inner;
-      return `[${inner.trim() || href}](${href})`;
+      const url = sanitizeUrl(href);
+      return `[${inner.trim() || url}](${url})`;
     }
     case 'strong': case 'b':  return inner ? `**${inner}**` : '';
     case 'em': case 'i':      return inner ? `*${inner}*` : '';
@@ -479,15 +575,40 @@ function nodeToMd(node) {
     }
     case 'br':                 return '\n';
     case 'p': case 'div':     return inner + '\n';
+    // CSP の img-src が https を許可していないため、リモート URL は画像記法にせずリンクにする。
+    // data: は resolveDataImages が保存済みの相対パスに解決済み（未解決なら alt のみ残す）。
+    // blob: / file: 等はそもそも取り込まず alt のみ残す。
+    case 'img': {
+      const alt = sanitizeAltText(node.getAttribute('alt') || '');
+      const src = node.getAttribute('src') || '';
+      if (isDataUri(src)) {
+        const relPath = imageMap.get(src);
+        return relPath ? `![${alt}](${relPath})` : alt;
+      }
+      if (/^https?:\/\//i.test(src)) {
+        const url = sanitizeUrl(src);
+        return `[${alt || url}](${url})`;
+      }
+      return alt;
+    }
     default:                   return inner;
   }
 }
 
-/** リッチテキストなら markdown に変換し、そうでなければプレーンテキストを返す。 */
+/**
+ * リッチテキストなら markdown に変換し、そうでなければプレーンテキストを返す。
+ * 変換結果が空／空白のみ（blob: / file: 画像だけで alt も無い等）になった場合は、
+ * 挿入が完全に消えてしまわないよう text にフォールバックする（同期・非同期どちらの経路でも）。
+ */
 function toMarkdown(text, html) {
-  return html && /<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li)\b/i.test(html)
-    ? htmlToMarkdown(html)
-    : text;
+  if (!html || !/<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li|img)\b/i.test(html)) {
+    return text;
+  }
+  const converted = htmlToMarkdown(html);
+  if (converted instanceof Promise) {
+    return converted.then(md => (md.trim() ? md : text));
+  }
+  return converted.trim() ? converted : text;
 }
 
 /**
@@ -547,6 +668,31 @@ async function pasteImage(ed, file, fallbackLine) {
   await saveNow();
 }
 
+/**
+ * toMarkdown() の戻り値（同期 string か非同期 Promise<string>）を生エディタへ挿入する。
+ * 非同期経路（HTML に data: 画像を含む場合）は await の間に生表示が閉じる／別行へ移ることが
+ * あり得るため、pasteImage と同じガードで ed の生存を確認し、ずれていれば fallbackLine
+ * （無ければ元の行）へ直接書き戻す。画像を含まない同期経路は await を挟まない。
+ */
+async function insertConverted(ed, converted, fallbackLine) {
+  if (!(converted instanceof Promise)) {
+    insertIntoEditor(ed, converted);
+    return;
+  }
+  const lineAtPaste = activeStart;
+  const markdown = await converted;
+  if (ed?.isConnected && activeStart === lineAtPaste) {
+    insertIntoEditor(ed, markdown);
+    return;
+  }
+  const lines = getLines();
+  const target = Math.min(Math.max(fallbackLine ?? lineAtPaste ?? lines.length - 1, 0), lines.length - 1);
+  lines[target] += markdown;
+  rawContent = lines.join('\n');
+  renderAll();
+  await saveNow();
+}
+
 async function onEditorPaste(e) {
   e.preventDefault();
   const ed = e.currentTarget;
@@ -571,7 +717,7 @@ async function onEditorPaste(e) {
     }
   }
 
-  insertIntoEditor(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
+  await insertConverted(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
 }
 
 /** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。 */
@@ -599,7 +745,7 @@ async function onEditorDrop(e) {
   const text = e.dataTransfer.getData('text/plain');
   if (!text) return;
   // drop 位置ではなく現在のキャレット位置へ入れる
-  insertIntoEditor(ed, toMarkdown(text, e.dataTransfer.getData('text/html')));
+  await insertConverted(ed, toMarkdown(text, e.dataTransfer.getData('text/html')));
 }
 
 /** ドロップ先の要素から挿入対象の行番号を求める。フェンスは行単位のマッピングを持たないので末尾に置く。 */
