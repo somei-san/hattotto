@@ -111,6 +111,8 @@ const I18N_TABLE = {
   toastCreateFailed: { ja: '付箋の作成に失敗しました', en: 'Failed to create note' },
   toastDeleteFailed: { ja: '付箋の削除に失敗しました', en: 'Failed to delete note' },
   toastImageDropUnsupported: { ja: '画像として扱えないファイルです', en: 'This file cannot be added as an image' },
+  toastOpenImageFailed: { ja: '画像を開けませんでした', en: 'Failed to open the image' },
+  imageOpenHint: { ja: 'ダブルクリックで開く', en: 'Double-click to open' },
 };
 
 // 訳の付け忘れ検出（キーを増やしたときに片方の言語が抜けていたら気づけるように）

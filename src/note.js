@@ -288,7 +288,7 @@ function rawColFromPoint(el, line, e) {
 // mouseup で拾う（mousedown を潰すとドラッグでの範囲選択ができなくなるため）
 mdView.addEventListener('mouseup', (e) => {
   if (e.target.closest('.raw-editor')) return;
-  if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]')) return;
+  if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]') || e.target.closest('img')) return;
   // 範囲選択したときは生表示に入らない（コピーの邪魔をしない）
   if (!window.getSelection().isCollapsed) return;
 
@@ -309,6 +309,18 @@ mdView.addEventListener('click', (e) => {
   if (!link) return;
   e.preventDefault();
   window.__TAURI__.shell.open(link.dataset.url);
+});
+
+// 画像ダブルクリック → OS の既定アプリで開く
+mdView.addEventListener('dblclick', (e) => {
+  const img = e.target.closest('img[data-rel-src]');
+  if (!img) return;
+  // リンクの中の画像（[![alt](img)](url)）はリンク側のクリック処理に一本化する。
+  // ここで開くと open_image とブラウザでのリンク遷移が同時に走ってしまう
+  if (img.closest('a[data-url]')) return;
+  const relSrc = img.dataset.relSrc;
+  if (!isValidImageRelPath(relSrc)) return;
+  fireInvoke('open_image', { imagePath: relSrc }, I18N.t('toastOpenImageFailed'));
 });
 
 // Checkbox toggle
@@ -1059,10 +1071,14 @@ document.addEventListener('contextmenu', async (e) => {
   e.preventDefault();
   // メニューから削除が選ばれてもよいように、開く前に保存を済ませておく
   await flushContent();
+  const img = e.target.closest('img[data-rel-src]');
+  const relSrc = img?.dataset.relSrc;
+  const imagePath = relSrc && isValidImageRelPath(relSrc) ? relSrc : undefined;
   invoke('show_context_menu', {
     id: noteId,
     isPinned: pinBtn.classList.contains('active'),
     currentColor: currentColor,
+    imagePath,
   }).catch(e => console.error('context menu failed:', e));
 });
 

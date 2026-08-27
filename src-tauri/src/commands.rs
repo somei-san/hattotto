@@ -6,6 +6,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::context_menu::build_context_menu;
 use crate::i18n::{self, Msg};
+use crate::image_actions;
 use crate::model::{
     clamp_opacity, clamp_zoom, is_valid_color_key, is_valid_default_color, resolve_color, AppState,
     LanguageSetting, Note, RecoverMutex, Settings, TRASH_MAX,
@@ -475,6 +476,7 @@ pub(crate) fn show_context_menu(
     id: String,
     is_pinned: bool,
     current_color: String,
+    image_path: Option<String>,
     app: AppHandle,
     state: State<AppState>,
 ) {
@@ -486,10 +488,31 @@ pub(crate) fn show_context_menu(
     // Store note ID so on_menu_event knows which note to target
     *state.context_menu_note_id.recover() = id;
 
+    // フロント側の data 属性は DOM 改変で偽装され得るため、ここでも形状を検証してから保留する
+    let validated_image_path = image_path.filter(|p| persistence::is_valid_image_rel_path(p));
+    *state.context_menu_image_path.recover() = validated_image_path.clone();
+
     let lang = i18n::resolve(state.settings.recover().language);
-    if let Err(e) = build_context_menu(&app, &webview_win, is_pinned, &current_color, lang) {
+    if let Err(e) = build_context_menu(
+        &app,
+        &webview_win,
+        is_pinned,
+        &current_color,
+        validated_image_path.as_deref(),
+        lang,
+    ) {
         log::error!("context menu error: {}", e);
     }
+}
+
+/// 画像を OS の既定アプリで開く。
+#[tauri::command]
+pub(crate) fn open_image(
+    image_path: String,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<(), String> {
+    image_actions::open_image(&app, &state.data_dir, &image_path)
 }
 
 #[cfg(test)]
@@ -522,6 +545,7 @@ mod tests {
             trash: Mutex::new(trash),
             last_bring_to_front: Mutex::new(Instant::now()),
             context_menu_note_id: Mutex::new(String::new()),
+            context_menu_image_path: Mutex::new(None),
             data_dir: dir.path().to_path_buf(),
             notes_loaded: true,
             settings_loaded: true,

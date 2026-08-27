@@ -217,6 +217,9 @@ pub struct AppState {
     pub(crate) last_bring_to_front: Mutex<Instant>,
     /// Note ID that last opened the context menu (for routing menu events)
     pub(crate) context_menu_note_id: Mutex<String>,
+    /// 直近にメニューを開いた画像の相対パス（`images/...`）。画像上以外で開いた場合は `None`。
+    /// `context_menu_note_id` と同じパターンで、メニューイベント側から参照する
+    pub(crate) context_menu_image_path: Mutex<Option<String>>,
     /// notes.json / settings.json / trash.json を置くディレクトリ。テストでは `TempDir` を指す
     pub(crate) data_dir: PathBuf,
     /// 対応するファイルを起動時に読み込めたか。`false` は「ファイルはあるが読めなかった」を

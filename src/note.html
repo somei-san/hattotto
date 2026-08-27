@@ -198,6 +198,13 @@
   .md-placeholder { color: var(--text-muted); }
   .md-line, .md-empty { min-height: 21px; word-break: break-word; }
   #markdown-view img { max-width: 100%; }
+  /* クリックでは編集に入らない（ダブルクリックで開く）ため、操作できることをホバーで示す */
+  #markdown-view img:hover {
+    outline: 2px solid var(--bar);
+    outline-offset: -2px;
+    cursor: pointer;
+    filter: brightness(0.94);
+  }
   .md-h1 { font-size: 17px; font-weight: 700; line-height: 1.4; margin: 4px 0 2px; }
   .md-h2 { font-size: 15px; font-weight: 600; line-height: 1.4; margin: 3px 0 1px; }
   .md-h3 { font-size: 14px; font-weight: 600; line-height: 1.4; margin: 2px 0 1px; }
