@@ -16,6 +16,22 @@ function escapeAttr(s) {
   return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Obsidian 方式の表示幅指定（`![alt|300](...)`）の下限・上限。範囲外・0 は指定なし扱いにする。
+const IMAGE_WIDTH_MIN = 40;
+const IMAGE_WIDTH_MAX = 2000;
+
+/**
+ * alt 末尾の `|数字` を表示幅として分離する。末尾セグメントが数字のみのときだけ幅指定とみなし、
+ * `![a|b]` のような非数値サフィックスは alt をそのまま返す（幅なし）。
+ */
+function parseImageAlt(altRaw) {
+  const m = altRaw.match(/^(.*)\|(\d+)$/);
+  if (!m) return { alt: altRaw, width: null };
+  const n = parseInt(m[2], 10);
+  const width = (n >= IMAGE_WIDTH_MIN && n <= IMAGE_WIDTH_MAX) ? n : null;
+  return { alt: m[1], width };
+}
+
 function inlineMarkdown(escaped) {
   // `code` → placeholder (protect from bold/italic/strikethrough)
   const codeBlocks = [];
@@ -32,13 +48,15 @@ function inlineMarkdown(escaped) {
   // ![alt](src) → <img> (before the link regex; `!` prefix distinguishes it from a link)
   // data-rel-src は resolve 前の相対パス。ダブルクリック・右クリックのハンドラは
   // asset URL 化された src ではなくこちらから元の相対パスを取り出す
-  escaped = escaped.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
+  escaped = escaped.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, altRaw, src) => {
     const resolved = (typeof window !== 'undefined' && typeof window.resolveImageSrc === 'function')
       ? window.resolveImageSrc(src)
       : src;
     // title はダブルクリックで開けることを伝えるアフォーダンス（クリックしても反応が無いため）
     const hint = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('imageOpenHint') : 'ダブルクリックで開く';
-    return `<img alt="${escapeAttr(alt)}" src="${escapeAttr(resolved)}" data-rel-src="${escapeAttr(src)}" title="${escapeAttr(hint)}">`;
+    const { alt, width } = parseImageAlt(altRaw);
+    const widthAttr = width != null ? ` width="${width}"` : '';
+    return `<img alt="${escapeAttr(alt)}" src="${escapeAttr(resolved)}" data-rel-src="${escapeAttr(src)}" title="${escapeAttr(hint)}"${widthAttr}>`;
   });
   // [text](url) → <a>
   escaped = escaped.replace(
