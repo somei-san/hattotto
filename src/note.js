@@ -211,6 +211,56 @@ function caretLineCol(ed) {
   return { line: activeStart + before.length - 1, col: before[before.length - 1].length };
 }
 
+/**
+ * block（差し替え前の描画済みブロック）が画像を含む場合、その描画結果を編集不可の
+ * プレビューとして複製する。data-line 系属性は自身だけでなく子孫（チェックボックスの
+ * input 等）にも付いており、残すと findBlock の誤マッチだけでなくチェックボックスが
+ * Tab 到達可能なまま change を発火させ得るため、複製全体から剥がす。
+ *
+ * inert は複製した中身（clone）にだけ立てる。ラッパー（preview）ごと inert にすると
+ * ポインタイベントのヒットテスト自体から外れ、CSS の pointer-events: auto（mdView の
+ * mouseup ハンドラでプレビュー自身へのクリックを識別するための仕掛け）が効かなくなり、
+ * クリックが背後の mdView へ抜けて「余白クリック→最終行へ」に誤爆する。
+ *
+ * block.el はまだ DOM に接続されたまま（置き換え前）なので、その img の実測サイズを
+ * clone 側の img へ固定で書き込む（詳細は下のコメント参照）。実測前（画像読み込み中）の
+ * block.el ではサイズが定まらないため何もしない。
+ */
+function buildImagePreview(block) {
+  if (!block || !block.el.querySelector('img[data-rel-src]')) return null;
+  const preview = document.createElement('div');
+  preview.className = 'raw-editor-preview';
+  const clone = block.el.cloneNode(true);
+  clone.removeAttribute('data-line');
+  clone.removeAttribute('data-line-end');
+  clone.querySelectorAll('[data-line], [data-line-end]').forEach((el) => {
+    el.removeAttribute('data-line');
+    el.removeAttribute('data-line-end');
+  });
+  // width・height の両方を明示指定して clone 側の img のボックスを固定する。片方
+  // （height）だけ固定すると、clone 自身の画像デコード・レイアウトのタイミングに
+  // width が左右され、結果的に高さもアスペクト比ごと揺れうる。幅も含めて数値で
+  // 固定してしまえば、clone の img が実際にいつ・どう読み込まれるかに一切依存しない。
+  //
+  // getBoundingClientRect() はズーム後（画面表示）のサイズを返す。CSS の width/height は
+  // ズーム前（ローカル座標）の値として解釈され、ズームは祖先の .note がまとめて
+  // 掛け直すため、画面表示のサイズをそのまま書き込むとズーム分が二重に掛かってしまう
+  // （例: 50% ズームなら本来の半分のサイズで描画される）。currentZoom で割り戻して
+  // ローカル座標に変換してから書き込む
+  const zoomFactor = currentZoom / 100;
+  const sourceImages = block.el.querySelectorAll('img[data-rel-src]');
+  const cloneImages = clone.querySelectorAll('img[data-rel-src]');
+  sourceImages.forEach((img, idx) => {
+    const rect = img.getBoundingClientRect();
+    if (rect.height <= 0 || rect.width <= 0) return;
+    cloneImages[idx].style.width = `${rect.width / zoomFactor}px`;
+    cloneImages[idx].style.height = `${rect.height / zoomFactor}px`;
+  });
+  clone.inert = true;
+  preview.appendChild(clone);
+  return preview;
+}
+
 /** 行 lineIdx を生 Markdown に差し替え、col 列にキャレットを置く（col が null なら行末）。 */
 function enterLine(lineIdx, col) {
   commitActive();
@@ -223,9 +273,17 @@ function enterLine(lineIdx, col) {
   activeStart = block ? block.start : i;
   activeEnd = block ? block.end : i;
 
+  const preview = buildImagePreview(block);
+
   const ed = document.createElement('div');
   ed.id = 'editor';
-  ed.className = 'raw-editor' + (activeEnd > activeStart ? ' atomic' : '');
+  // 画像を含む行も atomic（折り返さず横スクロール）にする。images/<uuid> の記法が
+  // 折り返して 2〜3 行になると、プレビューと合わせた高さで全体が下にずれるため、
+  // 高さの増加を 1 行分に抑える。has-preview は「同じ記法・画像だ」と分かるよう
+  // ed とプレビューを 1 枚のカードに見せるための CSS フック（下側の角丸を落とす）
+  ed.className = 'raw-editor'
+    + (activeEnd > activeStart || preview ? ' atomic' : '')
+    + (preview ? ' has-preview' : '');
   ed.contentEditable = 'true';
   ed.setAttribute('aria-label', I18N.t('noteContentAriaLabel'));
   ed.textContent = lines.slice(activeStart, activeEnd + 1).join('\n');
@@ -233,6 +291,7 @@ function enterLine(lineIdx, col) {
   // 空の付箋はプレースホルダしか無いので、差し替え先が無い
   if (block) block.el.replaceWith(ed);
   else { mdView.innerHTML = ''; mdView.appendChild(ed); }
+  if (preview) ed.after(preview);
 
   bindEditor(ed);
   ed.focus();
@@ -288,10 +347,20 @@ function rawColFromPoint(el, line, e) {
   return Math.min(markerLength(line) + visible, line.length);
 }
 
+// プレビューへの mousedown はフォーカス移動ごと止める。既定に任せると生エディタが blur →
+// commitActive の再描画でプレビューが消えてレイアウトが詰まり、mouseup 時に再ヒットテストする
+// エンジン（WebKit）では同じ画面座標に来た別の行へ編集が飛んでしまう
+mdView.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.raw-editor-preview')) e.preventDefault();
+});
+
 // mouseup で拾う（mousedown を潰すとドラッグでの範囲選択ができなくなるため）
 mdView.addEventListener('mouseup', (e) => {
   // 画像リサイズのドラッグ確定はここでは扱わない（別のリスナーが担当。生表示に入らせない）
   if (dragState) return;
+  // プレビューは pointer-events: auto でヒットターゲットになるが、生表示への遷移対象ではない。
+  // 無視しないと「余白クリック」扱いになり、キャレットが最終行へ飛んでしまう
+  if (e.target.closest('.raw-editor-preview')) return;
   if (e.target.closest('.raw-editor')) return;
   if (e.target.closest('a[data-url]') || e.target.closest('input[type="checkbox"]') || e.target.closest('img')) return;
   // 範囲選択したときは生表示に入らない（コピーの邪魔をしない）
@@ -848,7 +917,9 @@ async function pasteImage(ed, file, fallbackLine) {
   }
   const markdown = `![](${relPath})`;
   if (ed?.isConnected && activeStart === lineAtPaste) {
-    insertIntoEditor(ed, markdown);
+    // 画像記法の直後で行を割り、キャレットを次の行へ送る。画像行から
+    // キャレットが外れることで、貼った直後から生の記法ではなく画像として描画される
+    insertIntoEditor(ed, markdown + '\n');
     return;
   }
   const lines = getLines();
@@ -911,10 +982,16 @@ async function onEditorPaste(e) {
   await insertConverted(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
 }
 
-/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。 */
+/**
+ * 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。
+ * pasteImage は画像記法の後で改行して次の行へ移るため、enterLine が ed を新しい DOM
+ * ノードに差し替える。次の画像もキャレット位置（＝新しい ed）へ続けて挿入できるよう、
+ * ループのたびに ed を取り直す。
+ */
 async function pasteImageFiles(ed, files, fallbackLine) {
   for (const file of files) {
     await pasteImage(ed, file, fallbackLine);
+    ed = activeEditor();
   }
 }
 

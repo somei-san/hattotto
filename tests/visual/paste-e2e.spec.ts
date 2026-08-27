@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, injectNoteMock } from "./fixtures";
+import { test, expect, enterEdit, getContent, injectNoteMock, placeCaret } from "./fixtures";
 
 test.describe("ペースト処理", () => {
   test("空の選択状態でURLペースト → リンク変換されずプレーンURL挿入", async ({ openNote }) => {
@@ -186,8 +186,89 @@ test.describe("ペースト処理", () => {
       { timeout: 3000 },
     ).toBe(1);
 
+    // 画像記法の直後で行が割れ、キャレットは次の（空の）行にある
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)");
+    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\n");
+
+    const activeLine = await page.evaluate(() => document.getElementById("editor")!.textContent);
+    expect(activeLine).toBe("");
+
+    await ctx.close();
+  });
+
+  test("行中へのクリップボード画像ペースト → 画像記法の直後で行が割れる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "hello world" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    // "hello" の直後（col=5）にキャレットを置く
+    await placeCaret(page, 0, 5);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "pasted.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toBe("hello![](images/00000000-0000-4000-8000-000000000001.png)\n world");
+
+    const activeLine = await page.evaluate(() => document.getElementById("editor")!.textContent);
+    expect(activeLine).toBe(" world");
+
+    await ctx.close();
+  });
+
+  test("行頭（col=0）へのクリップボード画像ペースト → 元の行全体が次の行へ押し出される", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "hello" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 0, 0);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "pasted.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\nhello");
+
+    const activeLine = await page.evaluate(() => document.getElementById("editor")!.textContent);
+    expect(activeLine).toBe("hello");
 
     await ctx.close();
   });
