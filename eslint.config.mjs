@@ -18,6 +18,10 @@ const noteLines = {
   CHECKBOX_RE: "readonly",
   isImageOnlyLine: "readonly",
 };
+const history = {
+  createHistory: "readonly",
+  firstDiffLine: "readonly",
+};
 
 export default [
   { ignores: ["playwright-report/", "test-results/", "src-tauri/target/"] },
@@ -39,8 +43,14 @@ export default [
     languageOptions: { globals: { ...utils, ...i18n, ...markdown, module: "readonly" } },
   },
   {
+    files: ["src/history.js"],
+    languageOptions: {
+      globals: { ...utils, ...i18n, ...markdown, ...noteLines, module: "readonly" },
+    },
+  },
+  {
     files: ["src/note.js"],
-    languageOptions: { globals: { ...utils, ...i18n, ...markdown, ...noteLines } },
+    languageOptions: { globals: { ...utils, ...i18n, ...markdown, ...noteLines, ...history } },
   },
   {
     files: ["src/settings.js", "src/trash.js"],

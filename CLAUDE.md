@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `capabilities/default.json` — Tauri v2 のパーミッション定義
 
 ### フロントエンド (`src/`)
-HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js` → `note-lines.js`〕→ ページ固有の `.js` の順に読む（〔〕内は `note.html` だけ）。同一ページ内でグローバルスコープを共有する。
+HTML はマークアップと `<style>` だけを持ち、スクリプトは同名の `.js` にある。すべて classic script で、`utils.js` → `i18n.js` →〔`markdown.js` → `note-lines.js` → `history.js`〕→ ページ固有の `.js` の順に読む（〔〕内は `note.html` だけ）。同一ページ内でグローバルスコープを共有する。
 
 この読み込み順は `eslint.config.mjs` にも書いてある。各 `.js` の `globals` が「そのファイルより先に読まれるファイルの識別子」だけを持つので、`settings.js` から `renderMarkdown` を呼ぶような誤りは `no-undef` で落ちる。`<script>` の並びを変えたら設定側も直すこと。
 
@@ -64,6 +64,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 - `settings.html` / `settings.js` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
 - `trash.html` / `trash.js` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
 - `note-lines.js` — 生 Markdown の行を扱う純粋関数（行頭マーカー長・リスト継続のプレフィックス・ブロック内オフセット）。DOM に触らないので `tests/unit/` から `require` できる
+- `history.js` — 付箋の undo/redo 履歴（`createHistory`）と差分行検出（`firstDiffLine`）。DOM に触らないので `tests/unit/` から `require` できる。⌘Z/⌘⇧Z はネイティブメニュー（`src-tauri/src/menu.rs`）が拾い、`edit-history` イベント経由で `note.js` の `performUndo`/`performRedo` を呼ぶ
 - `markdown.js` — Markdown レンダリング（`window.renderMarkdown`）。`note.js` の表示とテストで共有。`utils.js` の `escapeHtml()` に依存。各要素に `data-line`（フェンスは `data-line-end` も）を付け、ソース行と DOM 要素を対応づける
 - `utils.js` — 各 HTML 共通のユーティリティ（`escapeHtml` / toast など）
 - `i18n.js` — フロントエンド側 UI 文言（`window.I18N`）。`data-i18n` / `data-i18n-html` / `data-i18n-title` / `data-i18n-aria-label` / `data-i18n-doc-title` 属性を `applyDom()` が差し替える
