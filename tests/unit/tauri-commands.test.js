@@ -27,14 +27,25 @@ function mockCommands() {
     .filter((c) => !c.startsWith("plugin:"));
 }
 
-/** src/*.js が invoke / fireInvoke に渡すコマンド名リテラル。plugin 呼び出しは対象外。 */
+/**
+ * src/*.js が invoke / fireInvoke / removeSelectedImage に渡すコマンド名リテラル。
+ * plugin 呼び出しは対象外。removeSelectedImage(cmd, ...) は画像の削除/カットで
+ * 'delete_image' / 'cut_image' を渡す呼び出し元（note.js）で、invoke を直接は呼ばず
+ * removeSelectedImage 内部で invoke するため、invoke/fireInvoke だけを見る抽出だと漏れる。
+ */
 function invokedCommands() {
   const names = new Set();
+  const patterns = [
+    /(?:invoke|fireInvoke)\(\s*['"]([^'"]+)['"]/g,
+    /removeSelectedImage\(\s*['"]([^'"]+)['"]/g,
+  ];
   for (const f of fs.readdirSync(path.join(root, "src"))) {
     if (!f.endsWith(".js")) continue;
     const src = read(path.join("src", f));
-    for (const m of src.matchAll(/(?:invoke|fireInvoke)\(\s*['"]([^'"]+)['"]/g)) {
-      if (!m[1].startsWith("plugin:")) names.add(m[1]);
+    for (const re of patterns) {
+      for (const m of src.matchAll(re)) {
+        if (!m[1].startsWith("plugin:")) names.add(m[1]);
+      }
     }
   }
   return [...names];
@@ -46,6 +57,13 @@ describe("Tauri コマンド名の照合", () => {
   test("抽出の空振り検知: 登録一覧が取れている", () => {
     assert.ok(handlers.includes("get_note"));
     assert.ok(handlers.length >= 10, `抽出できたのは ${handlers.length} 件だけ`);
+  });
+
+  test("抽出の空振り検知: removeSelectedImage 経由の delete_image が抽出できている", () => {
+    assert.ok(
+      invokedCommands().includes("delete_image"),
+      "removeSelectedImage('delete_image', ...) 形の呼び出しが抽出されていない",
+    );
   });
 
   test("モックの分岐は実在するコマンドだけを持つ", () => {

@@ -9,10 +9,13 @@ const LOADED_IMG_SRC =
   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNDAiIGhlaWdodD0iNjAiPjxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iNjAiIGZpbGw9InJlZCIvPjwvc3ZnPg==";
 
 test.describe("画像行の生表示中プレビュー", () => {
+  // 画像のみの行（前後空白のみ）は生表示に入れない「オブジェクト」として扱う（issue #63 後続）。
+  // このプレビュー自体は「テキストと画像が混在する行」向けの挙動なので、以下のフィクスチャは
+  // すべてテキストと画像を混在させ、対象行が生表示に入れることを前提にしている。
   test("画像行を生表示にすると #editor の直後にプレビューが出る（幅指定も反映）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `![|150](${IMAGE_PATH})` });
+    await injectNoteMock(page, { content: `text ![|150](${IMAGE_PATH})` });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
@@ -48,7 +51,7 @@ test.describe("画像行の生表示中プレビュー", () => {
   test("別の行へ移るとプレビューが消える", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `![](${IMAGE_PATH})\ntext` });
+    await injectNoteMock(page, { content: `text0 ![](${IMAGE_PATH})\ntext1` });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
@@ -64,7 +67,7 @@ test.describe("画像行の生表示中プレビュー", () => {
   test("生表示を抜ける（commit）とプレビューが消える", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` });
+    await injectNoteMock(page, { content: `text ![](${IMAGE_PATH})` });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
@@ -83,7 +86,7 @@ test.describe("画像行の生表示中プレビュー", () => {
   test("プレビューは pointer-events: none で操作対象にならない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await injectNoteMock(page, { content: `text ![](${IMAGE_PATH})` }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
@@ -118,7 +121,7 @@ test.describe("画像行の生表示中プレビュー", () => {
   test("プレビュー中央のクリックでは余白クリック扱いにならず最終行へ飛ばない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `![](${IMAGE_PATH})\nline1\nline2` });
+    await injectNoteMock(page, { content: `text ![](${IMAGE_PATH})\nline1\nline2` });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
@@ -135,7 +138,7 @@ test.describe("画像行の生表示中プレビュー", () => {
     await expect(page.locator("#editor")).toContainText("![](images/");
 
     const content = await getContent(page);
-    expect(content).toBe(`![](${IMAGE_PATH})\nline1\nline2`);
+    expect(content).toBe(`text ![](${IMAGE_PATH})\nline1\nline2`);
 
     await ctx.close();
   });

@@ -44,6 +44,7 @@ pub(crate) enum Msg {
     DeleteConfirmMessage,
     DeleteConfirmOk,
     DeleteConfirmCancel,
+    DeleteImageConfirmMessage,
 
     /// 読み込めなかったファイル名を差し込む `{files}` を含む
     DataLoadFailed,
@@ -92,6 +93,7 @@ pub(crate) fn text(lang: Lang, msg: Msg) -> &'static str {
         Msg::DeleteConfirmMessage => ("この付箋を削除しますか？", "Delete this note?"),
         Msg::DeleteConfirmOk => ("削除", "Delete"),
         Msg::DeleteConfirmCancel => ("キャンセル", "Cancel"),
+        Msg::DeleteImageConfirmMessage => ("この画像を削除しますか？", "Delete this image?"),
 
         Msg::DataLoadFailed => (
             "{files} を読み込めませんでした。\n\n中身が壊れているか、ファイルを開けない状態です。ファイルは削除していません。\n\n該当のファイルを削除するか、JSON として読める状態に直してから、貼っとっとを起動し直してください。",

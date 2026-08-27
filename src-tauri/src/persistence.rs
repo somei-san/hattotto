@@ -318,6 +318,136 @@ pub(crate) fn extract_image_paths(content: &str) -> Vec<String> {
     paths
 }
 
+/// `line`（前後の空白を除く）が、`rel_path` を指す画像記法 1 個だけで構成されているか。
+/// フロントエンドの `isImageOnlyLine`（`src/note-lines.js`）と対になる判定。
+fn is_image_only_line(line: &str, rel_path: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix("![") else {
+        return false;
+    };
+    let Some(alt_end) = rest.find(']') else {
+        return false;
+    };
+    let after_alt = &rest[alt_end + 1..];
+    let Some(src_part) = after_alt.strip_prefix('(') else {
+        return false;
+    };
+    let Some(src_end) = src_part.find(')') else {
+        return false;
+    };
+    let (src, tail) = (&src_part[..src_end], &src_part[src_end + 1..]);
+    tail.is_empty() && src == rel_path
+}
+
+/// `line` 内でバッククォート 1 組（`` `...` ``）に囲まれた区間（開始・終了のバッククォート自身を
+/// 含む、バイトオフセットの半開区間）を列挙する。`src/markdown.js` の `inlineMarkdown` が
+/// code を先にプレースホルダへ保護してから画像記法を解釈するのと同じ解釈で、この区間内の
+/// `![alt](src)` は実際には `<img>` として描画されない（コードスパンの地の文字列のまま）。
+/// occurrence の数え方（`strip_image_ref_occurrence` / フロントの `rewriteImageWidth`）を
+/// この「実際に描画されるか」に揃えるための下ごしらえ。
+fn code_span_ranges(line: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            if let Some(rel_end) = line[i + 1..].find('`') {
+                // `[^`]+` 相当（中身が空のペアは対象外）。バッククォート自身を含めて 1 区間とする
+                if rel_end > 0 {
+                    let end = i + 1 + rel_end + 1;
+                    ranges.push((i, end));
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    ranges
+}
+
+fn is_in_code_span(ranges: &[(usize, usize)], pos: usize) -> bool {
+    ranges.iter().any(|&(start, end)| pos >= start && pos < end)
+}
+
+/// `line` 内で `rel_path` を参照する `![alt](rel_path)` のうち、`occurrence` 番目（0 始まり、
+/// 行内での出現順。コードスパン内の記法は数えない）だけを取り除いた文字列を返す。同じパスの
+/// 他の出現・他の画像には触れない。`occurrence` 番目が実在しなければ `None`（unchanged）。
+/// `extract_image_paths` と同じ手書きスキャンで、対象区間だけを飛ばして出力を組み立てる。
+fn strip_image_ref_occurrence(line: &str, rel_path: &str, occurrence: usize) -> Option<String> {
+    let code_spans = code_span_ranges(line);
+    let mut out = String::with_capacity(line.len());
+    let mut seen = 0usize;
+    let mut removed = false;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < line.len() {
+        // `!` と `[` は ASCII なので、一致した位置は常に UTF-8 の文字境界にある
+        if !is_in_code_span(&code_spans, i)
+            && i + 1 < bytes.len()
+            && bytes[i] == b'!'
+            && bytes[i + 1] == b'['
+        {
+            let after_alt_start = i + 2;
+            if let Some(alt_end) = line[after_alt_start..].find(']') {
+                let paren_pos = after_alt_start + alt_end + 1;
+                if line.as_bytes().get(paren_pos) == Some(&b'(') {
+                    let src_start = paren_pos + 1;
+                    if let Some(src_len) = line[src_start..].find(')') {
+                        let src = &line[src_start..src_start + src_len];
+                        if src == rel_path {
+                            if seen == occurrence {
+                                removed = true;
+                                seen += 1;
+                                i = src_start + src_len + 1;
+                                continue;
+                            }
+                            seen += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let ch = line[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    removed.then_some(out)
+}
+
+/// content の `line_idx` 行目（0 始まり）にある、`rel_path` を参照する `occurrence` 番目
+/// （0 始まり、行内での出現順）の画像記法だけを取り除く。行全体が画像のみ（前後空白のみ）
+/// なら行ごと取り除く（画像のみの行は記法が 1 個しかないので `occurrence` は必ず 0）。
+///
+/// クリックされた 1 箇所だけを対象にする（フロント側の `imageOccurrenceInLine` /
+/// `rewriteImageWidth` と同じ考え方）。同じ画像を指す他の行・他の occurrence には触れない
+/// ため、コードフェンス内に同じ記法がテキストとして出現していても巻き込まれない。1 箇所だけ
+/// 残しても、その参照が残っている限り `gc_images` は正しくファイルを保持する（孤児化しない）。
+///
+/// `line_idx` が範囲外、または `occurrence` 番目が実在しない（呼び出し元の状態が content の
+/// 現在値とずれている等）場合は `None`。
+pub(crate) fn remove_image_occurrence_from_content(
+    content: &str,
+    rel_path: &str,
+    line_idx: usize,
+    occurrence: usize,
+) -> Option<String> {
+    let lines: Vec<&str> = content.split('\n').collect();
+    let line = *lines.get(line_idx)?;
+    if is_image_only_line(line, rel_path) {
+        if occurrence != 0 {
+            return None;
+        }
+        let mut out = lines;
+        out.remove(line_idx);
+        return Some(out.join("\n"));
+    }
+    let stripped = strip_image_ref_occurrence(line, rel_path, occurrence)?;
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    out[line_idx] = stripped;
+    Some(out.join("\n"))
+}
+
 /// notes / trash の全 content が参照している画像相対パスの集合。
 fn referenced_image_paths(notes: &[Note], trash: &[Note]) -> HashSet<String> {
     notes
@@ -570,6 +700,203 @@ mod tests {
     fn extract_image_paths_rejects_backslash_traversal_payload() {
         let content = "![](images/..\\notes.json)";
         assert!(extract_image_paths(content).is_empty());
+    }
+
+    // ── remove_image_occurrence_from_content ──
+
+    #[test]
+    fn remove_image_occurrence_drops_image_only_line_entirely() {
+        let path = uuid_image_path(1);
+        let content = format!("見出し\n![]({})\n本文", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 1, 0),
+            Some("見出し\n本文".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_drops_image_only_line_with_width_and_alt() {
+        let path = uuid_image_path(1);
+        let content = format!("前\n  ![説明|300]({})  \n後", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 1, 0),
+            Some("前\n後".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_strips_syntax_only_from_mixed_line() {
+        let path = uuid_image_path(1);
+        let content = format!("テキスト ![]({}) の続き", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some("テキスト  の続き".to_string())
+        );
+    }
+
+    /// クリックされた 1 箇所だけを取り除く。同じパスを参照する他の行はそのまま残る
+    /// 同じパスを参照する他の行・他の出現はそのまま残る。
+    #[test]
+    fn remove_image_occurrence_touches_only_the_targeted_line() {
+        let path = uuid_image_path(1);
+        let content = format!("![]({})\nテキスト ![別alt]({}) 続き", path, path);
+
+        // 1 行目（image-only）を対象にすると、1 行目だけが丸ごと消え 2 行目は無傷
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some(format!("テキスト ![別alt]({}) 続き", path))
+        );
+        // 2 行目を対象にすると、2 行目の記法だけが消え 1 行目は無傷
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 1, 0),
+            Some(format!("![]({})\nテキスト  続き", path))
+        );
+    }
+
+    /// 同じ行に同じパスの画像が複数あっても、occurrence で指定した 1 個だけを取り除く。
+    #[test]
+    fn remove_image_occurrence_targets_only_the_specified_occurrence_in_a_line() {
+        let path = uuid_image_path(1);
+        let content = format!("![]({}) 通常 ![別alt]({})", path, path);
+
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some(format!(" 通常 ![別alt]({})", path))
+        );
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 1),
+            Some(format!("![]({}) 通常 ", path))
+        );
+    }
+
+    /// コードフェンス内に同じ画像記法がテキストとして出現していても巻き込まれない
+    /// （行・occurrence 単位で 1 箇所だけを対象にするため）。
+    #[test]
+    fn remove_image_occurrence_does_not_touch_identical_syntax_inside_code_fence() {
+        let path = uuid_image_path(1);
+        let content = format!("```\n![]({})\n```\ntext ![]({}) here", path, path);
+
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 3, 0),
+            Some(format!("```\n![]({})\n```\ntext  here", path))
+        );
+    }
+
+    /// 同じ行にコードスパン（`` `...` ``）内の画像記法もどきと実画像が同居していても、
+    /// コードスパン内は occurrence に数えない（実際に <img> として描画されるものだけを数える、
+    /// フロントの imageOccurrenceInLine と同じ定義に揃える）。
+    #[test]
+    fn remove_image_occurrence_skips_code_span_when_counting_occurrence() {
+        let path = uuid_image_path(1);
+        let content = format!("`![]({})` と ![]({})", path, path);
+
+        // occurrence 0 は「実際に描画される」方（コードスパンの外）を指す
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some(format!("`![]({})` と ", path))
+        );
+        // コードスパン内は数えないので occurrence 1 は存在しない
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 1),
+            None
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_keeps_other_images_untouched() {
+        let (p1, p2) = (uuid_image_path(1), uuid_image_path(2));
+        let content = format!("![]({})\n![]({})", p1, p2);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &p1, 0, 0),
+            Some(format!("![]({})", p2))
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_no_match_in_line_returns_none() {
+        let path = uuid_image_path(1);
+        let content = "plain text without images".to_string();
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_out_of_range_line_returns_none() {
+        let path = uuid_image_path(1);
+        let content = format!("![]({})", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 5, 0),
+            None
+        );
+    }
+
+    /// occurrence が実在しない（呼び出し元が古い content を基に指定した等）場合は
+    /// 何も取り除かず None を返す。
+    #[test]
+    fn remove_image_occurrence_nonexistent_occurrence_returns_none() {
+        let path = uuid_image_path(1);
+        let content = format!("text ![]({})", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 1),
+            None
+        );
+    }
+
+    /// 行が画像記法だけで構成されていても、occurrence が 0 以外なら（呼び出し元の状態が
+    /// ずれている）取り除かない。
+    #[test]
+    fn remove_image_occurrence_image_only_line_with_nonzero_occurrence_returns_none() {
+        let path = uuid_image_path(1);
+        let content = format!("![]({})", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 1),
+            None
+        );
+    }
+
+    /// 行が画像記法だけで構成されていても、対象と別のパスなら行ごと消さない。
+    #[test]
+    fn remove_image_occurrence_image_only_line_of_different_path_untouched() {
+        let (p1, p2) = (uuid_image_path(1), uuid_image_path(2));
+        let content = format!("![]({})", p1);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &p2, 0, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_sole_image_only_line_becomes_empty_string() {
+        let path = uuid_image_path(1);
+        let content = format!("![]({})", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some(String::new())
+        );
+    }
+
+    /// 行全体が前後空白＋画像記法だけなら image-only 行として丸ごと消える
+    /// （strip_image_ref_occurrence 側の「混在行の空白だけ残る」経路は通らない）。
+    #[test]
+    fn remove_image_occurrence_whitespace_padded_image_only_line_is_dropped() {
+        let path = uuid_image_path(1);
+        let content = format!("  ![]({})  ", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn remove_image_occurrence_does_not_panic_on_multibyte_content() {
+        let path = uuid_image_path(1);
+        let content = format!("日本語のテキスト ![説明]({}) さらに続く文章", path);
+        assert_eq!(
+            remove_image_occurrence_from_content(&content, &path, 0, 0),
+            Some("日本語のテキスト  さらに続く文章".to_string())
+        );
     }
 
     // ── gc_images ──

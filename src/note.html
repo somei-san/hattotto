@@ -245,6 +245,19 @@
     cursor: pointer;
     filter: brightness(0.94);
   }
+  /* クリック選択（画像を選んで Backspace/Delete で削除できる状態）。ホバー枠より太く、
+     ノートの配色（--bar）に依存しない固定色にして、どの付箋の色でも視認できるようにする */
+  #markdown-view img.img-selected {
+    outline: 3px solid #0a84ff;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.35);
+  }
+  /* 選択状態は DOM 選択（Range）を画像に張って作る（⌘C/⌘X をネイティブ Edit メニュー経由で
+     機能させるための仕掛け）。ブラウザ既定の選択ハイライト（青みがかった網掛け）が
+     .img-selected の枠と二重に見えないよう透明化する */
+  #markdown-view img.img-selected::selection {
+    background: transparent;
+  }
   /* 画像ホバー時に右下へ出すリサイズハンドル。共有 1 要素を画像ごとに位置だけ動かして使い回す。
      mdView.innerHTML の再描画（renderAll）で消されないよう、mdView の外（body 直下）に置く。
      position: fixed でビューポート座標に直接置くので、mdView のスクロール位置の影響を受けない */
