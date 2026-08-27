@@ -1714,6 +1714,8 @@ dependencies = [
  "dirs 6.0.0",
  "image",
  "log",
+ "objc2",
+ "objc2-foundation",
  "rand 0.10.2",
  "serde",
  "serde_json",
