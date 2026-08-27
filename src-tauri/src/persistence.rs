@@ -1,8 +1,10 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
+use uuid::Uuid;
 
 use crate::model::{is_valid_default_color, AppState, Note, Settings, TRASH_MAX};
 
@@ -38,6 +40,10 @@ fn settings_file(dir: &Path) -> PathBuf {
 
 fn trash_file(dir: &Path) -> PathBuf {
     dir.join("trash.json")
+}
+
+fn images_dir(dir: &Path) -> PathBuf {
+    dir.join("images")
 }
 
 /// tmp へ書き、fsync してから rename する。
@@ -182,11 +188,144 @@ pub(crate) fn save_trash(state: &AppState, trash: &[Note]) -> Result<(), String>
     save_trash_to(trash, &trash_file(&state.data_dir))
 }
 
-/// ゴミ箱のFIFO制限: TRASH_MAXを超えた分を先頭から削除
-pub(crate) fn enforce_trash_limit(trash: &mut Vec<Note>) {
+/// ゴミ箱のFIFO制限: TRASH_MAXを超えた分を先頭から削除し、削除した付箋を返す。
+/// 呼び出し元はこれを使って、その付箋が参照していた画像の GC 候補を判定する。
+#[must_use]
+pub(crate) fn enforce_trash_limit(trash: &mut Vec<Note>) -> Vec<Note> {
     let overflow = trash.len().saturating_sub(TRASH_MAX);
     if overflow > 0 {
-        trash.drain(0..overflow);
+        trash.drain(0..overflow).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+// ── Pasted Images ───────────────────────────────────────────
+
+/// クリップボード画像の許容上限（10MB）。これを超えるペイロードは保存しない。
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+
+/// 対応する画像形式の拡張子一覧。`is_valid_image_rel_path` の形状チェックと対応させる。
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+
+/// 先頭バイト（マジックバイト）から画像形式を判定し、拡張子を返す。
+/// 対応外の形式（TIFF 等）は `None`。WKWebView は TIFF を `<img>` として描画できないため対応しない。
+fn detect_image_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some("png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("gif")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+/// `save_pasted_image` が生成する相対パスの形状（`images/<uuid v4>.<ext>`）と一致するか検証する。
+/// content からの抽出時・GC の削除直前・フロントエンドの asset URL 変換時、いずれもこの形状
+/// だけを許可する。`images/../notes.json` のようなパストラバーサルを塞ぐための唯一の関所。
+pub(crate) fn is_valid_image_rel_path(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("images/") else {
+        return false;
+    };
+    // 単一パスコンポーネントであること（`/`・`\` を含まない = 親ディレクトリへ抜けられない）
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    uuid::Uuid::parse_str(stem).is_ok()
+        && IMAGE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+}
+
+/// クリップボード画像を `images/<uuid v4>.<ext>` として保存し、相対パスを返す。
+/// 拡張子はマジックバイトから判定する（クライアントの MIME 型は信用しない）。
+pub(crate) fn save_pasted_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "image too large: {} bytes (max {} bytes)",
+            bytes.len(),
+            MAX_IMAGE_BYTES
+        ));
+    }
+    let ext = detect_image_ext(bytes).ok_or_else(|| "unsupported image format".to_string())?;
+    let images = images_dir(dir);
+    fs::create_dir_all(&images).map_err(|e| format!("Failed to create images dir: {}", e))?;
+    let filename = format!("{}.{}", Uuid::new_v4(), ext);
+    fs::write(images.join(&filename), bytes).map_err(|e| format!("Failed to save image: {}", e))?;
+    Ok(format!("images/{}", filename))
+}
+
+/// content 中の `![alt](images/...)` が参照する相対パス（`images/...`）を抽出する。
+/// `is_valid_image_rel_path` の形状に一致するものだけを採用し、パストラバーサルを狙った
+/// 記法（`images/../notes.json` 等）は候補にすら入れない。
+/// Markdown パーサ全体は導入せず、この記法だけを手書きでスキャンする。
+pub(crate) fn extract_image_paths(content: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    // `!` と `[` は ASCII なので、一致した位置は常に UTF-8 の文字境界にある
+    while i + 1 < bytes.len() {
+        if bytes[i] != b'!' || bytes[i + 1] != b'[' {
+            i += 1;
+            continue;
+        }
+        let after_alt_start = i + 2;
+        let Some(alt_end) = content[after_alt_start..].find(']') else {
+            i += 1;
+            continue;
+        };
+        let paren_pos = after_alt_start + alt_end + 1;
+        if content.as_bytes().get(paren_pos) != Some(&b'(') {
+            i += 1;
+            continue;
+        }
+        let src_start = paren_pos + 1;
+        let Some(src_len) = content[src_start..].find(')') else {
+            i += 1;
+            continue;
+        };
+        let src = &content[src_start..src_start + src_len];
+        if is_valid_image_rel_path(src) {
+            paths.push(src.to_string());
+        }
+        i = src_start + src_len + 1;
+    }
+    paths
+}
+
+/// notes / trash の全 content が参照している画像相対パスの集合。
+fn referenced_image_paths(notes: &[Note], trash: &[Note]) -> HashSet<String> {
+    notes
+        .iter()
+        .chain(trash.iter())
+        .flat_map(|n| extract_image_paths(&n.content))
+        .collect()
+}
+
+/// GC 候補パスのうち、notes / trash のどこからも参照されなくなったものだけ削除する。
+/// 削除失敗は致命的ではないので warn ログに残すだけで処理は続ける。
+pub(crate) fn gc_images(data_dir: &Path, candidates: &[String], notes: &[Note], trash: &[Note]) {
+    if candidates.is_empty() {
+        return;
+    }
+    let referenced = referenced_image_paths(notes, trash);
+    for path in candidates {
+        // candidates は呼び出し元が extract_image_paths で作るので既に形状検証済みのはずだが、
+        // 削除という不可逆操作の直前でもう一段検証する（多層防御）
+        if !is_valid_image_rel_path(path) || referenced.contains(path) {
+            continue;
+        }
+        let full = data_dir.join(path);
+        if let Err(e) = fs::remove_file(&full) {
+            if e.kind() != io::ErrorKind::NotFound {
+                log::warn!("failed to remove orphaned image {}: {}", full.display(), e);
+            }
+        }
     }
 }
 
@@ -250,7 +389,7 @@ mod tests {
         let mut trash: Vec<Note> = (0..TRASH_MAX)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
-        enforce_trash_limit(&mut trash);
+        let _ = enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), TRASH_MAX);
     }
 
@@ -259,7 +398,7 @@ mod tests {
         let mut trash: Vec<Note> = (0..TRASH_MAX + 1)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
-        enforce_trash_limit(&mut trash);
+        let _ = enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), TRASH_MAX);
         // oldest (id "0") should be removed
         assert_eq!(trash[0].id, "1");
@@ -270,10 +409,325 @@ mod tests {
         let mut trash: Vec<Note> = (0..TRASH_MAX + 5)
             .map(|i| make_note(&i.to_string(), "yellow", ""))
             .collect();
-        enforce_trash_limit(&mut trash);
+        let _ = enforce_trash_limit(&mut trash);
         assert_eq!(trash.len(), TRASH_MAX);
         assert_eq!(trash[0].id, "5");
         assert_eq!(trash[TRASH_MAX - 1].id, (TRASH_MAX + 4).to_string());
+    }
+
+    #[test]
+    fn trash_fifo_returns_drained_notes() {
+        let mut trash: Vec<Note> = (0..TRASH_MAX + 2)
+            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .collect();
+        let drained = enforce_trash_limit(&mut trash);
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].id, "0");
+        assert_eq!(drained[1].id, "1");
+    }
+
+    #[test]
+    fn trash_fifo_within_limit_drains_nothing() {
+        let mut trash: Vec<Note> = (0..TRASH_MAX)
+            .map(|i| make_note(&i.to_string(), "yellow", ""))
+            .collect();
+        assert!(enforce_trash_limit(&mut trash).is_empty());
+    }
+
+    // テスト用の有効な uuid 形状パス。1〜9 の連番を末尾に埋め込み、テストごとに使い分ける
+    fn uuid_image_path(n: u8) -> String {
+        format!("images/00000000-0000-4000-8000-00000000000{}.png", n)
+    }
+
+    // ── is_valid_image_rel_path ──
+
+    #[test]
+    fn is_valid_image_rel_path_accepts_generated_shape() {
+        assert!(is_valid_image_rel_path(&uuid_image_path(1)));
+        assert!(is_valid_image_rel_path(
+            "images/00000000-0000-4000-8000-000000000001.jpg"
+        ));
+        assert!(is_valid_image_rel_path(
+            "images/00000000-0000-4000-8000-000000000001.jpeg"
+        ));
+        assert!(is_valid_image_rel_path(
+            "images/00000000-0000-4000-8000-000000000001.gif"
+        ));
+    }
+
+    #[test]
+    fn is_valid_image_rel_path_rejects_path_traversal() {
+        assert!(!is_valid_image_rel_path("images/../notes.json"));
+        assert!(!is_valid_image_rel_path("images/../../etc/passwd"));
+        assert!(!is_valid_image_rel_path("images/sub/dir.png"));
+        assert!(!is_valid_image_rel_path("images/..\\notes.json"));
+    }
+
+    #[test]
+    fn is_valid_image_rel_path_rejects_non_uuid_stem() {
+        assert!(!is_valid_image_rel_path("images/a.png"));
+        assert!(!is_valid_image_rel_path("images/notes.json"));
+    }
+
+    #[test]
+    fn is_valid_image_rel_path_rejects_unsupported_extension() {
+        assert!(!is_valid_image_rel_path(
+            "images/00000000-0000-4000-8000-000000000001.tiff"
+        ));
+        assert!(!is_valid_image_rel_path(
+            "images/00000000-0000-4000-8000-000000000001"
+        ));
+    }
+
+    #[test]
+    fn is_valid_image_rel_path_rejects_missing_images_prefix() {
+        assert!(!is_valid_image_rel_path(
+            "00000000-0000-4000-8000-000000000001.png"
+        ));
+        assert!(!is_valid_image_rel_path(""));
+    }
+
+    // ── extract_image_paths ──
+
+    #[test]
+    fn extract_image_paths_finds_single_reference() {
+        let path = uuid_image_path(1);
+        let content = format!("見出し\n![]({})\n本文", path);
+        assert_eq!(extract_image_paths(&content), vec![path]);
+    }
+
+    #[test]
+    fn extract_image_paths_finds_multiple_references_with_alt() {
+        let (p1, p2) = (uuid_image_path(1), uuid_image_path(2));
+        let content = format!("![alt1]({}) text ![alt2]({})", p1, p2);
+        assert_eq!(extract_image_paths(&content), vec![p1, p2]);
+    }
+
+    #[test]
+    fn extract_image_paths_ignores_non_image_links() {
+        let content = "[link](https://example.com) and ![alt](https://example.com/pic.png)";
+        assert!(extract_image_paths(content).is_empty());
+    }
+
+    #[test]
+    fn extract_image_paths_empty_content_returns_empty() {
+        assert!(extract_image_paths("").is_empty());
+    }
+
+    #[test]
+    fn extract_image_paths_does_not_panic_on_multibyte_content() {
+        let path = uuid_image_path(1);
+        let content = format!("日本語のテキスト ![説明]({}) さらに続く文章", path);
+        let found = extract_image_paths(&content);
+        assert_eq!(found, vec![path]);
+    }
+
+    /// パストラバーサル細工（issue で指摘された `images/../notes.json` 系）は候補にすら
+    /// 入らない。extract_image_paths → gc_images の両方が同じ `is_valid_image_rel_path`
+    /// を通るため、ここで弾ければ GC の削除対象にもならない。
+    #[test]
+    fn extract_image_paths_rejects_path_traversal_payload() {
+        let content = "![](images/../notes.json)";
+        assert!(extract_image_paths(content).is_empty());
+    }
+
+    #[test]
+    fn extract_image_paths_rejects_nested_path_payload() {
+        let content = "![](images/../../etc/passwd)";
+        assert!(extract_image_paths(content).is_empty());
+    }
+
+    #[test]
+    fn extract_image_paths_rejects_backslash_traversal_payload() {
+        let content = "![](images/..\\notes.json)";
+        assert!(extract_image_paths(content).is_empty());
+    }
+
+    // ── gc_images ──
+
+    #[test]
+    fn gc_images_removes_unreferenced_image() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+
+        gc_images(dir.path(), std::slice::from_ref(&path), &[], &[]);
+
+        assert!(!images.join(filename).exists());
+    }
+
+    /// 他の付箋が同じ画像を参照していたら消さない。
+    #[test]
+    fn gc_images_keeps_image_still_referenced_by_another_note() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+        let notes = vec![make_note("a", "yellow", &format!("![]({})", path))];
+
+        gc_images(dir.path(), std::slice::from_ref(&path), &notes, &[]);
+
+        assert!(images.join(filename).exists());
+    }
+
+    /// trash 側の参照でも残す。
+    #[test]
+    fn gc_images_keeps_image_still_referenced_by_trash() {
+        let dir = TempDir::new().unwrap();
+        let path = uuid_image_path(1);
+        let images = dir.path().join("images");
+        fs::create_dir_all(&images).unwrap();
+        let filename = path.strip_prefix("images/").unwrap();
+        fs::write(images.join(filename), b"data").unwrap();
+        let trash = vec![make_note("t", "yellow", &format!("![]({})", path))];
+
+        gc_images(dir.path(), std::slice::from_ref(&path), &[], &trash);
+
+        assert!(images.join(filename).exists());
+    }
+
+    #[test]
+    fn gc_images_missing_file_does_not_error() {
+        let dir = TempDir::new().unwrap();
+        // ファイルが既に無くても panic しない
+        gc_images(dir.path(), &[uuid_image_path(1)], &[], &[]);
+    }
+
+    /// 呼び出し元の検証をすり抜けて渡ってきても、削除直前の多層防御で弾かれる
+    /// （data_dir の外や notes.json 自体を指すパスは、そもそも削除対象にしない）。
+    #[test]
+    fn gc_images_defends_against_path_traversal_candidate() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("notes.json"), r#"[{"id":"a"}]"#).unwrap();
+
+        gc_images(dir.path(), &["images/../notes.json".to_string()], &[], &[]);
+
+        assert!(dir.path().join("notes.json").exists());
+    }
+
+    // ── save_pasted_image ──
+
+    const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    const JPEG_MAGIC: &[u8] = &[0xFF, 0xD8, 0xFF];
+    const GIF_MAGIC: &[u8] = b"GIF89a";
+
+    #[test]
+    fn save_pasted_image_writes_bytes_and_returns_uuid_png_path() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = PNG_MAGIC.to_vec();
+        bytes.extend_from_slice(b"rest-of-the-fake-png-data");
+
+        let rel_path = save_pasted_image(dir.path(), &bytes).unwrap();
+
+        assert!(is_valid_image_rel_path(&rel_path));
+        assert!(rel_path.ends_with(".png"));
+        let filename = rel_path.strip_prefix("images/").unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("images").join(filename)).unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn save_pasted_image_detects_jpeg_extension() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = JPEG_MAGIC.to_vec();
+        bytes.extend_from_slice(b"rest-of-the-fake-jpeg-data");
+
+        let rel_path = save_pasted_image(dir.path(), &bytes).unwrap();
+
+        assert!(rel_path.ends_with(".jpg"));
+        assert!(is_valid_image_rel_path(&rel_path));
+    }
+
+    #[test]
+    fn save_pasted_image_detects_gif_extension() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = GIF_MAGIC.to_vec();
+        bytes.extend_from_slice(b"rest-of-the-fake-gif-data");
+
+        let rel_path = save_pasted_image(dir.path(), &bytes).unwrap();
+
+        assert!(rel_path.ends_with(".gif"));
+        assert!(is_valid_image_rel_path(&rel_path));
+    }
+
+    #[test]
+    fn save_pasted_image_detects_webp_extension() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&[0x24, 0x00, 0x00, 0x00]);
+        bytes.extend_from_slice(b"WEBP");
+        bytes.extend_from_slice(b"rest-of-the-fake-webp-data");
+
+        let rel_path = save_pasted_image(dir.path(), &bytes).unwrap();
+
+        assert!(rel_path.ends_with(".webp"));
+        assert!(is_valid_image_rel_path(&rel_path));
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_riff_without_webp_marker() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&[0x24, 0x00, 0x00, 0x00]);
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"this-is-audio-not-an-image");
+
+        assert!(save_pasted_image(dir.path(), &bytes).is_err());
+    }
+
+    #[test]
+    fn save_pasted_image_creates_images_dir_if_missing() {
+        let dir = TempDir::new().unwrap();
+        assert!(!dir.path().join("images").exists());
+
+        save_pasted_image(dir.path(), PNG_MAGIC).unwrap();
+
+        assert!(dir.path().join("images").is_dir());
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_oversized_payload() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = vec![0u8; MAX_IMAGE_BYTES + 1];
+        bytes[..PNG_MAGIC.len()].copy_from_slice(PNG_MAGIC);
+
+        let result = save_pasted_image(dir.path(), &bytes);
+
+        assert!(result.is_err());
+        assert!(!dir.path().join("images").exists());
+    }
+
+    #[test]
+    fn save_pasted_image_accepts_payload_at_exactly_the_limit() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = vec![0u8; MAX_IMAGE_BYTES];
+        bytes[..PNG_MAGIC.len()].copy_from_slice(PNG_MAGIC);
+
+        assert!(save_pasted_image(dir.path(), &bytes).is_ok());
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_unsupported_format() {
+        let dir = TempDir::new().unwrap();
+        let bytes = b"BM-this-looks-like-a-bitmap-not-png-jpeg-or-gif".to_vec();
+
+        let result = save_pasted_image(dir.path(), &bytes);
+
+        assert!(result.is_err());
+        assert!(!dir.path().join("images").exists());
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_empty_payload() {
+        let dir = TempDir::new().unwrap();
+        assert!(save_pasted_image(dir.path(), &[]).is_err());
     }
 
     // ── JSON persistence roundtrip ──

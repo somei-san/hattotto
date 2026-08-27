@@ -216,6 +216,67 @@ describe("renderMarkdown — edge cases", () => {
   });
 });
 
+describe("renderMarkdown — image syntax", () => {
+  test("image without alt", () => {
+    const html = renderMarkdown("![](images/a.png)");
+    assert.match(html, /<img alt="" src="images\/a\.png">/);
+  });
+
+  test("image with alt", () => {
+    const html = renderMarkdown("![説明](images/a.png)");
+    assert.match(html, /<img alt="説明" src="images\/a\.png">/);
+  });
+
+  test("image mixed with link on the same line", () => {
+    const html = renderMarkdown("![](images/a.png) [text](https://example.com)");
+    assert.match(html, /<img alt="" src="images\/a\.png">/);
+    assert.match(html, /<a href="https:\/\/example\.com"/);
+  });
+
+  test("link is not mistaken for an image (no leading !)", () => {
+    const html = renderMarkdown("[text](https://example.com)");
+    assert.doesNotMatch(html, /<img/);
+  });
+
+  test("uses window.resolveImageSrc when defined", () => {
+    global.window = { resolveImageSrc: (src) => `asset://localhost/${src}` };
+    try {
+      const html = renderMarkdown("![](images/a.png)");
+      assert.match(html, /<img alt="" src="asset:\/\/localhost\/images\/a\.png">/);
+    } finally {
+      delete global.window;
+    }
+  });
+
+  test("image nested inside a link renders <img> inside <a>", () => {
+    const html = renderMarkdown("[![alt](images/a.png)](https://example.com)");
+    assert.match(
+      html,
+      /<a href="https:\/\/example\.com" data-url="https:\/\/example\.com"><img alt="alt" src="images\/a\.png"><\/a>/
+    );
+  });
+
+  test("image alt attribute injection attempt is neutralized", () => {
+    const html = renderMarkdown('![" onerror=alert(1) x="](images/a.png)');
+    // The payload text survives as inert data, but the `"` that would break out of the
+    // attribute is escaped — no unescaped `"` appears right before `onerror=`.
+    assert.doesNotMatch(html, /alt="[^"]*"[^>]*onerror=/);
+    assert.match(html, /<img alt="&quot; onerror=alert\(1\) x=&quot;" src="images\/a\.png">/);
+  });
+
+  test("image src attribute injection attempt is neutralized", () => {
+    const html = renderMarkdown('![](images/a.png"onerror=xss)');
+    assert.doesNotMatch(html, /src="images\/a\.png"onerror=xss"/);
+    assert.match(html, /src="images\/a\.png&quot;onerror=xss"/);
+  });
+
+  test("link href attribute injection attempt is neutralized", () => {
+    const html = renderMarkdown('[text](https://example.com/"onmouseover=xss x=")');
+    assert.doesNotMatch(html, /href="https:\/\/example\.com\/"onmouseover/);
+    assert.match(html, /href="https:\/\/example\.com\/&quot;onmouseover=xss x=&quot;"/);
+  });
+});
+
 describe("renderMarkdown — NBSP (U+00A0) normalization", () => {
   test("checkbox with NBSP: - [ ] task", () => {
     const html = renderMarkdown("- [ ] task");

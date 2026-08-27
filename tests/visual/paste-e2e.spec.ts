@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent } from "./fixtures";
+import { test, expect, enterEdit, getContent, injectNoteMock } from "./fixtures";
 
 test.describe("ペースト処理", () => {
   test("空の選択状態でURLペースト → リンク変換されずプレーンURL挿入", async ({ openNote }) => {
@@ -155,5 +155,40 @@ test.describe("ペースト処理", () => {
 
     const content = await getContent(page);
     expect(content).toBe("[click here](https://example.com)");
+  });
+
+  test("クリップボード画像ペースト → save_pasted_image 経由でMarkdown画像記法が挿入される", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await enterEdit(page);
+
+    await page.evaluate(() => {
+      const editor = document.getElementById("editor")!;
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "pasted.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const pasteEvent = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(pasteEvent);
+    });
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)");
+
+    await ctx.close();
   });
 });
