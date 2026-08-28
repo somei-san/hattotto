@@ -107,6 +107,115 @@ test.describe("行の生表示と行編集", () => {
   }
 });
 
+// ── Ctrl+A/E の行頭・行末移動 ─────────────────────────────
+// 実機の WKWebView は contenteditable 上で Ctrl+A/E を標準キーバインドとして処理しない
+// ため、note.js が自前実装している（#69）。テストで使う Chromium は逆にネイティブで
+// 行頭・行末移動を処理するが、自前実装が preventDefault で上書きするため、ここでの
+// 検証は自前実装側の回帰を検出する。
+
+test.describe("Ctrl+A/E の行頭・行末移動", () => {
+  /** 生エディタ内のキャレット位置（選択の折り畳み状態つき）。 */
+  function caretState(page: import("@playwright/test").Page) {
+    return page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const sel = window.getSelection()!;
+      const range = sel.getRangeAt(0);
+      const pre = range.cloneRange();
+      pre.selectNodeContents(ed);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return { offset: pre.toString().length, collapsed: sel.isCollapsed };
+    });
+  }
+
+  /** 生エディタ内の選択の anchor/focus 位置（折り畳み状態つき）。 */
+  function selectionState(page: import("@playwright/test").Page) {
+    return page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const sel = window.getSelection()!;
+      const offsetOf = (node: Node, offset: number) => {
+        const r = document.createRange();
+        r.selectNodeContents(ed);
+        r.setEnd(node, offset);
+        return r.toString().length;
+      };
+      return {
+        collapsed: sel.isCollapsed,
+        anchorOffset: offsetOf(sel.anchorNode!, sel.anchorOffset),
+        focusOffset: offsetOf(sel.focusNode!, sel.focusOffset),
+      };
+    });
+  }
+
+  test("Ctrl+A でキャレットが行頭へ移動する（選択されない）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Control+a");
+
+    expect(await caretState(page)).toEqual({ offset: 0, collapsed: true });
+  });
+
+  test("Ctrl+E でキャレットが行末へ移動する（選択されない）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Control+e");
+
+    expect(await caretState(page)).toEqual({ offset: 2, collapsed: true });
+  });
+
+  test("⌘A はブロック内全選択のまま（回帰）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Meta+a");
+
+    const state = await caretState(page);
+    expect(state.collapsed).toBe(false);
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("本文");
+  });
+
+  test("Ctrl+⌘+A は何もしない（未定義の修飾キー組み合わせは macOS 標準に合わせて無視する）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Control+Meta+a");
+
+    expect(await caretState(page)).toEqual({ offset: 1, collapsed: true });
+  });
+
+  test("Shift+Ctrl+A は行頭まで選択を拡張する（キャレット移動に化けない）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Control+Shift+A");
+
+    expect(await selectionState(page)).toEqual({ collapsed: false, anchorOffset: 1, focusOffset: 0 });
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("本");
+  });
+
+  test("Shift+Ctrl+E は行末まで選択を拡張する（キャレット移動に化けない）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.keyboard.press("Control+Shift+E");
+
+    expect(await selectionState(page)).toEqual({ collapsed: false, anchorOffset: 1, focusOffset: 2 });
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("文");
+  });
+
+  test("atomic な行で Ctrl+E の後、キャレットが横スクロールで可視範囲に入る", async ({ openNote }) => {
+    const longLine = "x".repeat(200);
+    const page = await openNote({ content: `\`\`\`\n${longLine}\n\`\`\`` });
+
+    await placeCaret(page, 1, 0);
+    await page.keyboard.press("Control+e");
+
+    const scrollLeft = await page.locator("#editor").evaluate((el) => el.scrollLeft);
+    expect(scrollLeft).toBeGreaterThan(0);
+  });
+});
+
 // ── クリック位置 → 生 Markdown の列 ──────────────────────
 // 描画テキストには行頭マーカーが出ないため、その分を足し戻して列を決める。
 

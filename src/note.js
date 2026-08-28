@@ -210,6 +210,41 @@ function caretOffset(el) {
   return pre.toString().length;
 }
 
+/**
+ * キャレット位置を可視領域までスクロールする。ArrowLeft/Right 等のネイティブなキャレット
+ * 移動は自動でスクロール追従するが、placeCaret による自前のジャンプ（Ctrl+A/E 等）は
+ * 追従しない。atomic な行（折り返さず横スクロール、.raw-editor.atomic）で長い行の行末へ
+ * 飛ぶと、この呼び出しがないとキャレットが画面外へ出る。
+ *
+ * キャレット位置に一時的な span を挿し、それを scrollIntoView した上で除去する。
+ * span に大きさ（inline-block の 1px 幅）を持たせるのは WebKit 対応で、大きさの無い
+ * インライン要素は行頭・行末でレイアウトボックスを持たず scrollIntoView が効かない。
+ * span は textContent を持たないため editorText(el) の結果には影響せず、除去後に
+ * 同じ数値オフセットで placeCaret し直せば、DOM 上のテキストノード分割の有無に関わらず
+ * 元と同じ位置へキャレットを戻せる。
+ */
+function scrollCaretIntoView(el) {
+  const offset = caretOffset(el);
+  const at = nodeAt(el, offset);
+  const marker = document.createElement('span');
+  marker.style.cssText = 'display:inline-block;width:1px;height:1em;';
+  if (at) {
+    const range = document.createRange();
+    range.setStart(at.node, at.offset);
+    range.collapse(true);
+    range.insertNode(marker);
+  } else {
+    el.appendChild(marker);
+  }
+  marker.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  marker.remove();
+  // insertNode が分割したテキストノードを繋ぎ直す（放置すると呼ぶたびに断片が増え、
+  // IME の変換開始位置がノード境界に当たりやすくなる）。normalize で既存の Range は
+  // 無効になるが、直後に数値オフセットでキャレットを置き直すので影響しない
+  el.normalize();
+  placeCaret(el, offset);
+}
+
 /** 生エディタ内のキャレット位置を、文書全体での (行番号, 列) に変換する。 */
 function caretLineCol(ed) {
   const before = editorText(ed).slice(0, caretOffset(ed)).split('\n');
@@ -1301,14 +1336,31 @@ function bindEditor(ed) {
       scheduleSave();
       return;
     }
-    // 選択が生エディタの外へ広がらないように自前で全選択する
-    if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+    // 選択が生エディタの外へ広がらないように自前で全選択する。
+    // 修飾キーは ⌘ 単独のときだけ効かせる（Ctrl+⌘+A 等の未定義の組み合わせで
+    // 何もしない macOS 標準に合わせる）。toLowerCase は CapsLock 対応
+    if (e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       const range = document.createRange();
       range.selectNodeContents(ed);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
+      return;
+    }
+    // 実機の WKWebView は contenteditable 上で Ctrl+A/E を標準キーバインド（行頭・行末移動）
+    // として処理しないため自前実装する。Shift 付き（選択拡張）はこの分岐に入れず、
+    // ネイティブの選択拡張に任せる
+    const caretKey = e.key.toLowerCase();
+    if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && (caretKey === 'a' || caretKey === 'e')) {
+      e.preventDefault();
+      const text = editorText(ed);
+      const offset = caretOffset(ed);
+      const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+      const nlAfter = text.indexOf('\n', offset);
+      const lineEnd = nlAfter === -1 ? text.length : nlAfter;
+      placeCaret(ed, caretKey === 'a' ? lineStart : lineEnd);
+      scrollCaretIntoView(ed);
       return;
     }
     if (e.key === 'ArrowUp' && activeStart > 0) {
