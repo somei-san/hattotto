@@ -45,6 +45,107 @@ test.describe("行の生表示と行編集", () => {
     expect(await page.locator("#editor").textContent()).toBe("本文");
   });
 
+  /** 生エディタ内のキャレット位置（#editor 内での文字オフセット）。 */
+  function caretOffsetInEditor(page: import("@playwright/test").Page) {
+    return page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const range = window.getSelection()!.getRangeAt(0);
+      const pre = range.cloneRange();
+      pre.selectNodeContents(ed);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return pre.toString().length;
+    });
+  }
+
+  test("行頭で ← を押すと前の行の末尾へ移る", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 0);
+    await page.locator("#editor").press("ArrowLeft");
+
+    expect(await page.locator("#editor").textContent()).toBe("# 見出し");
+    expect(await caretOffsetInEditor(page)).toBe("# 見出し".length);
+  });
+
+  test("行末で → を押すと次の行の先頭へ移る", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, null);
+    await page.locator("#editor").press("ArrowRight");
+
+    expect(await page.locator("#editor").textContent()).toBe("- 項目");
+    expect(await caretOffsetInEditor(page)).toBe(0);
+  });
+
+  test("行頭以外の ← / 行末以外の → はエディタ内移動のまま", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 1);
+    await page.locator("#editor").press("ArrowLeft");
+    expect(await page.locator("#editor").textContent()).toBe("本文");
+    expect(await caretOffsetInEditor(page)).toBe(0);
+
+    await placeCaret(page, 1, 1);
+    await page.locator("#editor").press("ArrowRight");
+    expect(await page.locator("#editor").textContent()).toBe("本文");
+    expect(await caretOffsetInEditor(page)).toBe(2);
+  });
+
+  test("先頭行の行頭で ← / 最終行の行末で → は何もしない（境界）", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 0, 0);
+    await page.locator("#editor").press("ArrowLeft");
+    expect(await page.locator("#editor").textContent()).toBe("# 見出し");
+    expect(await caretOffsetInEditor(page)).toBe(0);
+
+    await placeCaret(page, 2, null);
+    await page.locator("#editor").press("ArrowRight");
+    expect(await page.locator("#editor").textContent()).toBe("- 項目");
+    expect(await caretOffsetInEditor(page)).toBe("- 項目".length);
+  });
+
+  test("Shift+←・Shift+→ は選択拡張のままで行をまたがない", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 0);
+    await page.locator("#editor").press("Shift+ArrowLeft");
+    expect(await page.locator("#editor").textContent()).toBe("本文");
+
+    await placeCaret(page, 1, null);
+    await page.locator("#editor").press("Shift+ArrowRight");
+    expect(await page.locator("#editor").textContent()).toBe("本文");
+  });
+
+  test("選択中に修飾なし ← を押すと選択が畳まれるだけで行をまたがない", async ({ openNote }) => {
+    const page = await openNote({ content: DOC });
+
+    await placeCaret(page, 1, 0);
+    // 行頭から1文字選択する。選択の開始位置（Range の左端）は行頭 col0 のままなので、
+    // caretLineCol だけで判定すると「行頭にいる」と誤認しかねない
+    await page.locator("#editor").press("Shift+ArrowRight");
+    await page.locator("#editor").press("ArrowLeft");
+
+    expect(await page.locator("#editor").textContent()).toBe("本文");
+    expect(await caretOffsetInEditor(page)).toBe(0);
+  });
+
+  test("フェンス複数行ブロックの途中の行頭 ← / 行末 → はエディタ内のネイティブ移動のまま", async ({ openNote }) => {
+    const page = await openNote({ content: "```\ncode1\ncode2\n```\nafter" });
+    await page.locator(".md-codeblock").click();
+    await page.waitForSelector("#editor", { state: "visible" });
+
+    await placeCaret(page, 2, 0); // "code2" 行の行頭（ブロックの先頭行ではない）
+    await page.locator("#editor").press("ArrowLeft");
+    expect(await page.locator("#editor").textContent()).toBe("```\ncode1\ncode2\n```");
+    expect(await caretOffsetInEditor(page)).toBe("```\ncode1".length);
+
+    await placeCaret(page, 1, null); // "code1" 行の行末（ブロックの最終行ではない）
+    await page.locator("#editor").press("ArrowRight");
+    expect(await page.locator("#editor").textContent()).toBe("```\ncode1\ncode2\n```");
+    expect(await caretOffsetInEditor(page)).toBe("```\ncode1\n".length);
+  });
+
   test("Enter で行が分割される", async ({ openNote }) => {
     const page = await openNote({ content: DOC });
 

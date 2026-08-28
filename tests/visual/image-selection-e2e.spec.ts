@@ -176,6 +176,68 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
+  test("行末で → の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 0, null);
+    await page.locator("#editor").press("ArrowRight");
+
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    await expect(page.locator("#editor")).toHaveCount(0);
+
+    await ctx.close();
+  });
+
+  test("行頭で ← の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 2, 0);
+    await page.locator("#editor").press("ArrowLeft");
+
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    await expect(page.locator("#editor")).toHaveCount(0);
+
+    await ctx.close();
+  });
+
+  test("画像選択状態から ← / → で隣の行へ抜けられる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 0, null);
+    await page.locator("#editor").press("ArrowRight"); // text0 → 画像行（選択状態）
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await page.keyboard.press("ArrowRight"); // 画像行 → text2（↑/↓ ではなく → で抜ける）
+
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+    await expect(page.locator("#editor")).toBeVisible();
+    expect(await page.locator("#editor").textContent()).toBe("text2");
+
+    await page.keyboard.press("ArrowLeft"); // text2 → 画像行（選択状態）
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    await expect(page.locator("#editor")).toHaveCount(0);
+
+    await page.keyboard.press("ArrowLeft"); // 画像行 → text0（← で抜ける）
+
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+    await expect(page.locator("#editor")).toBeVisible();
+    expect(await page.locator("#editor").textContent()).toBe("text0");
+
+    await ctx.close();
+  });
+
   test("選択中に Enter → 画像の直下に空行を挿入し、そこへキャレット（選択は解除）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
