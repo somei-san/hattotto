@@ -350,6 +350,9 @@ function applySelectionHighlight() {
   if (!img) { selectedImage = null; return; }
   img.classList.add('img-selected');
   selectImageRange(img);
+  // キー操作（←/→/↑/↓）で画面外の画像行へ着地したとき、選択枠が唯一の状態表示なので
+  // 見える位置までスクロールする
+  img.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 /** 行テキスト中で最初に出てくる画像記法の src を取り出す。無ければ null。 */
@@ -421,6 +424,9 @@ function enterLine(lineIdx, col) {
   const blockLines = lines.slice(activeStart, activeEnd + 1);
   const line = lines[i] ?? '';
   placeCaret(ed, blockOffset(blockLines, i - activeStart, col == null ? line.length : Math.min(col, line.length)));
+  // atomic な行（折り返さず横スクロール）へ行末等でキャレットが着地すると、placeCaret だけでは
+  // 横スクロール位置が追従せずキャレットが画面外に出ることがあるため、可視位置まで追従させる
+  scrollCaretIntoView(ed);
 }
 
 /** 生エディタの内容を rawContent へ書き戻す。DOM は触らない（入力中に呼ばれる）。 */
@@ -1379,8 +1385,46 @@ function bindEditor(ed) {
       }
       return;
     }
+    // Shift（選択拡張）・⌥（単語移動）・⌘/Ctrl（行頭/行末移動）付きはこの分岐に入れず、
+    // ネイティブの生エディタ内移動に任せる（Ctrl+A/E・⌘A 分岐と同じ 4 修飾キーの並び）。
+    // 非 collapsed（選択あり）のときも、caretLineCol が返すのは選択開始位置（左端）なので
+    // ここで拾うと「選択を畳む」が「行またぎジャンプ」に化ける。Backspace/Delete 分岐と
+    // 同じく isCollapsed で弾き、選択畳みはネイティブに譲る
+    if (
+      e.key === 'ArrowLeft' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey
+      && window.getSelection().isCollapsed && activeStart > 0
+    ) {
+      const { line, col } = caretLineCol(ed);
+      // 行頭のときだけ発動。複数行ブロック（フェンス）の途中の行頭は
+      // contenteditable のネイティブ移動（同一エディタ内で前行末尾へ）に任せる
+      if (line === activeStart && col === 0) {
+        e.preventDefault();
+        // 移動先が画像のみの行なら enterLine が選択状態にする（selectImage が
+        // selectedImage を立てる）。stopPropagation しないと、この 1 回の keydown が
+        // document まで伝播し、画像選択用のキー処理（この直後に登録）が
+        // 立ったばかりの selectedImage を見て同じキーで二重に隣へ進めてしまう
+        e.stopPropagation();
+        enterLine(activeStart - 1, null);
+      }
+      return;
+    }
+    if (
+      e.key === 'ArrowRight' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey
+      && window.getSelection().isCollapsed && activeEnd < getLines().length - 1
+    ) {
+      const { line, col } = caretLineCol(ed);
+      if (line === activeEnd && col === getLines()[line].length) {
+        e.preventDefault();
+        // 移動先が画像のみの行なら enterLine が選択状態にする。stopPropagation しないと
+        // 同じ keydown が document の画像選択用キー処理に届き、二重に隣へ進めてしまう
+        e.stopPropagation();
+        enterLine(activeEnd + 1, 0);
+      }
+      return;
+    }
     if ((e.key === 'Backspace' || e.key === 'Delete') && window.getSelection().isCollapsed) {
-      // 結合結果の行が画像のみの行になり enterLine が選択状態にすることがある。同じ理由で止める
+      // 結合結果の行が画像のみの行になり enterLine が選択状態にすることがある。
+      // stopPropagation しないと同じ keydown が document の画像選択用キー処理に届いてしまう
       if (mergeLine(ed, e.key === 'Backspace')) { e.preventDefault(); e.stopPropagation(); }
     }
   });
@@ -1552,6 +1596,18 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (selectedImage.line < getLines().length - 1) enterLine(selectedImage.line + 1, null);
+    return;
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    // 選択を解除して前の行の末尾へ（隣も画像のみの行なら enterLine が連続して選択状態にする）。
+    // 端で行が無ければ選択を維持する（何もしない）
+    if (selectedImage.line > 0) enterLine(selectedImage.line - 1, null);
+    return;
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    if (selectedImage.line < getLines().length - 1) enterLine(selectedImage.line + 1, 0);
     return;
   }
   if (e.key === 'Backspace' || e.key === 'Delete') {
