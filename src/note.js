@@ -28,6 +28,11 @@ document.addEventListener('dragover', (e) => { if (isFileDrag(e)) e.preventDefau
 document.addEventListener('drop', (e) => { if (isFileDrag(e)) e.preventDefault(); });
 
 let saveTimer = null;
+// true の間は scheduleSave の debounce 起動を止める。行またぎ選択のペースト（削除 → 画像保存等の
+// 非同期処理 → 挿入）で、削除直後に 300ms のデバウンスが先に切れて editHistory へ「削除だけ」を
+// 積んでしまうと、続く挿入が別の undo 手になってしまう。一連の操作が終わるまで保留し、最後に
+// まとめて 1 回だけ scheduleSave を呼ぶことで undo を 1 手に保つ
+let holdSave = false;
 
 // ── Editor State ──────────────────────────────────
 // rawContent が唯一の真実。activeStart/activeEnd は今だけ生 Markdown で
@@ -1182,8 +1187,15 @@ async function insertConverted(ed, converted, fallbackLine) {
 
 async function onEditorPaste(e) {
   e.preventDefault();
-  const ed = e.currentTarget;
-  const text = e.clipboardData.getData('text/plain');
+  await pasteIntoEditor(e.currentTarget, e.clipboardData);
+}
+
+/**
+ * clipboardData を生エディタ ed へ実際に反映する（onEditorPaste の本体。行またぎ選択の
+ * ペースト（選択を削除してから開いた生エディタへ続けて合流する経路）とも共有する）。
+ */
+async function pasteIntoEditor(ed, clipboardData) {
+  const text = clipboardData.getData('text/plain');
   const sel = window.getSelection();
   const selected = sel.toString();
 
@@ -1196,7 +1208,7 @@ async function onEditorPaste(e) {
   }
 
   if (!text) {
-    const imageItem = Array.from(e.clipboardData.items)
+    const imageItem = Array.from(clipboardData.items)
       .find(item => item.kind === 'file' && item.type.startsWith('image/'));
     if (imageItem) {
       await pasteImage(ed, imageItem.getAsFile());
@@ -1204,7 +1216,7 @@ async function onEditorPaste(e) {
     }
   }
 
-  await insertConverted(ed, toMarkdown(text, e.clipboardData.getData('text/html')));
+  await insertConverted(ed, toMarkdown(text, clipboardData.getData('text/html')));
 }
 
 /**
@@ -1292,6 +1304,7 @@ function autocompleteCheckbox(ed) {
 // ── Auto-Save Content ─────────────────────────────
 function scheduleSave() {
   clearTimeout(saveTimer);
+  if (holdSave) return;
   saveTimer = setTimeout(saveNow, 300);
 }
 
@@ -1609,8 +1622,11 @@ document.addEventListener('keydown', (e) => {
 
 // ── Cross-line Selection Guard ────────────────────
 // 行をまたぐ選択（markdown-view の描画テキスト上の Range）は resolveSelectionBounds で
-// 生 Markdown の範囲へ解決できるため、削除・カット・キャレットの畳み込みはここで実際に処理する。
-// タイピング・ペースト・IME 等、置換系の破壊的操作は一律ブロックする。
+// 生 Markdown の範囲へ解決できるため、削除・カット・キャレットの畳み込み・印字可能キーの
+// 置換入力・ペーストはここで実際に処理する（削除 + 挿入を 1 回の applyLines にまとめ、undo が
+// 1 手で「選択+入力前」に戻るようにする）。IME 打鍵での置換は非対応（生エディタにフォーカスが
+// 無いため composition イベント自体が起きず、成立させる経路が無い）。それ以外の組み立てられない
+// 破壊的操作（Dead key 等）は一律ブロックする。
 const NAV_KEYS = new Set(['Home', 'End', 'PageUp', 'PageDown']);
 const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
 
@@ -1641,15 +1657,23 @@ function selectionSpansRawLines() {
   return !!bounds && bounds.start.line !== bounds.end.line;
 }
 
-/** 行またぎ選択（生 Markdown の {start, end}）を削除する。start 行の手前と end 行の続きを
- * 1 行へ結合し、間の行ごと取り除く。全体を消せば空 1 行になる。キャレットは start に置いて
- * 生表示にする（applyLines が rawContent 更新 → renderAll → enterLine → 保存の順で行う）。 */
-function deleteSelectionRange(bounds) {
+/** 行またぎ選択（生 Markdown の {start, end}）を insertedText で置き換える。start 行の手前と
+ * end 行の続きの間へ insertedText を差し込む（改行を含めば複数行に展開される。空文字なら
+ * 削除だけになる）。全体を空にすれば空 1 行になる。キャレットは insertedText の直後に置いて
+ * 生表示にする（applyLines が rawContent 更新 → renderAll → enterLine → 保存の順で行う。
+ * 削除と挿入をここで 1 回の applyLines にまとめることで undo も 1 手にまとまる）。 */
+function spliceSelectionRange(bounds, insertedText) {
   const { start, end } = bounds;
   const lines = getLines();
-  const merged = lines[start.line].slice(0, start.col) + lines[end.line].slice(end.col);
-  lines.splice(start.line, end.line - start.line + 1, merged);
-  applyLines(lines, start.line, start.col);
+  const prefix = lines[start.line].slice(0, start.col);
+  const suffix = lines[end.line].slice(end.col);
+  const parts = insertedText.split('\n');
+  parts[0] = prefix + parts[0];
+  const caretLine = start.line + parts.length - 1;
+  const caretCol = parts[parts.length - 1].length;
+  parts[parts.length - 1] += suffix;
+  lines.splice(start.line, end.line - start.line + 1, ...parts);
+  applyLines(lines, caretLine, caretCol);
 }
 
 /** start と end が resolveSelectionBounds 上で同一点に解決されたかどうか。hr・空フェンス等の
@@ -1657,6 +1681,15 @@ function deleteSelectionRange(bounds) {
  * ここには来ない（このチェックが捕まえるのは、それ以外の理由で退化した選択だけ）。 */
 function boundsAreDegenerate(bounds) {
   return bounds.start.line === bounds.end.line && bounds.start.col === bounds.end.col;
+}
+
+/** 選択を置き換える対象になる印字可能キーかどうか。e.key.length === 1 は Backspace・Enter・
+ * ArrowLeft 等の名前つきキーを自然に除外する（IME 変換中の keydown は key が "Process" になる
+ * ため、isComposing のチェックと合わせて二重に除外される）。⌥+文字（例: ⌥8 → •）は e.key が
+ * 変換済みの 1 文字になるため対象に含める。⌥+矢印・⌥Backspace・Dead key 等は e.key.length が
+ * 1 にならず、この時点で自然に除外される。⌘/Ctrl 付きは対象外（既定の編集操作に任せる）。 */
+function isPrintableReplacementKey(e) {
+  return e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.isComposing;
 }
 
 /** 現在の DOM 選択を削除向けに判定する（判定フェーズ、resolveSelectionBounds 経由で例外を
@@ -1674,16 +1707,22 @@ function resolveDeletableBounds() {
   return bounds;
 }
 
-/** resolveDeletableBounds で得た bounds を実際に削除する（変更フェーズ）。ここで投げた例外は
- * rawContent と DOM が食い違ったまま止まる致命的なバグであり、判定フェーズの「解決できない
- * 選択は既定に委ねる」とは性質が違うため、呼び出し元は try で包まず伝播させる。 */
-function commitSelectionDeletion(bounds) {
+/** resolveDeletableBounds で得た bounds を実際に置き換える（変更フェーズ）。insertedText を
+ * 省略すると削除だけになる（Backspace/Delete/⌘X はこちら）。ここで投げた例外は rawContent と
+ * DOM が食い違ったまま止まる致命的なバグであり、判定フェーズの「解決できない選択は既定に
+ * 委ねる」とは性質が違うため、呼び出し元は try で包まず伝播させる。 */
+function commitSelectionReplacement(bounds, insertedText = '') {
   window.getSelection().removeAllRanges();
-  // splice で行番号がずれる前に、stale な画像選択を解いておく。deleteSelectionRange の後だと
-  // enterLine が張り直した新しい画像選択までここで消してしまう（開始行が画像のみの行になった
-  // ケースで、生エディタも画像選択も無い操作不能状態を招く）
+  // splice で行番号がずれる前に、stale な画像選択を解いておく。spliceSelectionRange の後だと
+  // enterLine が張り直した新しい画像選択・生エディタまでここで消してしまう（開始行が画像のみの
+  // 行になったケースで、生エディタも画像選択も無い操作不能状態を招く）
   clearImageSelection();
-  deleteSelectionRange(bounds);
+  spliceSelectionRange(bounds, insertedText);
+}
+
+/** 削除だけを行う commitSelectionReplacement のショートハンド。 */
+function commitSelectionDeletion(bounds) {
+  commitSelectionReplacement(bounds);
 }
 
 /** 行またぎ選択中の無修飾矢印キーの畳み先を判定する（判定フェーズ、例外を投げうる）。
@@ -1756,14 +1795,31 @@ document.addEventListener('keydown', (e) => {
         e.stopPropagation();
         commitSelectionDeletion(bounds);
       }
+      return;
+    }
+    // 印字可能キー（Shift のみ許容。⌘/Ctrl/⌥ 付きは既定の編集操作に任せる）は選択を
+    // 置き換える（コピー範囲と揃える）
+    if (isPrintableReplacementKey(e)) {
+      const bounds = resolveOrBlock(e, resolveDeletableBounds);
+      if (bounds === RESOLVE_FAILED) return;
+      if (bounds) {
+        e.preventDefault();
+        e.stopPropagation();
+        commitSelectionReplacement(bounds, e.key);
+      }
     }
     return;
   }
 
   if (e.metaKey || e.ctrlKey) {
     if (e.key.toLowerCase() === 'v') {
-      e.preventDefault();
-      return;
+      // ⌘V は基本 preventDefault しない。ブラウザの既定に任せて paste イベントを発生させ、
+      // 実際の置き換えは paste リスナー（resolveDeletableBounds を共有する）に委ねる。
+      // ただし選択が生エディタに触れる等で paste リスナーが処理しない場合はここで止めないと、
+      // 行またぎ選択のままネイティブ paste が編集可能領域と描画 DOM にまたがって実行されてしまう
+      const bounds = resolveOrBlock(e, resolveDeletableBounds);
+      if (bounds === RESOLVE_FAILED) return;
+      if (!bounds) e.preventDefault();
     }
     if (e.key.toLowerCase() === 'x') {
       // ⌘X は基本 preventDefault しない。ブラウザの既定に任せて cut イベントを発生させ、
@@ -1806,6 +1862,18 @@ document.addEventListener('keydown', (e) => {
     }
     // 解決できない選択（生エディタに触れる等）は下の既定ブロックに委ねる
   }
+  // 印字可能キー（Shift のみ許容）は行またぎ選択を置き換える
+  if (isPrintableReplacementKey(e)) {
+    const bounds = resolveOrBlock(e, resolveDeletableBounds);
+    if (bounds === RESOLVE_FAILED) return;
+    if (bounds) {
+      e.preventDefault();
+      e.stopPropagation();
+      commitSelectionReplacement(bounds, e.key);
+      return;
+    }
+    // 解決できない選択（生エディタに触れる等）は下の既定ブロックに委ねる
+  }
   // preventDefault はブラウザ既定の編集を止めるだけで伝播は止まらない。
   // 生エディタ側の keydown（Enter の行分割・Tab のインデント）にも
   // 届かせないよう、ここで伝播ごと打ち切る。Shift+Enter・Shift+Tab・⌥Backspace 等、
@@ -1814,15 +1882,76 @@ document.addEventListener('keydown', (e) => {
   e.stopPropagation();
 }, true);
 
-for (const type of ['paste', 'drop']) {
-  document.addEventListener(type, (e) => {
-    // 画像ドロップは行をまたぐ選択が残っていても許可する（選択範囲への破壊的な書き込みではない）
-    if (type === 'drop' && isFileDrag(e)) return;
-    if (!selectionSpansLines() && !selectionSpansRawLines()) return;
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-}
+// 行またぎ選択（および描画上の単一行選択）へのペーストは、選択を削除してからキャレット位置に
+// 生エディタを開き、既存のペースト経路（pasteIntoEditor）へ合流させる。resolveDeletableBounds
+// が解決できない（選択が無い・生エディタ内で完結する 等）ときは既定のペーストに任せる。
+// 実アプリではネイティブ Edit メニューの Paste（PredefinedMenuItem::paste）が ⌘V を先取りする
+// ため、keydown の ⌘V ガードを通らずに paste イベントが直接届く。解決できない選択のうち
+// 行またぎのものは blockUnhandledCrossLineEdit で止める（cut と同じ穴を塞ぐ）
+document.addEventListener('paste', async (e) => {
+  let bounds;
+  try {
+    bounds = resolveDeletableBounds();
+  } catch (err) {
+    console.error('paste guard failed:', err);
+    blockUnhandledCrossLineEdit(e);
+    return;
+  }
+  if (!bounds) {
+    blockUnhandledCrossLineEdit(e);
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+
+  const clipboardData = e.clipboardData;
+  const text = clipboardData.getData('text/plain');
+  const url = text.trim();
+
+  // 選択テキスト + URL ペーストは生エディタ内の既存挙動（pasteIntoEditor）と揃え、
+  // 削除と挿入を 1 回の splice で markdown link に置き換える。ラベルは選択が単一行のときだけ
+  // bounds（resolveSelectionBounds が正規化した生 Markdown の範囲）から組み立てる。行またぎの
+  // ラベルをそのまま埋めると、spliceSelectionRange が改行で複数行に分割してリンクが壊れるため、
+  // その場合はリンク化せず素の URL 挿入（下の通常経路）に落とす
+  const singleLineLabel = bounds.start.line === bounds.end.line
+    ? getLines()[bounds.start.line].slice(bounds.start.col, bounds.end.col)
+    : '';
+  if (singleLineLabel && /^https?:\/\/\S+$/.test(url)) {
+    commitSelectionReplacement(bounds, `[${singleLineLabel}](${url})`);
+    return;
+  }
+
+  // 削除と（画像保存等の非同期処理を挟みうる）挿入を undo 1 手にまとめるため、
+  // 一連の操作が終わるまで debounce の起動を保留し、最後にまとめて 1 回だけ発火させる
+  holdSave = true;
+  try {
+    commitSelectionReplacement(bounds);
+    const ed = activeEditor();
+    if (!ed) {
+      // 削除後のキャレット行が画像のみの行になった等で生エディタが開けない場合は、
+      // プレーンテキストだけでも spliceSelectionRange の挿入テキストとして反映する
+      // （無ければ削除だけで諦める）
+      if (text) {
+        const caret = { line: bounds.start.line, col: bounds.start.col };
+        commitSelectionReplacement({ start: caret, end: caret }, text);
+      }
+      return;
+    }
+    await pasteIntoEditor(ed, clipboardData);
+  } finally {
+    holdSave = false;
+    scheduleSave();
+  }
+}, true);
+
+// ドロップは選択の置き換えに含めない（画像ドロップは行をまたぐ選択が残っていても許可する。
+// 選択範囲への破壊的な書き込みではないため）
+document.addEventListener('drop', (e) => {
+  if (isFileDrag(e)) return;
+  if (!selectionSpansLines() && !selectionSpansRawLines()) return;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 
 // ── Image Selection: keyboard ──────────────────────
 // 画像選択中は生エディタが無い（フォーカス先の contenteditable が存在しない）ため、
@@ -2735,17 +2864,17 @@ document.addEventListener('copy', (e) => {
   e.clipboardData.setData('text/plain', payload.plain);
 });
 
-/** cut イベントを処理できない選択が行をまたいでいたら既定のカットを止める。実アプリでは
- * ネイティブ Edit メニューの Cut（PredefinedMenuItem::cut）が ⌘X を先取りするため、keydown の
- * ⌘X ガードを通らずに cut イベントが直接届く。ここで止めないと、行またぎ選択のまま
- * ネイティブ cut が編集可能領域と描画 DOM にまたがって実行され、管理外の DOM が壊れる。
- * 生エディタ内で完結する選択は spans が false なので既定のカットのまま通る。 */
-function blockUnhandledCrossLineCut(e) {
+/** cut/paste イベントを処理できない選択が行をまたいでいたら既定の cut/paste を止める。実アプリ
+ * ではネイティブ Edit メニューの Cut/Paste（PredefinedMenuItem::cut/paste）が ⌘X/⌘V を先取り
+ * するため、keydown の ⌘X/⌘V ガードを通らずに cut/paste イベントが直接届く。ここで止めないと、
+ * 行またぎ選択のままネイティブ cut/paste が編集可能領域と描画 DOM にまたがって実行され、
+ * 管理外の DOM が壊れる。生エディタ内で完結する選択は spans が false なので既定のまま通る。 */
+function blockUnhandledCrossLineEdit(e) {
   let spans = true; // 判定自体が例外を投げたときは安全側（ブロック）に倒す
   try {
     spans = selectionSpansLines() || selectionSpansRawLines();
   } catch (err) {
-    console.error('cross-line cut guard failed:', err);
+    console.error('cross-line edit guard failed:', err);
   }
   if (spans) {
     e.preventDefault();
@@ -2768,13 +2897,13 @@ document.addEventListener('cut', (e) => {
     resolved = resolveCutSelection();
   } catch (err) {
     console.error('cut guard failed:', err);
-    blockUnhandledCrossLineCut(e);
+    blockUnhandledCrossLineEdit(e);
     return;
   }
   if (!resolved) {
     // 解決できない選択のうち、生エディタ内で完結するものは既定のカットに任せ、
     // 行またぎのものはブロックする
-    blockUnhandledCrossLineCut(e);
+    blockUnhandledCrossLineEdit(e);
     return;
   }
   const { range, bounds } = resolved;
@@ -2906,11 +3035,11 @@ unlisteners.push(listen('settings-changed', (e) => {
 
 // ── Cleanup on window close ──────────────────────
 window.addEventListener('beforeunload', () => {
-  // 生表示中の行や保留中のデバウンスを取りこぼさずに保存する
-  if (saveTimer || activeStart != null) {
-    snapshotContent();
-    saveNow();
-  }
+  // 生表示中の行や保留中のデバウンスを取りこぼさずに保存する。holdSave 中（ペーストの非同期
+  // 処理待ち）は saveTimer が立っていないため、その有無に頼らず常に呼ぶ（同値なら history 側の
+  // 同値ガードで無視されるだけなので、余分に呼んでも問題ない）
+  snapshotContent();
+  saveNow();
   clearTimeout(saveTimer);
   clearTimeout(geoTimer);
   Promise.all(unlisteners).then(fns => fns.forEach(fn => fn()));

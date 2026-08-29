@@ -21,7 +21,7 @@ export async function injectNoteMock(
   page: Page,
   noteOverrides: Record<string, unknown> = {},
   settingsOverrides: Record<string, unknown> = {},
-  options: { captureInvokes?: boolean } = {},
+  options: { captureInvokes?: boolean; invokeDelays?: Record<string, number> } = {},
 ) {
   const note = {
     id: "test-note-id",
@@ -38,6 +38,8 @@ export async function injectNoteMock(
 
   await page.addInitScript((data) => {
     const baseMock = async (cmd: string, args?: unknown) => {
+      const delay = data.invokeDelays[cmd];
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       switch (cmd) {
         case "get_note":              return data.note;
         case "get_settings":          return data.settings;
@@ -109,7 +111,12 @@ export async function injectNoteMock(
         }),
       },
     };
-  }, { note, settings: { ...DEFAULT_SETTINGS, ...settingsOverrides }, captureInvokes: !!options.captureInvokes });
+  }, {
+    note,
+    settings: { ...DEFAULT_SETTINGS, ...settingsOverrides },
+    captureInvokes: !!options.captureInvokes,
+    invokeDelays: options.invokeDelays ?? {},
+  });
 }
 
 // ── Settings mock ──────────────────────────────────────────

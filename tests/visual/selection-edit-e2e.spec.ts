@@ -2,8 +2,8 @@ import { test, expect, enterEdit, getContent, selectMarkdownRange } from "./fixt
 
 // 行またぎ選択（markdown-view の描画テキスト上の Range）に対する削除系の操作。
 // resolveSelectionBounds で生 Markdown の範囲へ解決し、行を splice して applyLines で
-// 再描画・保存する。タイピング・ペースト等、行構成をその場では組み立てられない破壊的操作は
-// 引き続き一律ブロックする（Cross-line Selection Guard の残置部分）。
+// 再描画・保存する。タイピング・ペーストによる置換系の操作は selection-replace-e2e.spec.ts
+// を参照。組み立てられない破壊的操作（Dead key 等）は Cross-line Selection Guard がブロックする。
 
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
@@ -18,15 +18,6 @@ function caretOffsetInEditor(page: import("@playwright/test").Page) {
     pre.setEnd(range.startContainer, range.startOffset);
     return pre.toString().length;
   });
-}
-
-/** document へ keydown の KeyboardEvent を dispatch し、preventDefault の有無を返す
- * （dispatchEvent は cancelable なイベントで preventDefault() が呼ばれると false を返す）。 */
-function dispatchKeydown(page: import("@playwright/test").Page, key: string) {
-  return page.evaluate((k) => {
-    const ev = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
-    return document.dispatchEvent(ev);
-  }, key);
 }
 
 /** document へ cut の ClipboardEvent を dispatch し、preventDefault の有無とセットされた
@@ -171,30 +162,8 @@ test.describe("行またぎ選択の無修飾矢印キー", () => {
 });
 
 test.describe("行またぎ選択中は引き続きブロックされる操作（ガード残置）", () => {
-  test("タイピングはブロックされ、内容が変わらない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-
-    await selectMarkdownRange(page, 0, 0, 1, "def".length);
-    const notCanceled = await dispatchKeydown(page, "x");
-
-    expect(notCanceled).toBe(false); // preventDefault された
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-
-  test("ペーストはブロックされ、内容が変わらない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-
-    await selectMarkdownRange(page, 0, 0, 1, "def".length);
-    const notCanceled = await page.evaluate(() => {
-      const dt = new DataTransfer();
-      dt.setData("text/plain", "x");
-      const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt });
-      return document.dispatchEvent(ev);
-    });
-
-    expect(notCanceled).toBe(false); // preventDefault された
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
+  // タイピング・ペーストによる置換は selection-replace-e2e.spec.ts を参照。ここは
+  // 組み立てられない破壊的操作（Dead key 相当・Shift/⌥ 付きの編集キー等）だけを扱う。
 
   // 生エディタに触れない純粋な mdView 選択でも、Shift/⌥ 付きの破壊的キーはブロックされる
   // ことを確認する（生エディタに触れる選択のケースは別 describe ブロックで確認済み）。
