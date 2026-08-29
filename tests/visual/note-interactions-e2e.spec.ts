@@ -109,9 +109,16 @@ test.describe("ペースト（URLリンク変換）", () => {
     // "hello" と入力
     await page.locator("#editor").pressSequentially("hello");
 
-    // "hello" を全選択（macOS: Meta+a, Linux: Control+a）
-    const mod = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${mod}+a`);
+    // "hello" を全選択。⌘A は付箋全体を選択する（selectAllNote）ため、生エディタ内だけを
+    // 選択するにはここでは Range を直接張る
+    await page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
 
     // クリップボードにURLを設定してペーストイベントをdispatch
     await page.evaluate(() => {

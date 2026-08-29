@@ -37,6 +37,11 @@ let activeStart = null;
 let activeEnd = null;
 let composing = false;
 
+// 生エディタの keydown ごとに増える通し番号。scheduleShiftArrowClampCheck が
+// setTimeout(0) の直前に captureし、発火時に比較する（後続のキー入力が起きていれば
+// 破棄する）のに使う。詳細は scheduleShiftArrowClampCheck 参照
+let editorKeySeq = 0;
+
 // ⌘Z/⌘⇧Z の undo/redo 履歴。loadNote() が最初の content で初期化する
 let editHistory = null;
 
@@ -245,10 +250,30 @@ function scrollCaretIntoView(el) {
   placeCaret(el, offset);
 }
 
+/** el 内の (node, offset) を、el の先頭からの文字オフセットへ変換する（caretOffset の
+ * 任意ノード版。node/offset は el の子孫を指している前提）。 */
+function textOffsetWithin(el, node, offset) {
+  const pre = document.createRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(node, offset);
+  return pre.toString().length;
+}
+
+/** 生エディタ内の文字オフセットを、文書全体での (行番号, 列) に変換する
+ * （caretLineCol の任意オフセット版）。 */
+function editorOffsetToLineCol(ed, offset) {
+  const before = editorText(ed).slice(0, offset).split('\n');
+  return { line: activeStart + before.length - 1, col: before[before.length - 1].length };
+}
+
 /** 生エディタ内のキャレット位置を、文書全体での (行番号, 列) に変換する。 */
 function caretLineCol(ed) {
-  const before = editorText(ed).slice(0, caretOffset(ed)).split('\n');
-  return { line: activeStart + before.length - 1, col: before[before.length - 1].length };
+  return editorOffsetToLineCol(ed, caretOffset(ed));
+}
+
+/** 生エディタ内の選択の一端（node, offset）を、文書全体での (行番号, 列) に変換する。 */
+function editorPointToLineCol(ed, node, offset) {
+  return editorOffsetToLineCol(ed, textOffsetWithin(ed, node, offset));
 }
 
 /**
@@ -1357,6 +1382,10 @@ function bindEditor(ed) {
   });
 
   ed.addEventListener('keydown', (e) => {
+    // scheduleShiftArrowClampCheck が setTimeout(0) 待ちの間に後続のキー入力（IME 含む）が
+    // 割り込んだかどうかを判定するための通し番号。composing チェックより前でインクリメントし、
+    // IME 経由の keydown（後段の早期 return で無視される）でも確実に進める
+    editorKeySeq++;
     // WebKit は変換確定の Enter より先に compositionend を出すので、composing も
     // isComposing も false になっている。IME 経由の keydown は keyCode が 229 になる。
     if (composing || e.isComposing || e.keyCode === 229) return;
@@ -1376,16 +1405,13 @@ function bindEditor(ed) {
       scheduleSave();
       return;
     }
-    // 選択が生エディタの外へ広がらないように自前で全選択する。
-    // 修飾キーは ⌘ 単独のときだけ効かせる（Ctrl+⌘+A 等の未定義の組み合わせで
-    // 何もしない macOS 標準に合わせる）。toLowerCase は CapsLock 対応
+    // ⌘A は付箋全体を選択する（selectAllNote）。修飾キーは ⌘ 単独のときだけ効かせる
+    // （Ctrl+⌘+A 等の未定義の組み合わせで何もしない macOS 標準に合わせる）。toLowerCase は
+    // CapsLock 対応。生エディタ内の keydown で拾うのは、この関数先頭の composing チェックを
+    // 経由させるため（変換中の ⌘A で確定前の入力を巻き込んで選択させない）
     if (e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      const range = document.createRange();
-      range.selectNodeContents(ed);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+      selectAllNote();
       return;
     }
     // 実機の WKWebView は contenteditable 上で Ctrl+A/E を標準キーバインド（行頭・行末移動）
@@ -1403,14 +1429,32 @@ function bindEditor(ed) {
       scrollCaretIntoView(ed);
       return;
     }
-    if (e.key === 'ArrowUp' && activeStart > 0) {
+    // Shift+矢印がエディタの境界（WebKit/Chromium が選択をクランプする位置）に達すると、
+    // ネイティブは選択を伸ばせず、選択が生エディタの外の描画 DOM へ届かない。
+    // scheduleShiftArrowClampCheck が preventDefault せずネイティブにまず試させ、
+    // 動けなかった（＝クランプされた）ときだけ描画 DOM 側の選択へ変換する
+    if (
+      e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
+      && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowRight' || e.key === 'ArrowLeft')
+    ) {
+      const key = e.key;
+      scheduleShiftArrowClampCheck(ed, () => {
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+          convertEditorShiftArrowAcrossBoundary(ed, key === 'ArrowDown' ? 'down' : 'up');
+        } else {
+          convertEditorShiftHorizontalAcrossBoundary(ed, key === 'ArrowRight' ? 'right' : 'left');
+        }
+      });
+      return;
+    }
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && activeStart > 0) {
       const { line, col } = caretLineCol(ed);
       // 移動先が画像のみの行なら enterLine が選択状態に切り替える（スキップはしない）。
       // selectedImage を立てる呼び出しなので、後段の画像選択用キー処理へ二重に届かせない
       if (line === activeStart) { e.preventDefault(); e.stopPropagation(); enterLine(activeStart - 1, col); }
       return;
     }
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       const { line, col } = caretLineCol(ed);
       if (line === activeEnd && activeEnd < getLines().length - 1) {
         e.preventDefault();
@@ -1463,6 +1507,57 @@ function bindEditor(ed) {
     }
   });
 
+  // 生エディタ内で mousedown したドラッグが別の描画行の上に達したら、境界を越えたとみなして
+  // エディタを commit で閉じ、描画 DOM 上の選択へ切り替える（ed 自身に張るのは
+  // 同一行内のドラッグを完全ネイティブのままにするため）。
+  ed.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // 左ボタンのみ
+    const startRange = caretRangeFromPointCompat(e.clientX, e.clientY);
+    if (!startRange || !ed.contains(startRange.startContainer)) return;
+    const startLineCol = editorPointToLineCol(ed, startRange.startContainer, startRange.startOffset);
+    let converted = false;
+
+    const onMove = (moveEvent) => {
+      // mouseup を取りこぼした（ウィンドウ外での release 等）場合の自己回復
+      // （onResizeMouseMove と同じ作法）。残ったままだと、ボタンを押していない
+      // ただのマウス移動で commitActive が走り生エディタが勝手に閉じてしまう
+      if (moveEvent.buttons === 0) {
+        onUp();
+        return;
+      }
+      if (converted) {
+        // 変換後は commit の再描画でネイティブのドラッグ選択が続かないため、
+        // mousemove ごとに自前で終点を追従させる
+        const target = caretRangeFromPointCompat(moveEvent.clientX, moveEvent.clientY);
+        if (target) window.getSelection().extend(target.startContainer, target.startOffset);
+        return;
+      }
+      const overLine = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest('[data-line]');
+      if (!overLine || ed.contains(overLine)) return; // 同一エディタ内のドラッグはネイティブのまま
+      converted = true;
+      commitActive();
+      const anchorPoint = domPointForRawPosition(startLineCol.line, startLineCol.col);
+      if (!anchorPoint) return;
+      const range = document.createRange();
+      range.setStart(anchorPoint.node, anchorPoint.offset);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const target = caretRangeFromPointCompat(moveEvent.clientX, moveEvent.clientY);
+      if (target) sel.extend(target.startContainer, target.startOffset);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    // ウィンドウ外へドラッグしたまま release される等で mouseup が届かないケースの保険
+    window.addEventListener('blur', onUp);
+  });
+
   ed.addEventListener('input', (e) => {
     if (!e.isComposing && e.data === ']') autocompleteCheckbox(ed);
     snapshotContent();
@@ -1484,13 +1579,40 @@ function bindEditor(ed) {
   });
 }
 
+// ── Select All (⌘A) ───────────────────────────────
+/** ⌘A・Edit メニューの Select All に共通の「付箋全体を選択する」処理。生エディタが開いていれば
+ * 書き戻して閉じ、画像選択中ならそれも解除したうえで、描画 DOM 上に付箋の内容全体の Range を張る。
+ * 空の付箋（内容が空 1 行のみ）はプレースホルダしか無く選択対象が無いので何もしない。 */
+function selectAllNote() {
+  commitActive();
+  clearImageSelection();
+  const lines = getLines();
+  if (lines.length === 1 && lines[0] === '') return;
+  const range = document.createRange();
+  range.selectNodeContents(mdView);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// 生エディタ内の ⌘A は bindEditor 側の keydown（composing チェック込み）が拾うが、
+// stopPropagation はしていないため、この document レベルのリスナーにも同じ keydown が
+// 届く。bindEditor 側が selectAllNote() で #editor を DOM から外した後にここへ来ると
+// activeEditor() は既に null を返し、e.defaultPrevented を見ないと selectAllNote() が
+// 二重に走る（冪等なので実害は無いが、ここは意図的に一度だけ実行する契約にする）
+document.addEventListener('keydown', (e) => {
+  if (!(e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a')) return;
+  if (e.defaultPrevented || activeEditor()) return;
+  e.preventDefault();
+  selectAllNote();
+});
+
 // ── Cross-line Selection Guard ────────────────────
-// 行をまたぐ選択のまま編集すると管理外の DOM が壊れ、rawContent と
-// 表示が乖離する。コピーは通し、破壊的な操作だけを止める。
-const NAV_KEYS = new Set([
-  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End',
-  'PageUp', 'PageDown', 'Escape', 'Shift', 'Meta', 'Control', 'Alt',
-]);
+// 行をまたぐ選択（markdown-view の描画テキスト上の Range）は resolveSelectionBounds で
+// 生 Markdown の範囲へ解決できるため、削除・カット・キャレットの畳み込みはここで実際に処理する。
+// タイピング・ペースト・IME 等、置換系の破壊的操作は一律ブロックする。
+const NAV_KEYS = new Set(['Home', 'End', 'PageUp', 'PageDown']);
+const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
 
 function blockOf(node) {
   const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
@@ -1504,25 +1626,199 @@ function selectionSpansLines() {
   return blockOf(range.startContainer) !== blockOf(range.endContainer);
 }
 
+/** 選択が生 Markdown 上で複数行にまたがるか（resolveSelectionBounds で解決できる場合）。
+ * コードブロックは複数の raw 行を単一の DOM ブロック（<pre>）で描画するため、
+ * selectionSpansLines（DOM ブロックの境界）だけでは「内容行を丸ごと選択したコードブロック」
+ * を見逃す。resolveSelectionBounds が返す行番号で判定することでこれを拾う。 */
+function selectionSpansRawLines() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  const ed = activeEditor();
+  if (ed && range.intersectsNode(ed)) return false; // 生エディタに触れる選択は既定の編集操作に任せる
+  if (!mdView.contains(range.commonAncestorContainer)) return false;
+  const bounds = resolveSelectionBounds(range);
+  return !!bounds && bounds.start.line !== bounds.end.line;
+}
+
+/** 行またぎ選択（生 Markdown の {start, end}）を削除する。start 行の手前と end 行の続きを
+ * 1 行へ結合し、間の行ごと取り除く。全体を消せば空 1 行になる。キャレットは start に置いて
+ * 生表示にする（applyLines が rawContent 更新 → renderAll → enterLine → 保存の順で行う）。 */
+function deleteSelectionRange(bounds) {
+  const { start, end } = bounds;
+  const lines = getLines();
+  const merged = lines[start.line].slice(0, start.col) + lines[end.line].slice(end.col);
+  lines.splice(start.line, end.line - start.line + 1, merged);
+  applyLines(lines, start.line, start.col);
+}
+
+/** start と end が resolveSelectionBounds 上で同一点に解決されたかどうか。hr・空フェンス等の
+ * 「可視テキストが 1 つも無い行」は expandZeroVisibleLineSelection が先に行全体へ展開するため
+ * ここには来ない（このチェックが捕まえるのは、それ以外の理由で退化した選択だけ）。 */
+function boundsAreDegenerate(bounds) {
+  return bounds.start.line === bounds.end.line && bounds.start.col === bounds.end.col;
+}
+
+/** 現在の DOM 選択を削除向けに判定する（判定フェーズ、resolveSelectionBounds 経由で例外を
+ * 投げうる）。生エディタに触れる選択・解決できない選択・退化した選択（可視範囲が空）では
+ * null。行またぎに限らず、非空の単一行選択も対象にする（「コピーされる範囲 = 削除される範囲」
+ * という設計）。実際の削除は commitSelectionDeletion（変更フェーズ）で行う。 */
+function resolveDeletableBounds() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const ed = activeEditor();
+  if (ed && range.intersectsNode(ed)) return null; // 生エディタに触れる選択は既定の編集操作に任せる
+  const bounds = resolveSelectionBounds(range);
+  if (!bounds || boundsAreDegenerate(bounds)) return null;
+  return bounds;
+}
+
+/** resolveDeletableBounds で得た bounds を実際に削除する（変更フェーズ）。ここで投げた例外は
+ * rawContent と DOM が食い違ったまま止まる致命的なバグであり、判定フェーズの「解決できない
+ * 選択は既定に委ねる」とは性質が違うため、呼び出し元は try で包まず伝播させる。 */
+function commitSelectionDeletion(bounds) {
+  window.getSelection().removeAllRanges();
+  // splice で行番号がずれる前に、stale な画像選択を解いておく。deleteSelectionRange の後だと
+  // enterLine が張り直した新しい画像選択までここで消してしまう（開始行が画像のみの行になった
+  // ケースで、生エディタも画像選択も無い操作不能状態を招く）
+  clearImageSelection();
+  deleteSelectionRange(bounds);
+}
+
+/** 行またぎ選択中の無修飾矢印キーの畳み先を判定する（判定フェーズ、例外を投げうる）。
+ * 左/上は選択開始端、右/下は選択終了端。resolveSelectionBounds が削除向けに正規化した
+ * start/end（マーカー行の col 0）ではなく、ユーザーが選択を始め/終えた可視位置
+ * （startVisual/endVisual、マーカー直後）を使う。解決できなければ null。 */
+function resolveCollapseTarget(key) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const bounds = resolveSelectionBounds(sel.getRangeAt(0));
+  if (!bounds) return null;
+  const forward = key === 'ArrowRight' || key === 'ArrowDown';
+  return forward ? (bounds.endVisual ?? bounds.end) : (bounds.startVisual ?? bounds.start);
+}
+
+/** resolveCollapseTarget で得た畳み先へ実際にキャレットを置く（変更フェーズ。enterLine が
+ * 該当行を生表示で開く）。 */
+function commitCollapse(target) {
+  window.getSelection().removeAllRanges();
+  enterLine(target.line, target.col);
+}
+
+/** cut イベント側で実際に処理できる（選択が生エディタに触れておらず、mdView 内で解決でき、
+ * 退化していない）ときの range と bounds。keydown 側で「cut イベントに任せてよいか」を判定
+ * するのにも使う（判定フェーズ、例外を投げうる）。 */
+function resolveCutSelection() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const ed = activeEditor();
+  if (ed && range.intersectsNode(ed)) return null; // 生エディタに触れる選択は既定の編集操作に任せる
+  if (!mdView.contains(range.commonAncestorContainer)) return null;
+  const bounds = resolveSelectionBounds(range);
+  if (!bounds || boundsAreDegenerate(bounds)) return null;
+  return { range, bounds };
+}
+
+// 判定フェーズの呼び出しが例外を投げたことを示す番兵。resolve 結果が null（＝解決できな
+// かっただけ）と区別するために使う（前者は既に preventDefault 済み、後者は既定に委ねてよい）。
+const RESOLVE_FAILED = Symbol('cross-line-guard-resolve-failed');
+
+/** 判定フェーズ（resolveSelectionBounds 経由で例外を投げうる処理）を try で保護する共通
+ * ラッパー。DOM の data-line が rawContent の行数とずれた瞬間（生エディタ書き戻し直後等）に
+ * 例外が起こりうるため、判定できないときは安全側（preventDefault + stopPropagation）に倒し、
+ * RESOLVE_FAILED を返す。判定結果を使った実際の変更（mutation フェーズ）はこの外で行い、
+ * そちらの例外は握り潰さない。 */
+function resolveOrBlock(e, resolve) {
+  try {
+    return resolve();
+  } catch (err) {
+    console.error('cross-line selection guard failed:', err);
+    e.preventDefault();
+    e.stopPropagation();
+    return RESOLVE_FAILED;
+  }
+}
+
 document.addEventListener('keydown', (e) => {
-  if (!selectionSpansLines()) return;
-  if (e.metaKey || e.ctrlKey) {
-    if (e.key === 'x' || e.key === 'v') e.preventDefault();
+  const spans = resolveOrBlock(e, () => selectionSpansLines() || selectionSpansRawLines());
+  if (spans === RESOLVE_FAILED) return;
+
+  if (!spans) {
+    // 行をまたがない非空の単一行選択も、無修飾の Backspace/⌘X の削除対象にする
+    // （コピー範囲と揃える）。⌘/Ctrl/Shift/⌥ 付きは対象外（既定の編集操作に任せる）
+    if (!e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && (e.key === 'Backspace' || e.key === 'Delete')) {
+      const bounds = resolveOrBlock(e, resolveDeletableBounds);
+      if (bounds === RESOLVE_FAILED) return;
+      if (bounds) {
+        e.preventDefault();
+        e.stopPropagation();
+        commitSelectionDeletion(bounds);
+      }
+    }
     return;
   }
-  if (NAV_KEYS.has(e.key)) return;
+
+  if (e.metaKey || e.ctrlKey) {
+    if (e.key.toLowerCase() === 'v') {
+      e.preventDefault();
+      return;
+    }
+    if (e.key.toLowerCase() === 'x') {
+      // ⌘X は基本 preventDefault しない。ブラウザの既定に任せて cut イベントを発生させ、
+      // 実際の削除は cut リスナー（buildSelectionCopyPayload と bounds を共有する）に委ねる。
+      // ただし選択が生エディタに触れる等で cut リスナーが処理しない場合はここで止めないと、
+      // 行またぎ選択のままネイティブ cut が編集可能領域と描画 DOM にまたがって実行されてしまう
+      const resolvable = resolveOrBlock(e, resolveCutSelection);
+      if (resolvable === RESOLVE_FAILED) return;
+      if (!resolvable) e.preventDefault();
+    }
+    return;
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    window.getSelection().removeAllRanges();
+    return;
+  }
+  if (ARROW_KEYS.has(e.key) || NAV_KEYS.has(e.key)) {
+    // Shift（選択拡張）・⌥（単語移動）付きはネイティブの選択操作に譲る。この免除は
+    // ナビゲーション系キーだけに限る（Shift+Enter 等の破壊的キーまで免除しない）
+    if (e.shiftKey || e.altKey) return;
+    if (ARROW_KEYS.has(e.key)) {
+      const target = resolveOrBlock(e, () => resolveCollapseTarget(e.key));
+      if (target === RESOLVE_FAILED) return;
+      if (target) {
+        e.preventDefault();
+        commitCollapse(target);
+      }
+    }
+    return;
+  }
+  if (!e.shiftKey && !e.altKey && (e.key === 'Backspace' || e.key === 'Delete')) {
+    const bounds = resolveOrBlock(e, resolveDeletableBounds);
+    if (bounds === RESOLVE_FAILED) return;
+    if (bounds) {
+      e.preventDefault();
+      e.stopPropagation();
+      commitSelectionDeletion(bounds);
+      return;
+    }
+    // 解決できない選択（生エディタに触れる等）は下の既定ブロックに委ねる
+  }
   // preventDefault はブラウザ既定の編集を止めるだけで伝播は止まらない。
   // 生エディタ側の keydown（Enter の行分割・Tab のインデント）にも
-  // 届かせないよう、ここで伝播ごと打ち切る。
+  // 届かせないよう、ここで伝播ごと打ち切る。Shift+Enter・Shift+Tab・⌥Backspace 等、
+  // 上のどの分岐にも当てはまらない Shift/⌥ 付きキーもここでブロックする。
   e.preventDefault();
   e.stopPropagation();
 }, true);
 
-for (const type of ['cut', 'paste', 'drop']) {
+for (const type of ['paste', 'drop']) {
   document.addEventListener(type, (e) => {
     // 画像ドロップは行をまたぐ選択が残っていても許可する（選択範囲への破壊的な書き込みではない）
     if (type === 'drop' && isFileDrag(e)) return;
-    if (!selectionSpansLines()) return;
+    if (!selectionSpansLines() && !selectionSpansRawLines()) return;
     e.preventDefault();
     e.stopPropagation();
   }, true);
@@ -1859,7 +2155,10 @@ function resolveSelectionBounds(range) {
 
   // 開始行の可視オフセットが 0（= マーカー直後）なら、行頭（インデント・マーカー含む）から取る。
   // コードブロック行を対象外にする理由は下の終了端と同じ（適用すると選択していない行頭の
-  // 生テキストまで巻き込む）
+  // 生テキストまで巻き込む）。この切り詰めは削除範囲向けの補正であり、キャレットの畳み先
+  // としてはユーザーが選択を始めた可視位置（マーカー直後）を使いたいため、切り詰め前の
+  // startVisual をここで退避しておく（resolveCollapseTarget が使う。終了端の endVisual と対）
+  const startVisual = { line: start.line, col: start.col };
   if (!isCodeBlockLine(codeBlockRanges, start.line) && start.col === markerLength(lines[start.line])) {
     start.col = 0;
   }
@@ -1871,6 +2170,7 @@ function resolveSelectionBounds(range) {
   // そのまま可視テキストなので、この切り詰めを適用すると選択済みの文字を落としてしまう
   // （例: `  - li` というコード行の可視オフセット 0 は raw の col 0 そのもの）。終了行が
   // コードブロック行のときは対象外にする
+  const endVisual = { line: end.line, col: end.col };
   if (
     end.line > start.line
     && !isCodeBlockLine(codeBlockRanges, end.line)
@@ -1881,7 +2181,188 @@ function resolveSelectionBounds(range) {
 
   const fenceExpanded = expandCodeBlockFences(start, end, lines, codeBlockRanges);
   const expanded = expandZeroVisibleLineSelection(fenceExpanded.start, fenceExpanded.end, lines);
-  return expanded;
+  // フェンス拡張・退化選択の吸収で開始・終了行そのものが変わった場合、退避した可視位置は
+  // 別の行を指しており使えない。そのときは削除向けの正規化済み start/end へフォールバックする
+  const collapsedStartVisual = expanded.start.line === startVisual.line ? startVisual : expanded.start;
+  const collapsedEndVisual = expanded.end.line === endVisual.line ? endVisual : expanded.end;
+  return { ...expanded, startVisual: collapsedStartVisual, endVisual: collapsedEndVisual };
+}
+
+// ── Raw → DOM 位置の写像（resolveSelectionPoint の逆） ────
+// 生エディタの境界を越える Shift+矢印・マウスドラッグで、生エディタの
+// raw 位置を描画済み DOM の位置へ変換するのに使う。
+
+/** 行 line の raw 列 col を、行頭マーカーを除いた「内容可視列」（inlineSegments 基準の
+ * 可視文字オフセット）へ変換する。visibleOffsetFromRawOffset（note-lines.js）の DOM 版。 */
+function contentVisibleColumn(line, col) {
+  const lineText = getLines()[line] ?? '';
+  const markerLen = markerLength(lineText);
+  const inlineRaw = lineText.slice(markerLen);
+  const rawInInline = Math.max(0, Math.min(col, lineText.length) - markerLen);
+  return visibleOffsetFromRawOffset(inlineRaw, rawInInline);
+}
+
+/** 描画済みブロック blockEl 上で、「内容可視列」contentVisible に対応する DOM 位置
+ * （テキストノード, オフセット）を返す。番号つきリストの連番プレフィックス分は
+ * ここで足し込むので、呼び出し側は意識しなくてよい。ブロック内にテキストノードが
+ * 無ければ（空行等）ブロック自身の先頭を返す。 */
+function domPointForContentVisible(blockEl, contentVisible) {
+  const prefixLen = orderedDisplayPrefixLength(blockEl);
+  const at = nodeAt(blockEl, prefixLen + Math.max(0, contentVisible));
+  return at || { node: blockEl, offset: 0 };
+}
+
+/**
+ * 生 Markdown の (line, col) を、描画 DOM 上の (node, offset) へ写像する
+ * （resolveSelectionPoint の逆）。マーカー・装飾記法の内部に col が落ちる場合は
+ * visibleOffsetFromRawOffset の丸め規則に従って可視側の近い境界へ寄せる。
+ * 行が描画されていなければ（未レンダー等）null。
+ *
+ * コードブロックのフェンス行（開き・閉じ）には対応する可視テキストが無いため、
+ * 開きフェンス行は内容の先頭へ、閉じフェンス行は内容の末尾へ寄せる。
+ */
+function domPointForRawPosition(line, col) {
+  const block = findBlock(line);
+  if (!block) return null;
+  const { el, start, end } = block;
+  if (el.matches('.md-codeblock')) {
+    const lines = getLines();
+    let visible = 0;
+    if (line <= start) {
+      visible = 0; // 開きフェンス行 → 内容の先頭
+    } else if (line >= end) {
+      for (let l = start + 1; l < end; l++) visible += (lines[l]?.length ?? 0) + 1;
+      visible = Math.max(0, visible - 1); // 閉じフェンス行 → 内容の末尾（最後の改行分を戻す）
+    } else {
+      for (let l = start + 1; l < line; l++) visible += (lines[l]?.length ?? 0) + 1; // + 行間の改行
+      visible += Math.min(Math.max(col, 0), (lines[line] ?? '').length);
+    }
+    const at = nodeAt(el, visible);
+    return at || { node: el, offset: 0 };
+  }
+  return domPointForContentVisible(el, contentVisibleColumn(line, col));
+}
+
+/** document.caretRangeFromPoint の WebKit/Chromium 版と、Firefox 系の
+ * caretPositionFromPoint 版を吸収する。どちらも無ければ null。 */
+function caretRangeFromPointCompat(x, y) {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+  if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (!pos) return null;
+    const range = document.createRange();
+    range.setStart(pos.offsetNode, pos.offset);
+    range.collapse(true);
+    return range;
+  }
+  return null;
+}
+
+/**
+ * 生エディタ内で Shift+矢印の keydown を受けたら呼ぶ共通のクランプ検出。e.preventDefault()
+ * しない: 同一エディタ内での折返し行移動・行末/行頭までの拡張はまずネイティブに任せたい。
+ * 現在の selection の anchor/focus（node, offset）を退避し、setTimeout(0) 後（ネイティブの
+ * デフォルト動作が適用された後）に実際に動けたかを比較する。動けていれば（＝ネイティブの
+ * 範囲内で処理できた）何もしない。動けていなければ（＝WebKit/Chromium が境界でクランプした）
+ * onClamped を呼ぶ。フェンス等の複数行エディタでも同じ判定で足りる: 中間行への移動は
+ * ネイティブ側で普通に進むので moved が true になり、変換は真の境界に達したときだけ発動する。
+ */
+function scheduleShiftArrowClampCheck(ed, onClamped) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const before = {
+    aNode: sel.anchorNode, aOff: sel.anchorOffset, fNode: sel.focusNode, fOff: sel.focusOffset,
+  };
+  // setTimeout(0) の間に後続のキー入力が割り込むと、その入力が選択を偶然 before と同じ位置へ
+  // 戻すことがある（例: Shift+→ で 1 文字だけ拡張した直後に無修飾 ← で畳むと、畳んだ結果が
+  // 拡張前と同じ位置に一致する）。その場合 moved が誤って false になり、実際には境界に
+  // 達していないのに変換が発火してしまう。この keydown の通し番号を捕まえておき、発火時に
+  // ズレていれば「後続入力に割り込まれた」とみなして何もしない
+  const seq = editorKeySeq;
+  setTimeout(() => {
+    if (composing || !ed.isConnected || editorKeySeq !== seq) return;
+    const moved = sel.anchorNode !== before.aNode || sel.anchorOffset !== before.aOff
+      || sel.focusNode !== before.fNode || sel.focusOffset !== before.fOff;
+    if (moved) return; // ネイティブが動けた（折返し行移動・行末までの拡張等）→ 何もしない
+    onClamped();
+  }, 0);
+}
+
+/**
+ * 生エディタ内で Shift+ArrowDown/ArrowUp がエディタの境界（WebKit/Chromium が選択を
+ * クランプする位置）に達したときに呼ぶ。次/前の描画行が無い、またはコードブロック
+ * （対応スコープ外）のときは commitActive() を呼ばず何もしない（←→ 版と同じ判断。
+ * commitActive() を先に呼んでしまうと、対象が無くて変換できない場合でも生エディタが
+ * 閉じてしまい、フォーカスされた contenteditable が無くなって直後の入力が黙って
+ * 捨てられる不具合になる）。対象があればエディタを commit して閉じ、描画 DOM 上に
+ * 「選択 anchor（生 col を可視位置へ写像）→ 次/前の描画行の同等の可視列」の Range を張る。
+ * commitActive の再描画で DOM が丸ごと差し替わるため、anchor/focus の生 (line, col) は
+ * commit 前に読み、DOM 位置への写像は commit 後の新しい DOM に対して行う
+ * （古い DOM ノードを参照する Range は再描画後に detached になり無効化する）。
+ */
+function convertEditorShiftArrowAcrossBoundary(ed, direction) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || activeStart == null) return;
+  const anchorLineCol = editorPointToLineCol(ed, sel.anchorNode, sel.anchorOffset);
+  const focusLineCol = editorPointToLineCol(ed, sel.focusNode, sel.focusOffset);
+  const targetLine = direction === 'down' ? activeEnd + 1 : activeStart - 1;
+
+  const lines = getLines();
+  if (targetLine < 0 || targetLine >= lines.length) return; // 次/前の描画行が無ければ何もしない
+  const targetBlock = findBlock(targetLine);
+  if (!targetBlock || targetBlock.el.matches('.md-codeblock')) return; // コードブロックは対応スコープ外
+  const contentVisible = contentVisibleColumn(focusLineCol.line, focusLineCol.col);
+
+  commitActive();
+
+  // targetBlock は commit 前（再描画前）の DOM を指しているため使い回さず、commit 後の
+  // 新しい mdView に対して findBlock をやり直す（同じ行番号なら同じ行が見つかる）
+  const freshTargetBlock = findBlock(targetLine);
+  if (!freshTargetBlock) return;
+  const focusPoint = domPointForContentVisible(freshTargetBlock.el, contentVisible);
+  const anchorPoint = domPointForRawPosition(anchorLineCol.line, anchorLineCol.col);
+  if (!anchorPoint || !focusPoint) return;
+
+  const range = document.createRange();
+  range.setStart(anchorPoint.node, anchorPoint.offset);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  sel.extend(focusPoint.node, focusPoint.offset);
+}
+
+/**
+ * 生エディタ内で Shift+ArrowRight/ArrowLeft がエディタの境界（内容の末尾/先頭）に達したときに
+ * 呼ぶ。次/前の描画行が無い、またはコードブロック（対応スコープ外）のときは commitActive() を
+ * 呼ばず何もしない（↑↓ 版と同じ判断。理由も同じ: 先に commit すると変換できないのに生エディタが
+ * 閉じ、直後の入力が黙って捨てられる）。対象があればエディタを commit して閉じ、描画 DOM 上に
+ * 「選択 anchor（生 col を可視位置へ写像）→ 次/前の描画行の可視先頭/末尾」の Range を張る。
+ */
+function convertEditorShiftHorizontalAcrossBoundary(ed, direction) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || activeStart == null) return;
+  const anchorLineCol = editorPointToLineCol(ed, sel.anchorNode, sel.anchorOffset);
+  const targetLine = direction === 'right' ? activeEnd + 1 : activeStart - 1;
+  const lines = getLines();
+  if (targetLine < 0 || targetLine >= lines.length) return; // 次/前行が無ければ何もしない
+  const targetBlock = findBlock(targetLine);
+  if (!targetBlock || targetBlock.el.matches('.md-codeblock')) return; // コードブロックは対応スコープ外
+  const targetLineText = lines[targetLine];
+  const targetCol = direction === 'right' ? markerLength(targetLineText) : targetLineText.length;
+
+  commitActive();
+
+  // anchor/focus とも commit 後の新しい DOM に対して写像する（vertical 版と同じ理由）
+  const anchorPoint = domPointForRawPosition(anchorLineCol.line, anchorLineCol.col);
+  const focusPoint = domPointForRawPosition(targetLine, targetCol);
+  if (!anchorPoint || !focusPoint) return;
+
+  const range = document.createRange();
+  range.setStart(anchorPoint.node, anchorPoint.offset);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  sel.extend(focusPoint.node, focusPoint.offset);
 }
 
 /**
@@ -2192,9 +2673,10 @@ function rowsToSemanticHtml(rows) {
  * 「メモを入力…」は [data-line] を持たず、resolveSelectionPoint が対応する行を見つけられない）
  * は null を返す。この場合、呼び出し元は独自のコピー処理をせず既定のコピーに任せる
  * （解決できない DOM の断片を html・plain にそのまま流し込まないため）。
+ * @param bounds 呼び出し元が resolveSelectionBounds(range) を計算済みなら渡す（⌘X が削除範囲と
+ *   共有するため）。省略時はここで計算する。
  */
-function buildSelectionCopyPayload(range) {
-  const bounds = resolveSelectionBounds(range);
+function buildSelectionCopyPayload(range, bounds = resolveSelectionBounds(range)) {
   if (!bounds) return null;
 
   const container = document.createElement('div');
@@ -2253,10 +2735,57 @@ document.addEventListener('copy', (e) => {
   e.clipboardData.setData('text/plain', payload.plain);
 });
 
+/** cut イベントを処理できない選択が行をまたいでいたら既定のカットを止める。実アプリでは
+ * ネイティブ Edit メニューの Cut（PredefinedMenuItem::cut）が ⌘X を先取りするため、keydown の
+ * ⌘X ガードを通らずに cut イベントが直接届く。ここで止めないと、行またぎ選択のまま
+ * ネイティブ cut が編集可能領域と描画 DOM にまたがって実行され、管理外の DOM が壊れる。
+ * 生エディタ内で完結する選択は spans が false なので既定のカットのまま通る。 */
+function blockUnhandledCrossLineCut(e) {
+  let spans = true; // 判定自体が例外を投げたときは安全側（ブロック）に倒す
+  try {
+    spans = selectionSpansLines() || selectionSpansRawLines();
+  } catch (err) {
+    console.error('cross-line cut guard failed:', err);
+  }
+  if (spans) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+
 document.addEventListener('cut', (e) => {
-  if (!selectedImage) return;
+  if (selectedImage) {
+    e.preventDefault();
+    cutSelectedImage();
+    return;
+  }
+  // markdown-view の描画テキスト上の ⌘X。行またぎに限らず、退化していない選択（可視範囲が
+  // 空でない）ならすべて対象にする（コピーされる範囲 = 削除される範囲、という設計）。
+  // copy と同じ payload をクリップボードへ載せたうえで、コピーとは違い選択範囲を実際に削除する
+  // （copy イベントは選択を残すだけ）。判定フェーズ（resolveCutSelection）だけを try で保護する
+  let resolved;
+  try {
+    resolved = resolveCutSelection();
+  } catch (err) {
+    console.error('cut guard failed:', err);
+    blockUnhandledCrossLineCut(e);
+    return;
+  }
+  if (!resolved) {
+    // 解決できない選択のうち、生エディタ内で完結するものは既定のカットに任せ、
+    // 行またぎのものはブロックする
+    blockUnhandledCrossLineCut(e);
+    return;
+  }
+  const { range, bounds } = resolved;
+  const payload = buildSelectionCopyPayload(range, bounds);
+  if (!payload) return;
   e.preventDefault();
-  cutSelectedImage();
+  e.clipboardData.setData('text/html', payload.html);
+  e.clipboardData.setData('text/plain', payload.plain);
+  // 変更フェーズ。クリップボードへ載せた後の例外は「載ったのに消えていない」という
+  // 中途半端な状態を招く致命的なバグなので、握り潰さず伝播させる
+  commitSelectionDeletion(bounds);
 });
 
 // ── Drag Window ───────────────────────────────────
@@ -2345,6 +2874,13 @@ unlisteners.push(listen('edit-history', (e) => {
   if (!document.hasFocus()) return;
   if (e.payload === 'undo') performUndo();
   else if (e.payload === 'redo') performRedo();
+}));
+unlisteners.push(listen('select-all', () => {
+  if (!document.hasFocus()) return;
+  // IME 変換中に selectAllNote() が生エディタを閉じて確定前の入力を巻き込まないよう、
+  // performUndo と同じガードで防ぐ
+  if (composing || applyingHistory || deletingImage) return;
+  selectAllNote();
 }));
 
 // Listen for context menu events (targeted to this window via emit_to)
@@ -2444,6 +2980,7 @@ window.resetZoom = resetZoom;
 window.performUndo = performUndo;
 window.performRedo = performRedo;
 window.resolveSelectionRange = resolveSelectionRange;
+window.selectAllNote = selectAllNote;
 
 
 // ── Keyboard: color dots (Enter/Space/Arrow) ───────

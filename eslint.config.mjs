@@ -23,6 +23,7 @@ const noteLines = {
   CHECKBOX_RE: "readonly",
   isImageOnlyLine: "readonly",
   visibleOffsetToRawOffset: "readonly",
+  visibleOffsetFromRawOffset: "readonly",
 };
 const history = {
   createHistory: "readonly",

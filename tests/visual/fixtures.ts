@@ -236,6 +236,44 @@ export function getContent(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { getRawContent(): string }).getRawContent());
 }
 
+/** markdown-view の (行, 可視オフセット) の 2 点を DOM 選択（Range）として張る。note.js の
+ * nodeAt と同じアルゴリズムをページ内で組み立てる（行末を超えるオフセットは行末にクランプ）。 */
+export function selectMarkdownRange(
+  page: Page,
+  startLine: number,
+  startOffset: number,
+  endLine: number,
+  endOffset: number,
+) {
+  return page.evaluate(
+    ([sl, so, el, eo]) => {
+      const pointAtInPage = (elm: Element, visibleOffset: number) => {
+        const walker = document.createTreeWalker(elm, NodeFilter.SHOW_TEXT);
+        let remaining = visibleOffset;
+        let node: Text | null;
+        let last: Text | null = null;
+        while ((node = walker.nextNode() as Text | null)) {
+          last = node;
+          if (remaining <= node.textContent!.length) return { node, offset: remaining };
+          remaining -= node.textContent!.length;
+        }
+        return last ? { node: last, offset: last.textContent!.length } : { node: elm, offset: 0 };
+      };
+      const startEl = document.querySelector(`#markdown-view [data-line="${sl}"]`)!;
+      const endEl = document.querySelector(`#markdown-view [data-line="${el}"]`)!;
+      const start = pointAtInPage(startEl, so as number);
+      const end = pointAtInPage(endEl, eo as number);
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+    [startLine, startOffset, endLine, endOffset] as const,
+  );
+}
+
 // ── Fixture types ──────────────────────────────────────────
 
 type Fixtures = {
