@@ -116,6 +116,8 @@ const I18N_TABLE = {
   toastCopyImageFailed: { ja: '画像のコピーに失敗しました', en: 'Failed to copy the image' },
   toastCutImageFailed: { ja: '画像のカットに失敗しました', en: 'Failed to cut the image' },
   imageOpenHint: { ja: 'ダブルクリックで開く', en: 'Double-click to open' },
+  imageAltFallback: { ja: '(画像)', en: '(image)' },
+  imageAltFallbackWithExt: { ja: '(画像.{ext})', en: '(image.{ext})' },
 };
 
 // 訳の付け忘れ検出（キーを増やしたときに片方の言語が抜けていたら気づけるように）

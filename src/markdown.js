@@ -464,5 +464,5 @@ function renderMarkdown(text) {
 
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments };
+  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt };
 }

@@ -37,6 +37,7 @@ pub(crate) fn build_context_menu(
     is_pinned: bool,
     current_color: &str,
     image_path: Option<&str>,
+    has_selection: bool,
     lang: Lang,
 ) -> tauri::Result<()> {
     let color_items: Vec<IconMenuItem<tauri::Wry>> = COLOR_DEFS
@@ -60,6 +61,18 @@ pub(crate) fn build_context_menu(
 
     let copy = PredefinedMenuItem::copy(app, None)?;
     let paste = PredefinedMenuItem::paste(app, None)?;
+    // 選択範囲があるときだけ「Markdown をコピー」を足す（通常の Copy の直後）
+    let copy_markdown = has_selection
+        .then(|| {
+            MenuItem::with_id(
+                app,
+                "ctx_copy_markdown",
+                i18n::text(lang, Msg::CtxCopyMarkdown),
+                true,
+                None::<&str>,
+            )
+        })
+        .transpose()?;
     // 画像上で開いたときだけ「画像を開く」「Finder で表示」「画像をコピー」を足す
     let image_items = image_path
         .map(|_| {
@@ -159,7 +172,11 @@ pub(crate) fn build_context_menu(
     )?;
     let sep3 = PredefinedMenuItem::separator(app)?;
 
-    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&copy, &paste];
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&copy];
+    if let Some(copy_markdown) = &copy_markdown {
+        items.push(copy_markdown);
+    }
+    items.push(&paste);
     if let Some((sep_img, open_image, reveal_image, copy_image)) = &image_items {
         items.push(sep_img);
         items.push(open_image);
@@ -258,6 +275,11 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
                 if let Err(e) = image_actions::copy_image_to_clipboard(&state.data_dir, &path) {
                     log::error!("copy image error: {}", e);
                 }
+            }
+        }
+        "ctx_copy_markdown" => {
+            if let Some(w) = &win {
+                let _ = w.emit_to(w.label(), "ctx-copy-markdown", ());
             }
         }
         _ if event_id.starts_with("ctx_color_") => {

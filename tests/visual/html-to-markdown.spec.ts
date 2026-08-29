@@ -89,6 +89,11 @@ test.describe("htmlToMarkdown", () => {
       .toBe("line1\nline2");
   });
 
+  test("hr → ---", async ({ notePage }) => {
+    expect(await convert(notePage, "<p>before</p><hr><p>after</p>"))
+      .toBe("before\n---\nafter\n");
+  });
+
   // ── Edge cases: empty nodes ──────────────────────────────
   test("empty <strong> produces no output", async ({ notePage }) => {
     expect(await convert(notePage, "<strong></strong>")).toBe("");
@@ -270,6 +275,58 @@ test.describe("htmlToMarkdown", () => {
   test("alt に改行を含む https image → 空白に置換", async ({ notePage }) => {
     expect(await convert(notePage, '<img src="https://example.com/cat.png" alt="line1\nline2">'))
       .toBe("[line1 line2](https://example.com/cat.png)");
+  });
+
+  // ── ネストした ul/ol → 2 スペース単位のインデント ─────────
+  test("ネストした ul → 親の文末に潰れず、2 スペースインデントの入れ子行になる", async ({ notePage }) => {
+    expect(await convert(notePage, "<ul><li>parent<ul><li>child</li></ul></li></ul>"))
+      .toBe("- parent\n  - child\n");
+  });
+
+  test("ネストした ol → 親の直下の子は 1 から採番し直し、2 スペースインデントになる", async ({ notePage }) => {
+    expect(await convert(notePage, "<ol><li>one<ol><li>two</li></ol></li><li>three</li></ol>"))
+      .toBe("1. one\n  1. two\n2. three\n");
+  });
+
+  test("2 階層ネストした ul → インデントが階層ぶん積み重なる", async ({ notePage }) => {
+    expect(await convert(
+      notePage,
+      "<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>",
+    )).toBe("- a\n  - b\n    - c\n");
+  });
+
+  test("兄弟 li にネストしたリストがあっても、後続の兄弟 li は巻き込まれない", async ({ notePage }) => {
+    expect(await convert(
+      notePage,
+      "<ul><li>a<ul><li>a1</li></ul></li><li>b</li></ul>",
+    )).toBe("- a\n  - a1\n- b\n");
+  });
+
+  // ── pre → フェンス（```） ──────────────────────────────────
+  test("pre > code → フェンスで囲む", async ({ notePage }) => {
+    expect(await convert(notePage, "<pre><code>const x = 1;</code></pre>"))
+      .toBe("```\nconst x = 1;\n```\n");
+  });
+
+  test("複数行の pre > code → 改行を保持したままフェンスで囲む", async ({ notePage }) => {
+    expect(await convert(notePage, "<pre><code>line1\nline2</code></pre>"))
+      .toBe("```\nline1\nline2\n```\n");
+  });
+
+  test("code の無い pre → pre 自身のテキストをフェンスで囲む", async ({ notePage }) => {
+    expect(await convert(notePage, "<pre>plain</pre>")).toBe("```\nplain\n```\n");
+  });
+
+  // 構文ハイライト目的でトークンごとに <span> を挟む貼り付け元（VS Code 等）を想定
+  test("pre > code 内の装飾タグ（構文ハイライト等）はテキストとして読み捨てる", async ({ notePage }) => {
+    expect(await convert(
+      notePage,
+      '<pre><code><span class="hljs-keyword">const</span> x = 1;</code></pre>',
+    )).toBe("```\nconst x = 1;\n```\n");
+  });
+
+  test("空の pre は出力しない", async ({ notePage }) => {
+    expect(await convert(notePage, "<pre></pre>")).toBe("");
   });
 
   // ── img: 同一 data: URI の重複 ────────────────────────────

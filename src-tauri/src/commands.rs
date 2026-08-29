@@ -503,6 +503,7 @@ pub(crate) fn show_context_menu(
     is_pinned: bool,
     current_color: String,
     image_path: Option<String>,
+    has_selection: bool,
     app: AppHandle,
     state: State<AppState>,
 ) {
@@ -525,6 +526,7 @@ pub(crate) fn show_context_menu(
         is_pinned,
         &current_color,
         validated_image_path.as_deref(),
+        has_selection,
         lang,
     ) {
         log::error!("context menu error: {}", e);
@@ -616,8 +618,8 @@ pub(crate) fn delete_image(
 }
 
 /// `run_on_main_thread` からの結果待ちが万一戻ってこなくても UI を無限にフリーズさせない
-/// ための上限。
-const COPY_IMAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// ための上限。画像コピーと Markdown コピー（テキスト）の両方で共有する。
+const MAIN_THREAD_CLIPBOARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// arboard 呼び出しをメインスレッドで実行し、結果を待ち合わせて返す。arboard は macOS で
 /// NSPasteboard をメインスレッド外から操作するとクラッシュしうる
@@ -642,7 +644,7 @@ fn copy_image_on_main_thread(
         let _ = tx.send(result);
     })
     .map_err(|e| e.to_string())?;
-    rx.recv_timeout(COPY_IMAGE_TIMEOUT)
+    rx.recv_timeout(MAIN_THREAD_CLIPBOARD_TIMEOUT)
         .map_err(|e| e.to_string())?
 }
 
@@ -655,6 +657,29 @@ pub(crate) fn copy_image(
     state: State<AppState>,
 ) -> Result<(), String> {
     copy_image_on_main_thread(&app, &state.data_dir, &image_path)
+}
+
+/// arboard 呼び出しをメインスレッドで実行する（理由は `copy_image_on_main_thread` のコメント参照）。
+fn copy_markdown_on_main_thread(app: &AppHandle, text: &str) -> Result<(), String> {
+    let text = text.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let result = arboard::Clipboard::new()
+            .and_then(|mut cb| cb.set_text(text))
+            .map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv_timeout(MAIN_THREAD_CLIPBOARD_TIMEOUT)
+        .map_err(|e| e.to_string())?
+}
+
+/// 選択範囲の生 Markdown をテキストとしてクリップボードにコピーする（右クリックメニューの
+/// 「Markdown をコピー」）。text/html + text/plain を同時に載せる通常コピー（⌘C）とは別経路で、
+/// こちらはプレーンテキスト 1 形式のみを載せる。
+#[tauri::command]
+pub(crate) fn copy_markdown(text: String, app: AppHandle) -> Result<(), String> {
+    copy_markdown_on_main_thread(&app, &text)
 }
 
 /// `cut_image` の早期 return 条件（不正な画像パスなら実行せず `Ok(None)` として扱う）。

@@ -77,9 +77,45 @@ function isImageOnlyLine(lineText) {
   return IMAGE_ONLY_LINE_RE.test(lineText);
 }
 
+/**
+ * インライン部（行頭マーカーを除いた raw 行の残り）の可視文字オフセットを raw オフセットへ
+ * 変換する。markdown-view の DOM 選択（可視テキスト基準）から生 Markdown の範囲を求めるのに使う
+ * （note.js の resolveSelectionPoint が、行頭マーカー分を除いた残りをここへ渡す）。
+ *
+ * inlineSegments(inlineRaw) の各セグメントを可視文字数で消費しながら探し、visibleOffset が
+ * 属するセグメント内の位置を raw オフセットへ写す。プレーンセグメント（装飾を伴わない素の
+ * テキスト）は可視文字と raw 文字が 1:1 対応するのでそのまま足す。装飾セグメント（**bold** 等）
+ * の内部（両端どちらでもない位置）に境界が落ちた場合は、記法を欠けさせないようセグメント全体を
+ * 含める側（開始端なら srcStart、終了端なら srcEnd）に丸める。
+ *
+ * @param {string} inlineRaw マーカーを除いた raw 行の残り
+ * @param {number} visibleOffset インライン部の可視文字数オフセット
+ * @param {boolean} isEnd 選択の終了端かどうか（装飾セグメント内部への丸め方向に使う）
+ * @returns {number} inlineRaw 上のオフセット
+ */
+function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
+  const segments = inlineSegments(inlineRaw);
+  let consumed = 0;
+  for (const seg of segments) {
+    const segLen = seg.visibleText.length;
+    if (visibleOffset > consumed + segLen) {
+      consumed += segLen;
+      continue;
+    }
+    const within = visibleOffset - consumed;
+    const isPlain = seg.visibleText === inlineRaw.slice(seg.srcStart, seg.srcEnd);
+    if (isPlain) return seg.srcStart + within;
+    if (within <= 0) return seg.srcStart;
+    if (within >= segLen) return seg.srcEnd;
+    return isEnd ? seg.srcEnd : seg.srcStart;
+  }
+  return inlineRaw.length;
+}
+
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
   module.exports = {
     blockOffset, markerLength, getAutoPrefix, isEmptyListItem, CHECKBOX_RE, isImageOnlyLine,
+    visibleOffsetToRawOffset,
   };
 }
