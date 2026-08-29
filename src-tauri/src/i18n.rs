@@ -62,6 +62,7 @@ pub(crate) enum Msg {
     CtxOpenImage,
     CtxRevealImage,
     CtxCopyImage,
+    CtxCopyMarkdown,
 
     ColorYellow,
     ColorBlue,
@@ -115,6 +116,7 @@ pub(crate) fn text(lang: Lang, msg: Msg) -> &'static str {
         Msg::CtxOpenImage => ("画像を開く", "Open Image"),
         Msg::CtxRevealImage => ("Finder で表示", "Show in Finder"),
         Msg::CtxCopyImage => ("画像をコピー", "Copy Image"),
+        Msg::CtxCopyMarkdown => ("Markdown をコピー", "Copy Markdown"),
 
         Msg::ColorYellow => ("イエロー", "Yellow"),
         Msg::ColorBlue => ("ブルー", "Blue"),

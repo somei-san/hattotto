@@ -7,7 +7,12 @@ import globals from "globals";
 // ずれていると no-undef が実行時の ReferenceError を見逃す。
 const utils = { escapeHtml: "readonly", showToast: "readonly" };
 const i18n = { I18N: "readonly" };
-const markdown = { inlineMarkdown: "readonly", renderMarkdown: "readonly" };
+const markdown = {
+  inlineMarkdown: "readonly",
+  renderMarkdown: "readonly",
+  inlineSegments: "readonly",
+  parseImageAlt: "readonly",
+};
 const noteLines = {
   blockOffset: "readonly",
   markerLength: "readonly",
@@ -17,6 +22,7 @@ const noteLines = {
   isEmptyListItem: "readonly",
   CHECKBOX_RE: "readonly",
   isImageOnlyLine: "readonly",
+  visibleOffsetToRawOffset: "readonly",
 };
 const history = {
   createHistory: "readonly",

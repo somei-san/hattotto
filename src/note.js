@@ -309,6 +309,12 @@ function buildImagePreview(block) {
 // imageOccurrenceInLine と同じ考え方）。
 let selectedImage = null;
 
+// contextmenu ハンドラで「Markdown をコピー」用に計算し退避しておく生 Markdown 文字列。
+// メニュー表示前に flushContent() が挟まると DOM 選択（Range）が renderAll() で失われるため、
+// 退避はメニューを開く invoke の直前・DOM がまだ壊れていない時点で行う（詳細は contextmenu
+// リスナー側のコメント参照）。選択が無ければ null。
+let pendingMarkdownCopy = null;
+
 /** 選択を解除し、ハイライト用クラスと DOM 選択（Range）も剥がす。 */
 function clearImageSelection() {
   if (!selectedImage) return;
@@ -966,13 +972,32 @@ function htmlToMarkdown(html) {
   return resolveDataImages(dataImgSrcs).then(map => renderNodesToMd(doc.body.childNodes, map));
 }
 
-function nodeToMd(node, imageMap) {
+/**
+ * <pre>(内側に <code> があればその中身、無ければ <pre> 自身)のテキストをフェンス（```）で
+ * 囲んで返す。renderMarkdown のフェンス記法は行内に他の要素が無い前提の単純な正規表現
+ * （note-lines.js 参照）なので、内部の <span> 等の装飾タグは textContent で読み捨てて
+ * プレーンテキストへ潰す（構文ハイライト用にトークンごと <span> で包む貼り付け元でも、
+ * コード内容自体の改行・空白はそのまま残る）。
+ */
+function preToMd(node) {
+  const code = node.querySelector('code');
+  const text = (code || node).textContent.replace(/\n$/, '');
+  return text ? '```\n' + text + '\n```\n' : '';
+}
+
+/**
+ * @param depth リスト入れ子の深さ（1 が最上位）。ul/ol の子（li）へ入るときだけ +1 する。
+ *   li はこの深さから 2 スペース単位のインデントを算出する（markdown.js 側の入れ子判定と対応）。
+ */
+function nodeToMd(node, imageMap, depth = 0) {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent;
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const tag = node.tagName.toLowerCase();
   // Strip script/style tags entirely — their text content is never useful
   if (tag === 'script' || tag === 'style') return '';
-  const inner = Array.from(node.childNodes).map(child => nodeToMd(child, imageMap)).join('');
+  if (tag === 'pre') return preToMd(node);
+  const childDepth = (tag === 'ul' || tag === 'ol') ? depth + 1 : depth;
+  const inner = Array.from(node.childNodes).map(child => nodeToMd(child, imageMap, childDepth)).join('');
   switch (tag) {
     case 'a': {
       const href = node.getAttribute('href') || '';
@@ -990,14 +1015,23 @@ function nodeToMd(node, imageMap) {
     case 'blockquote':         return inner ? inner.split('\n').filter(l => l).map(l => `> ${l}`).join('\n') + '\n' : '';
     case 'ul': case 'ol':     return inner;
     case 'li': {
+      // 自身のインライン内容とネストした <ul>/<ol> を分けて処理する。混ぜて inner のまま
+      // 出すと、ネストしたリストが改行・インデント無しで自身の文末に連結され
+      // "- parent- child" のように潰れる
       const parent = node.parentElement?.tagName.toLowerCase();
-      if (parent === 'ol') {
-        const idx = Array.from(node.parentElement.children).indexOf(node) + 1;
-        return `${idx}. ${inner}\n`;
-      }
-      return `- ${inner}\n`;
+      const ownNodes = Array.from(node.childNodes)
+        .filter((c) => !(c.nodeType === Node.ELEMENT_NODE && ['UL', 'OL'].includes(c.tagName)));
+      const nestedLists = Array.from(node.children).filter((c) => ['UL', 'OL'].includes(c.tagName));
+      const ownText = ownNodes.map((c) => nodeToMd(c, imageMap, depth)).join('').trim();
+      const nestedMd = nestedLists.map((c) => nodeToMd(c, imageMap, depth)).join('');
+      const indent = '  '.repeat(Math.max(0, depth - 1));
+      const marker = parent === 'ol'
+        ? `${Array.from(node.parentElement.children).indexOf(node) + 1}. `
+        : '- ';
+      return `${indent}${marker}${ownText}\n${nestedMd}`;
     }
     case 'br':                 return '\n';
+    case 'hr':                 return '---\n';
     case 'p': case 'div':     return inner + '\n';
     // CSP の img-src が https を許可していないため、リモート URL は画像記法にせずリンクにする。
     // data: は resolveDataImages が保存済みの相対パスに解決済み（未解決なら alt のみ残す）。
@@ -1027,7 +1061,7 @@ function nodeToMd(node, imageMap) {
  * 挿入が完全に消えてしまわないよう text にフォールバックする（同期・非同期どちらの経路でも）。
  */
 function toMarkdown(text, html) {
-  if (!html || !/<(?:a|strong|b|em|i|del|s|code|h[1-3]|blockquote|[uo]l|li|img)\b/i.test(html)) {
+  if (!html || !/<(?:a|strong|b|em|i|del|s|code|pre|h[1-3]|blockquote|[uo]l|li|hr|img)\b/i.test(html)) {
     return text;
   }
   const converted = htmlToMarkdown(html);
@@ -1644,14 +1678,579 @@ document.addEventListener('mousedown', (e) => {
   clearImageSelection();
 });
 
+// ── Selection Copy (markdown-view) ─────────────────────────
+// 描画部分（markdown-view）の選択から、対応する生 Markdown の範囲を求める。通常コピー
+// （text/html + text/plain の同時セット）と「Markdown をコピー」（右クリックメニュー）が
+// この写像を共有する。詳細は各関数のコメント参照（可視オフセット → raw オフセットの
+// 純粋な変換自体は note-lines.js の visibleOffsetToRawOffset に持たせている）。
+
+/** .md-ordered 行だけが持つ、自動採番の表示専用プレフィックス（"1. " 等）の文字数。
+ * 他の行はマーカー（"- " 等）が inlineMarkdown に渡らず DOM に一切現れないため 0。 */
+function orderedDisplayPrefixLength(lineEl) {
+  const span = lineEl.querySelector(':scope > .md-order-num');
+  return span ? span.textContent.length + 1 : 0; // + 直後の区切りスペース
+}
+
+/** lineEl の可視テキスト先頭から (node, offset) までの文字数。node は lineEl 自身か
+ * その子孫である前提（呼び出し元が closest('[data-line]') で特定した後に渡す）。 */
+function visibleOffsetInLine(lineEl, node, offset) {
+  const range = document.createRange();
+  range.selectNodeContents(lineEl);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+/**
+ * 選択の一端（node, offset）が指す位置を、文書全体での (行番号, raw 列オフセット) に変換する。
+ * isEnd は選択の終了端かどうか（装飾記法の内部に境界が落ちたときの丸め方向に使う。
+ * visibleOffsetToRawOffset 参照）。対応する行が見つからなければ null。
+ */
+function resolveSelectionPoint(node, offset, isEnd) {
+  let target = node;
+  let targetOffset = offset;
+  let el = target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
+  let block = el ? el.closest('[data-line]') : null;
+  if (!block && target.nodeType === Node.ELEMENT_NODE && target.children.length > 0) {
+    // 選択端点が mdView 自身のようなコンテナを指している場合（offset は子要素インデックス）、
+    // 対応する子要素へ踏み込んで解決し直す。コンテナ末尾を指すオフセットは最後の子の末尾へ、
+    // それ以外はその子の先頭へ丸める
+    const container = target;
+    const atEnd = targetOffset >= container.children.length;
+    const child = container.children[atEnd ? container.children.length - 1 : targetOffset];
+    target = child;
+    targetOffset = atEnd ? child.childNodes.length : 0;
+    el = target;
+    block = el.closest('[data-line]');
+  }
+  if (!block) return null;
+
+  const line = Number(block.dataset.line);
+  const visible = visibleOffsetInLine(block, target, targetOffset);
+
+  if (block.matches('.md-codeblock')) {
+    // コードブロック: 可視テキストはフェンス内側の raw 行そのまま（改行で連結）なので、
+    // 可視オフセットから行・列を直接計算する。renderMarkdown の data-line-end は、閉じた
+    // フェンスでは「閉じフェンス行自身」（内容行はその手前まで）を指すが、未クローズ（EOF まで
+    // フェンスが閉じない）だと「最後の内容行自身」を指す（閉じフェンス行が存在しないため）。
+    // この違いを lines[lineEnd] が閉じフェンス行の形かどうかで判別し、内容行の終端をずらす
+    const lineEnd = Number(block.dataset.lineEnd);
+    const lines = getLines();
+    const closed = lineEnd > line && /^```\s*$/.test(lines[lineEnd] ?? '');
+    const lastContentLine = closed ? lineEnd - 1 : lineEnd;
+    if (lastContentLine < line + 1) {
+      // 内容行が 1 行も無い退化ケース（例: 閉じないまま "```" だけで EOF）。フェンス行自身へ逃がす
+      return { line, col: lines[line].length };
+    }
+    let remaining = visible;
+    for (let l = line + 1; l <= lastContentLine; l++) {
+      const text = lines[l];
+      if (l === lastContentLine || remaining <= text.length) {
+        return { line: l, col: Math.min(remaining, text.length) };
+      }
+      remaining -= text.length + 1; // + 行間の改行
+    }
+  }
+
+  const lineText = getLines()[line];
+  const markerLen = markerLength(lineText);
+  const inlineRaw = lineText.slice(markerLen);
+  const prefixLen = orderedDisplayPrefixLength(block);
+  const contentVisible = Math.max(0, visible - prefixLen);
+  const rawOffset = markerLen + visibleOffsetToRawOffset(inlineRaw, contentVisible, isEnd);
+  return { line, col: rawOffset };
+}
+
+/** コードブロックの行範囲（開始行〜終了行、フェンス行含む）を [start, end] のペア配列で返す。
+ * renderMarkdown が付ける data-line/data-line-end を DOM から読む。 */
+function codeBlockLineRanges() {
+  return Array.from(mdView.querySelectorAll('[data-line-end]'))
+    .map((el) => [Number(el.dataset.line), Number(el.dataset.lineEnd)]);
+}
+
+function isCodeBlockLine(ranges, l) {
+  return ranges.some(([s, e]) => l >= s && l <= e);
+}
+
+/** [openLine, dataLineEnd] から実際のフェンス情報を組み立てる。closed は data-line-end が
+ * 閉じフェンス行自身を指しているか（true）、内容行自身を指しているか（false・未クローズ）。
+ * resolveSelectionPoint のコードブロック分岐と同じ判定式。 */
+function codeBlockFenceInfo(lines, openLine, dataLineEnd) {
+  const closed = dataLineEnd > openLine && /^```\s*$/.test(lines[dataLineEnd] ?? '');
+  return {
+    closed,
+    openLine,
+    closeLine: closed ? dataLineEnd : null,
+    firstContentLine: openLine + 1,
+    lastContentLine: closed ? dataLineEnd - 1 : dataLineEnd,
+  };
+}
+
+/**
+ * コードブロックの可視テキストはフェンス内側の内容行だけなので、選択が内容行の全体（先頭〜末尾）
+ * にちょうど一致していても、開き・閉じフェンス行自体は行範囲に含まれない。これは非対称になりやすい
+ * （選択がブロックより上から始まれば開きフェンスは自然に含まれるが、内容の末尾ちょうどで終わる
+ * 選択では閉じフェンス行が範囲外に落ちる）。ここでは「内容行の先頭から選択が始まっていれば
+ * 開きフェンスも、内容行の末尾で選択が終わっていれば閉じフェンスも含める」よう両端を対称に拡張し、
+ * 「ブロックの可視テキスト全体を選択したらフェンス込みで丸ごと取れる」形に揃える。
+ * 未クローズのブロック（閉じフェンスが無い）、内容行が 1 行も無い空フェンス（別途
+ * expandZeroVisibleLineSelection が処理する退化ケース）は対象外。
+ */
+function expandCodeBlockFences(start, end, lines, codeBlockRanges) {
+  let newStart = start;
+  let newEnd = end;
+  for (const [openLine, dataLineEnd] of codeBlockRanges) {
+    const info = codeBlockFenceInfo(lines, openLine, dataLineEnd);
+    if (!info.closed || info.firstContentLine > info.lastContentLine) continue;
+    // 開始・終了それぞれが「そのブロックを覆っているか」を独立に見るだけでは、内容行の
+    // 一部（例: 複数行あるうちの 1 行だけ）を先頭〜末尾で選択したときに、片方の条件だけが
+    // 偶然成立してフェンスが片側にだけ付いてしまう（例: "```js\nline1" のような未クローズの
+    // 断片ができ、貼り戻すと以降の行までコードブロック化する）。両端が揃ってブロック全体を
+    // 覆っているときだけ拡張する
+    const startCovers = start.line < info.openLine
+      || (start.line === info.firstContentLine && start.col === 0);
+    const endCovers = end.line > info.closeLine
+      || (end.line === info.lastContentLine && end.col === lines[end.line].length);
+    if (!startCovers || !endCovers) continue;
+    if (start.line === info.firstContentLine && start.col === 0) {
+      newStart = { line: info.openLine, col: 0 };
+    }
+    if (end.line === info.lastContentLine && end.col === lines[end.line].length) {
+      newEnd = { line: info.closeLine, col: lines[info.closeLine].length };
+    }
+  }
+  return { start: newStart, end: newEnd };
+}
+
+/**
+ * hr（<hr> は子ノードを持たない）や内容行の無い空フェンス（<code> が空）は、その行に可視の
+ * テキストノードが 1 つも無い。resolveSelectionPoint は選択の開始・終了をテキストノード基準で
+ * 区別するため、その行だけを選択しても start/end が同じ点に潰れてしまう。この行だけを選択した
+ * 結果 start===end になっているときは、行（コードブロックなら開始行〜終了行）をまるごと採ることで
+ * この退化を吸収する。resolveSelectionRange・buildPlainFromSelection の両方が
+ * resolveSelectionBounds を経由するよう、ここで一元化する。
+ */
+function expandZeroVisibleLineSelection(start, end, lines) {
+  if (start.line !== end.line || start.col !== end.col) return { start, end };
+  const row = mdView.querySelector(`[data-line="${start.line}"]`);
+  if (row && row.classList.contains('md-hr')) {
+    return { start: { line: start.line, col: 0 }, end: { line: start.line, col: lines[start.line].length } };
+  }
+  if (row && row.tagName === 'PRE' && row.hasAttribute('data-line-end')) {
+    const code = row.querySelector('code');
+    if (!code || code.textContent.length === 0) {
+      const lineEndIdx = Number(row.dataset.lineEnd);
+      return { start: { line: start.line, col: 0 }, end: { line: lineEndIdx, col: lines[lineEndIdx].length } };
+    }
+  }
+  return { start, end };
+}
+
+/**
+ * DOM Range（markdown-view 内の選択）を生 Markdown 上の (行, 列) の開始・終了点へ解決する。
+ * resolveSelectionRange（Markdown をコピー）と buildPlainFromSelection（通常コピーの
+ * text/plain）が同じ行範囲・境界を共有するための土台。解決できなければ null。
+ */
+function resolveSelectionBounds(range) {
+  const start = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  const end = resolveSelectionPoint(range.endContainer, range.endOffset, true);
+  if (!start || !end) return null;
+  const lines = getLines();
+  const codeBlockRanges = codeBlockLineRanges();
+
+  // 開始行の可視オフセットが 0（= マーカー直後）なら、行頭（インデント・マーカー含む）から取る。
+  // コードブロック行を対象外にする理由は下の終了端と同じ（適用すると選択していない行頭の
+  // 生テキストまで巻き込む）
+  if (!isCodeBlockLine(codeBlockRanges, start.line) && start.col === markerLength(lines[start.line])) {
+    start.col = 0;
+  }
+  // 終了端が「次の行の可視オフセット 0」（＝その行のマーカー直後、内容は 1 文字も選択されて
+  // いない）に落ちている場合、終了端をその行の行頭（col 0）まで切り詰める。行頭からドラッグして
+  // 次の行の先頭で止める典型操作でここに落ちるが、切り詰めないとその行のマーカー（`> ` や
+  // `- [ ] ` 等）だけが選択に含まれてしまう（内容が 0 文字なのにマーカーだけ拾う不整合）。
+  // ただしコードブロック行には「マーカー相当の接頭辞」という概念が無く、行頭からの生テキストが
+  // そのまま可視テキストなので、この切り詰めを適用すると選択済みの文字を落としてしまう
+  // （例: `  - li` というコード行の可視オフセット 0 は raw の col 0 そのもの）。終了行が
+  // コードブロック行のときは対象外にする
+  if (
+    end.line > start.line
+    && !isCodeBlockLine(codeBlockRanges, end.line)
+    && end.col === markerLength(lines[end.line])
+  ) {
+    end.col = 0;
+  }
+
+  const fenceExpanded = expandCodeBlockFences(start, end, lines, codeBlockRanges);
+  const expanded = expandZeroVisibleLineSelection(fenceExpanded.start, fenceExpanded.end, lines);
+  return expanded;
+}
+
+/**
+ * DOM Range（markdown-view 内の選択）から、対応する生 Markdown 文字列を組み立てる。
+ * 解決できなければ null。
+ */
+function resolveSelectionRange(range) {
+  const bounds = resolveSelectionBounds(range);
+  if (!bounds) return null;
+  const { start, end } = bounds;
+  const lines = getLines();
+  if (start.line === end.line) return lines[start.line].slice(start.col, end.col);
+  const parts = [lines[start.line].slice(start.col)];
+  for (let l = start.line + 1; l < end.line; l++) parts.push(lines[l]);
+  parts.push(lines[end.line].slice(0, end.col));
+  return parts.join('\n');
+}
+
+/** src の拡張子（小文字）を返す。クエリ・フラグメントは無視する。読み取れなければ null。 */
+function imageExt(src) {
+  if (!src) return null;
+  const m = src.split(/[?#]/)[0].match(/\.([a-zA-Z0-9]+)$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * 通常コピー（text/html・text/plain）で画像の代わりに載せる表示ラベルを alt・src から組み立てる。
+ * 生 Markdown の画像記法（`![alt](path)`）は UUID パス等が外部で意味を持たないため出さず、
+ * 常に「(〜)」の平文にする。alt があってもそのままでは無く拡張子付きにするのは、貼り付け先で
+ * 画像 1 枚ぶんだと分かるようにするため（例: alt「サンプル画像」+ .png → "(サンプル画像.png)"）。
+ *   - alt 非空・拡張子あり: "(alt.ext)"
+ *   - alt 非空・拡張子なし: "(alt)"
+ *   - alt 空・拡張子あり: i18n imageAltFallbackWithExt（例: "(画像.png)"）
+ *   - alt 空・拡張子なし: i18n imageAltFallback（例: "(画像)"）
+ * window.I18N を読み込まない場面・テスト環境でも壊れないよう、無ければ日本語のフォールバックを
+ * 返す（他の画像文言と同じパターン）。「Markdown をコピー」は生記法のままなのでここは使わない。
+ */
+function imageDisplayLabel(alt, src) {
+  const ext = imageExt(src);
+  if (alt) return ext ? `(${alt}.${ext})` : `(${alt})`;
+  const hasI18n = typeof window !== 'undefined' && window.I18N;
+  if (!ext) return hasI18n ? window.I18N.t('imageAltFallback') : '(画像)';
+  const template = hasI18n ? window.I18N.t('imageAltFallbackWithExt') : '(画像.{ext})';
+  return template.replace('{ext}', ext);
+}
+
+// 画像記法（![alt](src)）を raw 文字列中から検索する（非 global・先頭アンカーなし）。
+// リンクや装飾に包まれた画像（`[![alt](p)](url)` / `**![a](p)**` 等）はセグメント合併で
+// 1 つの装飾セグメントにまとまり、raw が画像記法だけでは終わらないため、完全一致ではなく検索で拾う
+const IMAGE_MARKDOWN_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/;
+
+/**
+ * インライン部分の raw 文字列から [localStart, localEnd) の範囲だけを、装飾記法を可視テキストへ
+ * 置換した文字列として取り出す。境界は呼び出し元（resolveSelectionPoint 経由）で常に装飾記法の
+ * 単位に丸められている前提のため、装飾セグメントは重なっていれば全体を含める。
+ * 画像は inlineSegments の visibleText がタグの中身（＝属性である alt）を拾えないため常に空になる。
+ * リンク・装飾に包まれた画像も同様に visibleText が空になる（stripTagsQuoteAware が <img> ごと
+ * 中身の無いタグとして扱うため）ので、raw に完全一致するかではなく「visibleText が空かつ html に
+ * <img を含む」ことで画像セグメントと判定し、raw から画像記法を検索して alt を取り出す。
+ */
+function inlineVisibleSlice(inlineRaw, localStart, localEnd) {
+  if (localStart >= localEnd) return '';
+  const segments = inlineSegments(inlineRaw);
+  let out = '';
+  for (const seg of segments) {
+    const segStart = Math.max(seg.srcStart, localStart);
+    const segEnd = Math.min(seg.srcEnd, localEnd);
+    if (segStart >= segEnd) continue;
+    const raw = inlineRaw.slice(seg.srcStart, seg.srcEnd);
+    if (raw === seg.visibleText) {
+      out += inlineRaw.slice(segStart, segEnd); // 装飾なしの素のテキスト。raw==visible なのでそのまま
+      continue;
+    }
+    if (seg.visibleText === '' && /<img\b/i.test(seg.html)) {
+      const imgMatch = raw.match(IMAGE_MARKDOWN_RE);
+      const { alt } = parseImageAlt(imgMatch ? imgMatch[1] : '');
+      out += imageDisplayLabel(alt, imgMatch ? imgMatch[2] : '');
+    } else {
+      out += seg.visibleText;
+    }
+  }
+  return out;
+}
+
+/**
+ * 通常コピーの text/plain。生 Markdown の行構造（インデント・リスト記号・チェックボックス
+ * 記法・コードフェンス・--- ・> ・# 見出しマーカー）はそのまま残し、インライン装飾（**太字** 等）
+ * だけを可視テキストへ置換する。resolveSelectionBounds を共有するため、「Markdown をコピー」
+ * （resolveSelectionRange）と行範囲・境界の丸めが一致する。
+ * @param bounds resolveSelectionBounds(range) の結果（呼び出し元と共有し二重に解決しない）。
+ *   null なら空文字を返す。
+ */
+function buildPlainFromSelection(range, bounds) {
+  if (!bounds) return '';
+  const { start, end } = bounds;
+  const lines = getLines();
+  // コードブロックの内容（フェンス行含む）は markdown 記法として解釈しない。renderMarkdown が
+  // 付ける data-line/data-line-end の範囲を DOM から読み、その行はインライン装飾の置換を
+  // 一切行わず raw のまま返す
+  const codeBlockRanges = codeBlockLineRanges();
+
+  const renderSlice = (lineIdx, colStart, colEnd) => {
+    const lineText = lines[lineIdx];
+    if (isCodeBlockLine(codeBlockRanges, lineIdx)) return lineText.slice(colStart, colEnd);
+    const markerLen = markerLength(lineText);
+    const markerPart = lineText.slice(Math.min(colStart, markerLen), Math.min(colEnd, markerLen));
+    const inlineRaw = lineText.slice(markerLen);
+    const localStart = Math.max(0, colStart - markerLen);
+    const localEnd = Math.max(0, colEnd - markerLen);
+    return markerPart + inlineVisibleSlice(inlineRaw, localStart, localEnd);
+  };
+
+  if (start.line === end.line) return renderSlice(start.line, start.col, end.col);
+  const parts = [renderSlice(start.line, start.col, lines[start.line].length)];
+  for (let l = start.line + 1; l < end.line; l++) parts.push(renderSlice(l, 0, lines[l].length));
+  parts.push(renderSlice(end.line, 0, end.col));
+  return parts.join('\n');
+}
+
+// ── 通常コピーの text/html セマンティック変換 ──────────────────────
+// 描画 DOM（.md-h1 等の CSS クラス）をそのまま text/html に載せると、貼り付け先
+// （Google Docs / Notion / Slack / Word / 別の付箋）は独自クラスに意味を持たないため
+// 見出し・リスト・コードブロックの構造が失われる。行要素の並びを見出し・リスト・
+// 引用・コードブロックのセマンティック HTML（h1〜h3 / ul・ol / blockquote / pre）へ
+// 変換してから text/html に載せる。htmlToMarkdown（リッチテキストペースト変換）が
+// 読める形に合わせてあり、別の付箋へ貼り戻すと構造が概ね復元される。
+
+/** 行要素のクラスから、変換で使う種別を判定する。markdown.js の renderMarkdown の
+ * 分岐と対応させている。 */
+function lineElementKind(row) {
+  if (row.tagName === 'PRE') return 'codeblock';
+  if (row.classList.contains('md-h1')) return 'h1';
+  if (row.classList.contains('md-h2')) return 'h2';
+  if (row.classList.contains('md-h3')) return 'h3';
+  if (row.classList.contains('md-check')) return 'check';
+  if (row.classList.contains('md-ordered')) return 'ordered';
+  if (row.classList.contains('md-bullet')) return 'bullet';
+  if (row.classList.contains('md-blockquote')) return 'blockquote';
+  if (row.classList.contains('md-hr')) return 'hr';
+  if (row.classList.contains('md-empty')) return 'empty';
+  return 'line'; // .md-line（無印の行）
+}
+
+/** md-indent-N クラスからインデントレベルを読む（無ければ 0）。 */
+function lineElementIndentLevel(row) {
+  const m = Array.from(row.classList).find((c) => /^md-indent-\d$/.test(c));
+  return m ? Number(m.slice('md-indent-'.length)) : 0;
+}
+
+/** class・data-* 属性と <input>（チェックボックスの入力要素。可視テキストを持たない）を
+ * すべて落とす（アプリ内部の状態で、貼り付け先には意味を持たないため）。
+ * <a> は data-url を落とすだけで href はそのまま残す。 */
+function stripInternalAttrs(html) {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  div.querySelectorAll('input').forEach((el) => el.remove());
+  div.querySelectorAll('*').forEach((el) => {
+    el.removeAttribute('class');
+    Array.from(el.attributes).forEach((attr) => {
+      if (attr.name.startsWith('data-')) el.removeAttribute(attr.name);
+    });
+  });
+  return div.innerHTML;
+}
+
+/** リスト系の行種別（bullet/ordered/check）かどうか。連続グループ化・ツリー構築で
+ * 「リスト行かどうか」を種別混在のまま束ねるために使う。 */
+function isListKind(kind) {
+  return kind === 'bullet' || kind === 'ordered' || kind === 'check';
+}
+
+/**
+ * 1 つのリスト項目行（bullet/ordered/check）から <li> の中身を取り出す。
+ * ordered は自動採番の表示専用プレフィックス（.md-order-num）を、check は
+ * <input> を、それぞれ構造から除いて内容だけにする。
+ * ordered の表示番号はクローン（選択範囲によっては .md-order-num が欠けている）ではなく、
+ * mdView 上の元の行要素から読む（fix: 番号スパンより後ろから選択しても正しい番号を拾う）。
+ */
+function extractListItemContent(kind, row) {
+  if (kind === 'check') {
+    const input = row.querySelector('input');
+    const checked = !!(input && input.checked);
+    const span = row.querySelector('span');
+    // to-do ブロックとして解釈するペースト先は無いため平文に落とすが、`[x] `/`[ ] ` の形にして
+    // おくことで、貼り戻し先が別の付箋なら htmlToMarkdown 経由で本物のチェックボックスに戻る
+    const html = (checked ? '[x] ' : '[ ] ') + (span ? stripInternalAttrs(span.innerHTML) : '');
+    return { html };
+  }
+  if (kind === 'ordered') {
+    const original = mdView.querySelector(`[data-line="${row.dataset.line}"]`) || row;
+    const numSpan = original.querySelector('.md-order-num');
+    const num = numSpan ? parseInt(numSpan.textContent, 10) || 1 : 1;
+    const clone = row.cloneNode(true);
+    clone.querySelector('.md-order-num')?.remove();
+    // .md-order-num の直後にある区切りスペース 1 文字ぶんも一緒に落とす
+    const html = stripInternalAttrs(clone.innerHTML.replace(/^ /, ''));
+    return { html, num };
+  }
+  return { html: stripInternalAttrs(row.innerHTML) }; // bullet
+}
+
+/** フラットな { level, kind, html, num } の並びを、level の差にもとづく親子ツリーへ組み立てる。
+ * kind は各ノードが自分の <ul>/<ol> をどちらで開くかの判断に使う（bullet/ordered/check が
+ * 混在した入れ子でも、ノードごとに正しいタグへ振り分けられるようにするため）。 */
+function buildListTree(items) {
+  const base = Math.min(...items.map((it) => it.level));
+  const root = { level: base - 1, children: [] };
+  const stack = [root];
+  for (const item of items) {
+    while (stack.length > 1 && stack[stack.length - 1].level >= item.level) stack.pop();
+    const node = { level: item.level, kind: item.kind, html: item.html, num: item.num, children: [] };
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  }
+  return root.children;
+}
+
+/** ツリーの 1 階層ぶんを直列化する。同じ階層内でも種別（bullet/ordered/check）が変われば
+ * <ul>/<ol> を区切り直す（check は <ul> 扱い）。ordered の各 <li> には元の行要素から読んだ
+ * 表示番号を value として個別に付ける。renderMarkdown は番号行以外（bullet 等）が挟まると
+ * カウンタをリセットするため、入れ子を挟んだ番号リストは画面上「1 / 1 / 2」のように連番が
+ * 途中でリセットされることがあるが、種別混在でも 1 つの <ol> にまとめる都合上ブラウザの
+ * 既定の自動採番（1 / 2 / 3）に任せると食い違う。<li value> で個々の番号を明示することで
+ * 貼り付け先の採番を画面表示・text/plain と一致させる */
+function serializeListTree(nodes) {
+  let out = '';
+  let i = 0;
+  while (i < nodes.length) {
+    const kind = nodes[i].kind;
+    const tag = kind === 'ordered' ? 'ol' : 'ul';
+    const startAttr = kind === 'ordered' ? ` start="${nodes[i].num}"` : '';
+    out += `<${tag}${startAttr}>`;
+    while (i < nodes.length && nodes[i].kind === kind) {
+      const valueAttr = kind === 'ordered' ? ` value="${nodes[i].num}"` : '';
+      out += `<li${valueAttr}>${nodes[i].html}`;
+      if (nodes[i].children.length) out += serializeListTree(nodes[i].children);
+      out += '</li>';
+      i++;
+    }
+    out += `</${tag}>`;
+  }
+  return out;
+}
+
+/** 連続するリスト行（bullet/ordered/check が混在してよい）1 ブロックぶんを <ul>/<ol> の
+ * 入れ子ツリーに組み立てる。種別の変わり目でリストが分断されないよう、レベル差による
+ * 親子関係は種別をまたいで判定する。 */
+function buildListHtml(rows) {
+  const items = rows.map((row) => {
+    const kind = lineElementKind(row);
+    return { level: lineElementIndentLevel(row), kind, ...extractListItemContent(kind, row) };
+  });
+  return serializeListTree(buildListTree(items));
+}
+
+/**
+ * トップレベルが行要素（mdView 直下の [data-line] 要素）の並びであるクローンを、
+ * セマンティック HTML へ変換する。連続する同種の行（リスト・引用）はまとめて 1 ブロックにする。
+ */
+function rowsToSemanticHtml(rows) {
+  const out = [];
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i];
+    const kind = lineElementKind(row);
+    if (kind === 'h1' || kind === 'h2' || kind === 'h3') {
+      out.push(`<${kind}>${stripInternalAttrs(row.innerHTML)}</${kind}>`);
+      i++;
+    } else if (kind === 'hr') {
+      out.push('<hr>');
+      i++;
+    } else if (kind === 'empty') {
+      out.push('<p></p>');
+      i++;
+    } else if (kind === 'codeblock') {
+      const code = row.querySelector('code');
+      // Google Docs / Word 等は HTML ペーストでコードブロックの書式を持たないため、
+      // 等幅フォントで見分けられるよう inline style を付ける
+      out.push(`<pre style="font-family: monospace"><code>${code ? code.innerHTML : ''}</code></pre>`);
+      i++;
+    } else if (kind === 'blockquote') {
+      const lines = [];
+      while (i < rows.length && lineElementKind(rows[i]) === 'blockquote') {
+        lines.push(`<p>${stripInternalAttrs(rows[i].innerHTML)}</p>`);
+        i++;
+      }
+      out.push(`<blockquote>${lines.join('')}</blockquote>`);
+    } else if (isListKind(kind)) {
+      const group = [];
+      while (i < rows.length && isListKind(lineElementKind(rows[i]))) {
+        group.push(rows[i]);
+        i++;
+      }
+      out.push(buildListHtml(group));
+    } else {
+      out.push(`<p>${stripInternalAttrs(row.innerHTML)}</p>`); // .md-line
+      i++;
+    }
+  }
+  return out.join('');
+}
+
+/**
+ * range.cloneContents() から通常コピー用の text/html・text/plain を組み立てる。
+ * img は元パスがアプリ外で解決できないため、html・plain どちらも alt テキストへ置き換える
+ * （置換後の同じクローンを両方の生成元にする）。
+ * 選択範囲が生 Markdown の (行, 列) へ解決できない場合（例: 空の付箋のプレースホルダ表示
+ * 「メモを入力…」は [data-line] を持たず、resolveSelectionPoint が対応する行を見つけられない）
+ * は null を返す。この場合、呼び出し元は独自のコピー処理をせず既定のコピーに任せる
+ * （解決できない DOM の断片を html・plain にそのまま流し込まないため）。
+ */
+function buildSelectionCopyPayload(range) {
+  const bounds = resolveSelectionBounds(range);
+  if (!bounds) return null;
+
+  const container = document.createElement('div');
+  container.appendChild(range.cloneContents());
+  container.querySelectorAll('img').forEach((img) => {
+    const alt = img.getAttribute('alt') || '';
+    // data-rel-src は renderMarkdown が書いた raw の相対パス（resolveImageSrc 前）。
+    // 拡張子の見た目を安定させるため、asset URL 化された src ではなくこちらを優先する
+    const src = img.dataset.relSrc || img.getAttribute('src') || '';
+    img.replaceWith(document.createTextNode(imageDisplayLabel(alt, src)));
+  });
+
+  // html: クローンのトップレベルに「行要素」（mdView 直下の要素の複製。常に <div data-line>
+  // か <pre data-line>）が 1 つでもあれば、行の並びとしてセマンティック HTML へ変換する。
+  // 複数行にまたがる選択はもちろん、選択が 1 行しか触れていなくても、その境界が
+  // 「行の手前」のようなコンテナレベルの位置（mdView 直下の子オフセット）で表現されている
+  // ときは、cloneContents がその行を属性ごとまるごと複製する（commonAncestorContainer が
+  // mdView になり、行要素は「完全または部分的に範囲内にある mdView の子」として扱われるため）。
+  // これは「行をまるごと選択する」典型的な操作（例: 行頭から次行の手前までドラッグ）で実際に
+  // 起こる形。<input data-line>（チェックボックス）や .md-order-num の span も data-line
+  // 相当の属性を持つことがあるが、それらは tagName が DIV/PRE ではないため区別できる
+  const hasRowElement = Array.from(container.children).some(
+    (el) => el.hasAttribute('data-line') && (el.tagName === 'DIV' || el.tagName === 'PRE'),
+  );
+  const html = hasRowElement
+    ? rowsToSemanticHtml(Array.from(container.children))
+    : stripInternalAttrs(container.innerHTML);
+
+  // plain: DOM クローンではなく、選択範囲の (行, 列) を生 Markdown へ解決する
+  // buildPlainFromSelection を使う（text/plain の仕様。行構造は raw のまま、インライン
+  // 装飾だけ可視テキストへ置換する。詳細は同関数のコメント参照）
+  const plain = buildPlainFromSelection(range, bounds);
+  return { html, plain };
+}
+
 // 画像選択中の ⌘C/⌘X はネイティブ Edit メニューのショートカットとして処理される
 // （keydown まで届かない）。selectImage が張った DOM 選択のおかげでメニュー項目が有効になり、
 // メニュー経由の Copy/Cut が WebKit の copy/cut イベントとして DOM に届く。selectedImage が
 // 無いとき（通常のテキスト選択）は preventDefault せず、ブラウザ既定のコピー/カットに任せる
 document.addEventListener('copy', (e) => {
-  if (!selectedImage) return;
+  if (selectedImage) {
+    e.preventDefault();
+    copySelectedImage();
+    return;
+  }
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return; // 選択なしは既定に任せる（何もしない）
+  const range = sel.getRangeAt(0);
+  const ed = activeEditor();
+  if (ed && range.intersectsNode(ed)) return; // .raw-editor に触れる選択は既定の編集操作に任せる
+  if (!mdView.contains(range.commonAncestorContainer)) return;
+  const payload = buildSelectionCopyPayload(range);
+  if (!payload) return; // 生 Markdown へ解決できない選択（プレースホルダ等）は既定のコピーに任せる
   e.preventDefault();
-  copySelectedImage();
+  e.clipboardData.setData('text/html', payload.html);
+  e.clipboardData.setData('text/plain', payload.plain);
 });
 
 document.addEventListener('cut', (e) => {
@@ -1785,6 +2384,32 @@ window.addEventListener('beforeunload', () => {
 document.addEventListener('contextmenu', async (e) => {
   if (e.shiftKey) return;
   e.preventDefault();
+  // 「Markdown をコピー」の対象は、メニュー表示前のこの時点で計算して退避しておく。
+  // 直後の flushContent() は入力中の行を renderAll() で描画し直しうり、DOM 選択（Range）が
+  // 生きたまま invoke → メニュー表示まで持つ保証が無いため。resolveSelectionRange は未クローズの
+  // コードフェンスなど選択範囲の形によっては例外を投げうるため、ここで拾って握りつぶす
+  // （投げっぱなしにすると e.preventDefault() 済みのままメニューが一切開かなくなる）
+  let hasSelection = false;
+  try {
+    const sel = window.getSelection();
+    if (sel.rangeCount && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const ed = activeEditor();
+      const touchesRawEditor = ed && range.intersectsNode(ed);
+      if (!touchesRawEditor && mdView.contains(range.commonAncestorContainer)) {
+        const markdown = resolveSelectionRange(range);
+        // 空文字（可視文字ゼロ行の退化ケース等）なら、空のクリップボード書き込みを防ぐため
+        // 選択なし扱いにする（Rust 側は hasSelection が false ならメニュー項目自体を出さない）
+        if (markdown) {
+          pendingMarkdownCopy = markdown;
+          hasSelection = true;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('resolve selection for context menu failed:', err);
+  }
+  if (!hasSelection) pendingMarkdownCopy = null;
   // メニューから削除が選ばれてもよいように、開く前に保存を済ませておく
   await flushContent();
   const img = e.target.closest('img[data-rel-src]');
@@ -1795,8 +2420,18 @@ document.addEventListener('contextmenu', async (e) => {
     isPinned: pinBtn.classList.contains('active'),
     currentColor: currentColor,
     imagePath,
+    hasSelection,
   }).catch(e => console.error('context menu failed:', e));
 });
+
+// 右クリックメニューの「Markdown をコピー」。contextmenu ハンドラが退避した
+// pendingMarkdownCopy をここで消費する（選択が無ければ Rust 側はメニュー項目自体を出さない）
+unlisteners.push(appWindow.listen('ctx-copy-markdown', () => {
+  const text = pendingMarkdownCopy;
+  pendingMarkdownCopy = null;
+  if (text == null) return;
+  invoke('copy_markdown', { text }).catch(e => console.error('copy markdown failed:', e));
+}));
 
 // ── Expose for Playwright tests ──────────────────────
 window.htmlToMarkdown = htmlToMarkdown;
@@ -1808,6 +2443,7 @@ window.changeZoom = changeZoom;
 window.resetZoom = resetZoom;
 window.performUndo = performUndo;
 window.performRedo = performRedo;
+window.resolveSelectionRange = resolveSelectionRange;
 
 
 // ── Keyboard: color dots (Enter/Space/Arrow) ───────

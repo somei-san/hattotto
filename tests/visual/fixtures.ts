@@ -55,6 +55,7 @@ export async function injectNoteMock(
         case "delete_image":          return null;
         case "copy_image":            return null;
         case "cut_image":             return null;
+        case "copy_markdown":         return null;
         default:                      return null;
       }
     };

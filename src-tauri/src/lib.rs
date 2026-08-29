@@ -134,6 +134,7 @@ pub fn run() {
             commands::delete_image,
             commands::copy_image,
             commands::cut_image,
+            commands::copy_markdown,
         ])
         .setup(move |app| {
             // Set up app menu and system tray

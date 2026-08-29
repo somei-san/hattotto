@@ -1,6 +1,11 @@
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
 
+// visibleOffsetToRawOffset は inlineSegments をブラウザのグローバルスコープ経由で参照する
+// （note.html の読み込み順で markdown.js → note-lines.js の順に読まれるのを前提にしている）。
+// markdown-codeblock.test.js の escapeHtml と同じ作法で、require 前に global へ生やす
+global.inlineSegments = require("../../src/markdown.js").inlineSegments;
+
 const {
   blockOffset,
   markerLength,
@@ -8,6 +13,7 @@ const {
   isEmptyListItem,
   CHECKBOX_RE,
   isImageOnlyLine,
+  visibleOffsetToRawOffset,
 } = require("../../src/note-lines.js");
 
 describe("getAutoPrefix", () => {
@@ -331,5 +337,80 @@ describe("isImageOnlyLine", () => {
 
   test("パストラバーサル細工 → false", () => {
     assert.equal(isImageOnlyLine("![](images/../notes.json)"), false);
+  });
+});
+
+describe("visibleOffsetToRawOffset", () => {
+  // ── プレーン行: 可視文字と raw 文字が 1:1 ─────────────────
+  test("プレーン行は可視オフセットがそのまま raw オフセット", () => {
+    const raw = "hello world";
+    for (let i = 0; i <= raw.length; i++) {
+      assert.equal(visibleOffsetToRawOffset(raw, i, false), i);
+      assert.equal(visibleOffsetToRawOffset(raw, i, true), i);
+    }
+  });
+
+  test("空文字列は 0 を返す", () => {
+    assert.equal(visibleOffsetToRawOffset("", 0, false), 0);
+  });
+
+  // ── 装飾セグメントの両端（自然な境界） ─────────────────
+  test("装飾セグメントの開始境界（within=0）は srcStart", () => {
+    // "**bold** tail" → 可視は "bold tail"。可視 0 は raw 0（"**" の直前）
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 0, false), 0);
+  });
+
+  test("装飾セグメントの終了境界（within=segLen）は srcEnd", () => {
+    // 可視 "bold"（4 文字）の直後 = raw の "**bold**"（8 文字）の直後
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 4, true), 8);
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 4, false), 8);
+  });
+
+  // ── 装飾セグメント内部への境界（丸め） ─────────────────
+  test("装飾セグメント内部・開始端（isEnd=false）は srcStart に丸める（記法を欠けさせない）", () => {
+    // 可視 "bo|ld"（2 文字目、"**bold**" の内部）→ 開始端なら raw 全体の先頭へ拡張
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, false), 0);
+  });
+
+  test("装飾セグメント内部・終了端（isEnd=true）は srcEnd に丸める（記法を欠けさせない）", () => {
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, true), 8);
+  });
+
+  test("取り消し線 ~~del~~ でも同様に丸める", () => {
+    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, false), 0);
+    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, true), 7);
+  });
+
+  // ── 画像記法: 可視文字数 0 ─────────────────────────────
+  test("画像記法は可視文字を持たず、直前の可視オフセットが raw 上の画像記法の開始位置に解決される", () => {
+    const raw = "before ![alt](images/00000000-0000-4000-8000-000000000001.png) after";
+    // "before " は可視 7 文字（raw も同じ 7 文字）、続く画像は可視 0 文字を挟むので、
+    // "before " の直後（可視オフセット 7）は isEnd の向きに関わらず同じ raw オフセット 7 に解決される
+    // （画像自体には選び取れる可視位置が無いため、開始端・終了端の区別が意味を持たない）
+    assert.equal(visibleOffsetToRawOffset(raw, 7, false), 7);
+    assert.equal(visibleOffsetToRawOffset(raw, 7, true), 7);
+  });
+
+  // ── コードスパン ────────────────────────────────────────
+  test("`code` の内部も装飾セグメントとして境界を欠けさせない", () => {
+    const raw = "see `foo` here";
+    // 可視 "foo" は raw の "`foo`"（5 文字）に対応
+    assert.equal(visibleOffsetToRawOffset(raw, 4, false), 4); // "see " の直後は 1:1
+    assert.equal(visibleOffsetToRawOffset(raw, 5, true), 9); // "foo" の直後 → "`foo`" の直後
+    assert.equal(visibleOffsetToRawOffset(raw, 5, false), 4); // "foo" の内部1文字目 → 開始端に丸め
+  });
+
+  // ── HTML エンティティを生む文字 ─────────────────────────
+  test("& < > を含む行でも可視オフセットは raw 1 文字ずつに対応する", () => {
+    const raw = "a & b < c > d";
+    for (let i = 0; i <= raw.length; i++) {
+      assert.equal(visibleOffsetToRawOffset(raw, i, false), i);
+    }
+  });
+
+  // ── 可視末尾を超えるオフセット ───────────────────────────
+  test("可視文字数の合計を超えるオフセットは raw 末尾にクランプする", () => {
+    const raw = "**bold**";
+    assert.equal(visibleOffsetToRawOffset(raw, 999, false), raw.length);
   });
 });

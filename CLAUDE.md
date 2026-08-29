@@ -92,6 +92,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 - 設定: `get_settings`, `update_settings`, `open_settings`
 - ゴミ箱: `get_trash`, `get_trash_max`, `restore_note`, `empty_trash`, `open_trash`
 - メニュー: `show_context_menu`
+- 選択範囲: `copy_markdown`（右クリックメニューの「Markdown をコピー」）
 
 ### アプリメニュー
 - File: New Note (⌘N), Trash... (⌘⇧T) — ネイティブアイコン付き
