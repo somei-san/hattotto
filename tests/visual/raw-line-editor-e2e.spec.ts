@@ -105,16 +105,25 @@ test.describe("行の生表示と行編集", () => {
     expect(await caretOffsetInEditor(page)).toBe("- 項目".length);
   });
 
-  test("Shift+←・Shift+→ は選択拡張のままで行をまたがない", async ({ openNote }) => {
+  test("Shift+←・Shift+→ は行頭/行末でエディタの境界を越え、マーカーを除いた前後行の可視端へ着地する", async ({ openNote }) => {
+    // Shift+←→ がエディタの境界（内容の先頭/末尾）に達すると、生エディタを閉じて描画 DOM 上の
+    // 行またぎ選択へ変換する（issue #67 続報）。見出し（# マーカー）・箇条書き（- マーカー）を
+    // 挟んだ隣接行でも、マーカーを除いた可視位置に着地することを確認する
     const page = await openNote({ content: DOC });
 
-    await placeCaret(page, 1, 0);
+    await placeCaret(page, 1, 0); // "本文" の行頭
     await page.locator("#editor").press("Shift+ArrowLeft");
-    expect(await page.locator("#editor").textContent()).toBe("本文");
 
-    await placeCaret(page, 1, null);
+    await expect(page.locator("#editor")).toHaveCount(0);
+    // anchor="本文"行頭、focus="# 見出し"の可視末尾（マーカー除く）→ 改行 1 文字分だけの選択
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("\n");
+
+    await placeCaret(page, 1, null); // "本文" の行末（生エディタへ戻す）
     await page.locator("#editor").press("Shift+ArrowRight");
-    expect(await page.locator("#editor").textContent()).toBe("本文");
+
+    await expect(page.locator("#editor")).toHaveCount(0);
+    // anchor="本文"行末、focus="- 項目"の可視先頭（マーカー除く）→ 改行 1 文字分だけの選択
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("\n");
   });
 
   test("選択中に修飾なし ← を押すと選択が畳まれるだけで行をまたがない", async ({ openNote }) => {
@@ -265,15 +274,18 @@ test.describe("Ctrl+A/E の行頭・行末移動", () => {
     expect(await caretState(page)).toEqual({ offset: 2, collapsed: true });
   });
 
-  test("⌘A はブロック内全選択のまま（回帰）", async ({ openNote }) => {
+  // ⌘A は付箋全体を選択する（selectAllNote、issue #67）。生エディタが開いていた行も
+  // 書き戻して閉じ、描画側で全文を選択する
+  test("⌘A で生エディタが閉じ、付箋全体が選択される", async ({ openNote }) => {
     const page = await openNote({ content: DOC });
 
     await placeCaret(page, 1, 1);
     await page.keyboard.press("Meta+a");
 
-    const state = await caretState(page);
-    expect(state.collapsed).toBe(false);
-    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("本文");
+    await expect(page.locator("#editor")).toHaveCount(0);
+    expect(await page.evaluate(() => window.getSelection()!.isCollapsed)).toBe(false);
+    // 描画側の可視テキスト（見出し・箇条書きのマーカーは剥がれる）
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("見出し\n本文\n項目");
   });
 
   test("Ctrl+⌘+A は何もしない（未定義の修飾キー組み合わせは macOS 標準に合わせて無視する）", async ({ openNote }) => {

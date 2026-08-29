@@ -112,10 +112,43 @@ function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
   return inlineRaw.length;
 }
 
+/**
+ * visibleOffsetToRawOffset の逆。インライン部の raw オフセットを可視文字オフセットへ変換する。
+ * 生エディタのキャレット位置（raw）を描画 DOM 上の位置（可視）へ写像するのに使う
+ * （note.js の contentVisibleColumn が、行頭マーカー分を除いた残りをここへ渡す）。
+ *
+ * inlineSegments(inlineRaw) の各セグメントを raw 文字数で消費しながら探し、rawOffset が
+ * 属するセグメント内の位置を可視オフセットへ写す。プレーンセグメントは 1:1 対応でそのまま足す。
+ * 装飾セグメント（**bold** 等）のマーカー文字そのもの（内部の可視テキスト範囲より外）に
+ * rawOffset が落ちた場合は、セグメント中央を境に近い側の可視境界（手前/奥）へ丸める
+ * （キャレットは記法の内部を指せないため、見た目上の直近の位置に寄せる）。
+ *
+ * @param {string} inlineRaw マーカーを除いた raw 行の残り
+ * @param {number} rawOffset inlineRaw 上の raw オフセット
+ * @returns {number} インライン部の可視文字オフセット
+ */
+function visibleOffsetFromRawOffset(inlineRaw, rawOffset) {
+  const segments = inlineSegments(inlineRaw);
+  let consumed = 0; // ここまでの可視文字数の累計
+  for (const seg of segments) {
+    const segLen = seg.visibleText.length;
+    if (rawOffset > seg.srcEnd) {
+      consumed += segLen;
+      continue;
+    }
+    if (rawOffset <= seg.srcStart) return consumed;
+    const isPlain = seg.visibleText === inlineRaw.slice(seg.srcStart, seg.srcEnd);
+    if (isPlain) return consumed + (rawOffset - seg.srcStart);
+    const mid = (seg.srcStart + seg.srcEnd) / 2;
+    return rawOffset < mid ? consumed : consumed + segLen;
+  }
+  return consumed;
+}
+
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
   module.exports = {
     blockOffset, markerLength, getAutoPrefix, isEmptyListItem, CHECKBOX_RE, isImageOnlyLine,
-    visibleOffsetToRawOffset,
+    visibleOffsetToRawOffset, visibleOffsetFromRawOffset,
   };
 }

@@ -56,6 +56,9 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
             "redo" => {
                 let _ = app.emit("edit-history", "redo");
             }
+            "select_all" => {
+                let _ = app.emit("select-all", ());
+            }
             "zoom_in" => {
                 let _ = app.emit("zoom", "in");
             }
@@ -151,7 +154,11 @@ fn build_menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
 
     // PredefinedMenuItem::undo/redo は macOS の NSUndoManager と結び付いており、⌘Z/⌘⇧Z を
     // WebView 側の keydown より先に奪う。付箋は独自の undo/redo 履歴（history.js）を持つため、
-    // ここは通常の MenuItem にして edit-history イベント経由でフロントへ委ねる
+    // ここは通常の MenuItem にして edit-history イベント経由でフロントへ委ねる。
+    // select_all も同じ理由でカスタム MenuItem にする。PredefinedMenuItem::select_all は
+    // WKWebView 標準の選択（フォーカス中の contenteditable 内だけ）に閉じてしまい、付箋全体
+    // （生エディタが閉じている状態も含む）を選択できない。select-all イベント経由で
+    // note.js の selectAllNote を呼ぶ
     let edit_submenu = Submenu::with_items(
         app,
         i18n::text(lang, Msg::MenuEdit),
@@ -175,7 +182,13 @@ fn build_menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::cut(app, None)?,
             &PredefinedMenuItem::copy(app, None)?,
             &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
+            &MenuItem::with_id(
+                app,
+                "select_all",
+                i18n::text(lang, Msg::MenuSelectAll),
+                true,
+                Some("CmdOrCtrl+A"),
+            )?,
         ],
     )?;
 

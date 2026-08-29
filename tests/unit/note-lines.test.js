@@ -14,6 +14,7 @@ const {
   CHECKBOX_RE,
   isImageOnlyLine,
   visibleOffsetToRawOffset,
+  visibleOffsetFromRawOffset,
 } = require("../../src/note-lines.js");
 
 describe("getAutoPrefix", () => {
@@ -412,5 +413,81 @@ describe("visibleOffsetToRawOffset", () => {
   test("可視文字数の合計を超えるオフセットは raw 末尾にクランプする", () => {
     const raw = "**bold**";
     assert.equal(visibleOffsetToRawOffset(raw, 999, false), raw.length);
+  });
+});
+
+describe("visibleOffsetFromRawOffset", () => {
+  // ── プレーン行: raw オフセットがそのまま可視オフセット ─────
+  test("プレーン行は raw オフセットがそのまま可視オフセット", () => {
+    const raw = "hello world";
+    for (let i = 0; i <= raw.length; i++) {
+      assert.equal(visibleOffsetFromRawOffset(raw, i), i);
+    }
+  });
+
+  test("空文字列は 0 を返す", () => {
+    assert.equal(visibleOffsetFromRawOffset("", 0), 0);
+  });
+
+  // ── 装飾セグメントの両端（visibleOffsetToRawOffset との往復） ─────
+  test("装飾セグメントの開始境界（raw 0）は可視 0 ── visibleOffsetToRawOffset(raw, 0, false) の逆", () => {
+    const raw = "**bold** tail";
+    assert.equal(visibleOffsetToRawOffset(raw, 0, false), 0); // 既存の往路の確認
+    assert.equal(visibleOffsetFromRawOffset(raw, 0), 0);
+  });
+
+  test("装飾セグメントの終了境界（raw 8）は可視 4 ── visibleOffsetToRawOffset(raw, 4, true) の逆", () => {
+    const raw = "**bold** tail";
+    assert.equal(visibleOffsetToRawOffset(raw, 4, true), 8); // 既存の往路の確認
+    assert.equal(visibleOffsetFromRawOffset(raw, 8), 4);
+  });
+
+  test("装飾セグメントに続くプレーン部分の末尾（raw 13）は可視 9（\"bold tail\" の文字数）", () => {
+    const raw = "**bold** tail";
+    assert.equal(visibleOffsetFromRawOffset(raw, 13), "bold tail".length);
+  });
+
+  // ── 装飾セグメント内部（マーカー文字そのもの）への丸め ─────
+  test("マーカー文字そのものの内部は、セグメント中央より手前なら開始側の可視境界へ丸める", () => {
+    // "**bold**" の raw 1（"*" の 2 文字目、中央 4 より手前）→ 可視 0（開始側）
+    assert.equal(visibleOffsetFromRawOffset("**bold** tail", 1), 0);
+  });
+
+  test("マーカー文字そのものの内部は、セグメント中央以降なら終了側の可視境界へ丸める", () => {
+    // "**bold**" の raw 7（末尾の "*" の 1 文字目、中央 4 より奥）→ 可視 4（終了側）
+    assert.equal(visibleOffsetFromRawOffset("**bold** tail", 7), 4);
+  });
+
+  test("取り消し線 ~~del~~ でも同様に丸める", () => {
+    const raw = "~~del~~";
+    assert.equal(visibleOffsetFromRawOffset(raw, 0), 0);
+    assert.equal(visibleOffsetFromRawOffset(raw, 7), 3); // "del" の直後
+  });
+
+  // ── コードスパン: プレーン/装飾の継ぎ目は往路と厳密に一致する ─────
+  test("`code` 直前のプレーン部分は raw と可視が 1:1 対応する", () => {
+    const raw = "see `foo` here";
+    assert.equal(visibleOffsetFromRawOffset(raw, 4), 4); // "see " の直後
+  });
+
+  test("`code` の終了境界（raw 9）は可視 7（\"see foo\" の直後）── visibleOffsetToRawOffset の逆", () => {
+    const raw = "see `foo` here";
+    assert.equal(visibleOffsetToRawOffset(raw, 7, true), 9); // 既存の往路の確認（コードスパンは isEnd に依らず境界へ丸める）
+    assert.equal(visibleOffsetFromRawOffset(raw, 9), 7);
+  });
+
+  // ── 可視末尾を超えるオフセット ───────────────────────────
+  test("raw 文字数の合計を超えるオフセットは可視末尾相当にクランプする", () => {
+    const raw = "**bold**";
+    assert.equal(visibleOffsetFromRawOffset(raw, 999), "bold".length);
+  });
+
+  // ── 往復（プレーン区間はどの raw オフセットでも一致する） ─────
+  test("プレーンセグメントは visibleOffsetToRawOffset と往復一致する", () => {
+    const raw = "a & b < c > d";
+    for (let i = 0; i <= raw.length; i++) {
+      const visible = visibleOffsetFromRawOffset(raw, i);
+      assert.equal(visibleOffsetToRawOffset(raw, visible, false), i);
+    }
   });
 });

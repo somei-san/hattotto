@@ -213,10 +213,17 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 画像は選択せず、通常のテキスト行を生表示にする
+    // 画像は選択せず、通常のテキスト行を生表示にする。⌘A は付箋全体を選択する
+    // （selectAllNote）ため、生エディタ内だけを選択するにはここでは Range を直接張る
     await enterEdit(page, 0);
-    await page.locator("#editor").click();
-    await page.keyboard.press("ControlOrMeta+a"); // 全選択してからコピー
+    await page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
 
     // 実際のキー操作（selectedImage が無いのでブラウザ既定のコピーに任される経路）
     await page.keyboard.press("ControlOrMeta+c");
@@ -237,8 +244,14 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
     await page.waitForLoadState("networkidle");
 
     await enterEdit(page, 0);
-    await page.locator("#editor").click();
-    await page.keyboard.press("ControlOrMeta+a"); // 全選択してからカット
+    await page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
 
     await page.keyboard.press("ControlOrMeta+x");
 

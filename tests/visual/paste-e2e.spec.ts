@@ -71,10 +71,17 @@ test.describe("ペースト処理", () => {
 
     await enterEdit(page);
 
-    // テキストを入力して全選択
+    // テキストを入力して全選択。⌘A は付箋全体を選択する（selectAllNote）ため、生エディタ内
+    // だけを選択するにはここでは Range を直接張る
     await page.locator("#editor").pressSequentially("multi line text");
-    const mod = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${mod}+a`);
+    await page.evaluate(() => {
+      const ed = document.getElementById("editor")!;
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
 
     await page.evaluate(() => {
       const editor = document.getElementById("editor")!;

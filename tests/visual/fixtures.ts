@@ -21,7 +21,7 @@ export async function injectNoteMock(
   page: Page,
   noteOverrides: Record<string, unknown> = {},
   settingsOverrides: Record<string, unknown> = {},
-  options: { captureInvokes?: boolean } = {},
+  options: { captureInvokes?: boolean; invokeDelays?: Record<string, number> } = {},
 ) {
   const note = {
     id: "test-note-id",
@@ -38,6 +38,8 @@ export async function injectNoteMock(
 
   await page.addInitScript((data) => {
     const baseMock = async (cmd: string, args?: unknown) => {
+      const delay = data.invokeDelays[cmd];
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       switch (cmd) {
         case "get_note":              return data.note;
         case "get_settings":          return data.settings;
@@ -109,7 +111,12 @@ export async function injectNoteMock(
         }),
       },
     };
-  }, { note, settings: { ...DEFAULT_SETTINGS, ...settingsOverrides }, captureInvokes: !!options.captureInvokes });
+  }, {
+    note,
+    settings: { ...DEFAULT_SETTINGS, ...settingsOverrides },
+    captureInvokes: !!options.captureInvokes,
+    invokeDelays: options.invokeDelays ?? {},
+  });
 }
 
 // ── Settings mock ──────────────────────────────────────────
@@ -234,6 +241,44 @@ export async function placeCaret(page: Page, line: number, col?: number) {
 /** 生表示中の行を書き戻したうえでの、付箋のソーステキスト全体。 */
 export function getContent(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { getRawContent(): string }).getRawContent());
+}
+
+/** markdown-view の (行, 可視オフセット) の 2 点を DOM 選択（Range）として張る。note.js の
+ * nodeAt と同じアルゴリズムをページ内で組み立てる（行末を超えるオフセットは行末にクランプ）。 */
+export function selectMarkdownRange(
+  page: Page,
+  startLine: number,
+  startOffset: number,
+  endLine: number,
+  endOffset: number,
+) {
+  return page.evaluate(
+    ([sl, so, el, eo]) => {
+      const pointAtInPage = (elm: Element, visibleOffset: number) => {
+        const walker = document.createTreeWalker(elm, NodeFilter.SHOW_TEXT);
+        let remaining = visibleOffset;
+        let node: Text | null;
+        let last: Text | null = null;
+        while ((node = walker.nextNode() as Text | null)) {
+          last = node;
+          if (remaining <= node.textContent!.length) return { node, offset: remaining };
+          remaining -= node.textContent!.length;
+        }
+        return last ? { node: last, offset: last.textContent!.length } : { node: elm, offset: 0 };
+      };
+      const startEl = document.querySelector(`#markdown-view [data-line="${sl}"]`)!;
+      const endEl = document.querySelector(`#markdown-view [data-line="${el}"]`)!;
+      const start = pointAtInPage(startEl, so as number);
+      const end = pointAtInPage(endEl, eo as number);
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+    [startLine, startOffset, endLine, endOffset] as const,
+  );
 }
 
 // ── Fixture types ──────────────────────────────────────────
