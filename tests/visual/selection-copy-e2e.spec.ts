@@ -824,7 +824,7 @@ test.describe("通常コピー: 単一行選択（複数行にまたがらない
 });
 
 test.describe("resolveSelectionRange（Markdown をコピーが使う生 Markdown の写像）", () => {
-  test("装飾記法の内部に選択境界が落ちても記法を欠けさせない", async ({ browser }) => {
+  test("装飾記法の内部に選択境界が落ちても、選択した可視文字に対応する raw 範囲をそのまま取る", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     // raw: "abc **bold** def" / 可視: "abc bold def"
@@ -857,9 +857,9 @@ test.describe("resolveSelectionRange（Markdown をコピーが使う生 Markdow
         .resolveSelectionRange(range);
     });
 
-    // 開始端は装飾セグモント "**bold**" の内部に落ちるので記法全体（srcStart）まで拡張され、
-    // 終了端は plain セグメントの内部なのでそのままの位置で切れる
-    expect(markdown).toBe("**bold** de");
+    // 開始端は装飾セグメント "**bold**" の中身（"bold"）の内部に落ちるので charMap で厳密対応し、
+    // "b" の次の raw 位置から始まる（"**bold" の "**b" は選択していないので含めない）
+    expect(markdown).toBe("old** de");
 
     await ctx.close();
   });

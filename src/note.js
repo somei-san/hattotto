@@ -2545,8 +2545,9 @@ const IMAGE_MARKDOWN_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/;
 
 /**
  * インライン部分の raw 文字列から [localStart, localEnd) の範囲だけを、装飾記法を可視テキストへ
- * 置換した文字列として取り出す。境界は呼び出し元（resolveSelectionPoint 経由）で常に装飾記法の
- * 単位に丸められている前提のため、装飾セグメントは重なっていれば全体を含める。
+ * 置換した文字列として取り出す。charMap を持つ装飾セグメントは中身の raw 範囲との重なりを
+ * 可視文字単位で切り出す（境界が装飾の内部に落ちても「コピーされる範囲 = 削除される範囲」を保つ）。
+ * charMap が無いセグメント（ネスト装飾等）は重なっていれば全体を含める。
  * 画像は inlineSegments の visibleText がタグの中身（＝属性である alt）を拾えないため常に空になる。
  * リンク・装飾に包まれた画像も同様に visibleText が空になる（stripTagsQuoteAware が <img> ごと
  * 中身の無いタグとして扱うため）ので、raw に完全一致するかではなく「visibleText が空かつ html に
@@ -2563,6 +2564,13 @@ function inlineVisibleSlice(inlineRaw, localStart, localEnd) {
     const raw = inlineRaw.slice(seg.srcStart, seg.srcEnd);
     if (raw === seg.visibleText) {
       out += inlineRaw.slice(segStart, segEnd); // 装飾なしの素のテキスト。raw==visible なのでそのまま
+      continue;
+    }
+    if (seg.charMap) {
+      const cs = seg.charMap.srcStart;
+      const from = Math.max(0, segStart - cs);
+      const to = Math.min(seg.charMap.len, segEnd - cs);
+      if (to > from) out += seg.visibleText.slice(from, to);
       continue;
     }
     if (seg.visibleText === '' && /<img\b/i.test(seg.html)) {

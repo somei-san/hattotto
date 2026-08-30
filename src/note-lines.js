@@ -85,12 +85,14 @@ function isImageOnlyLine(lineText) {
  * inlineSegments(inlineRaw) の各セグメントを可視文字数で消費しながら探し、visibleOffset が
  * 属するセグメント内の位置を raw オフセットへ写す。プレーンセグメント（装飾を伴わない素の
  * テキスト）は可視文字と raw 文字が 1:1 対応するのでそのまま足す。装飾セグメント（**bold** 等）
- * の内部（両端どちらでもない位置）に境界が落ちた場合は、記法を欠けさせないようセグメント全体を
- * 含める側（開始端なら srcStart、終了端なら srcEnd）に丸める。
+ * は charMap があれば内部の可視文字位置も raw へ厳密対応する（両端の境界は charMap の有無に
+ * 関わらず常に srcStart/srcEnd）。charMap を持たないセグメント（画像・ネストした装飾）の内部に
+ * 境界が落ちた場合は、記法を欠けさせないようセグメント全体を含める側（開始端なら srcStart、
+ * 終了端なら srcEnd）に丸める。
  *
  * @param {string} inlineRaw マーカーを除いた raw 行の残り
  * @param {number} visibleOffset インライン部の可視文字数オフセット
- * @param {boolean} isEnd 選択の終了端かどうか（装飾セグメント内部への丸め方向に使う）
+ * @param {boolean} isEnd 選択の終了端かどうか（charMap を持たないセグメント内部への丸め方向に使う）
  * @returns {number} inlineRaw 上のオフセット
  */
 function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
@@ -103,6 +105,13 @@ function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
       continue;
     }
     const within = visibleOffset - consumed;
+    // charMap がある装飾セグメントは境界規約（両端は srcStart/srcEnd、内部は charMap）で厳密に解決する。
+    // isEnd はもう使わない: 内部の丸め方向という役割は charMap の厳密対応に置き換わった
+    if (seg.charMap) {
+      if (within <= 0) return seg.srcStart;
+      if (within >= segLen) return seg.srcEnd;
+      return seg.charMap.srcStart + within;
+    }
     const isPlain = seg.visibleText === inlineRaw.slice(seg.srcStart, seg.srcEnd);
     if (isPlain) return seg.srcStart + within;
     if (within <= 0) return seg.srcStart;
@@ -119,8 +128,9 @@ function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
  *
  * inlineSegments(inlineRaw) の各セグメントを raw 文字数で消費しながら探し、rawOffset が
  * 属するセグメント内の位置を可視オフセットへ写す。プレーンセグメントは 1:1 対応でそのまま足す。
- * 装飾セグメント（**bold** 等）のマーカー文字そのもの（内部の可視テキスト範囲より外）に
- * rawOffset が落ちた場合は、セグメント中央を境に近い側の可視境界（手前/奥）へ丸める
+ * 装飾セグメント（**bold** 等）は charMap があれば中身の raw 範囲に落ちた rawOffset を厳密対応し、
+ * マーカー上に落ちた場合は同じ側の可視境界へ寄せる。charMap が無いセグメントでマーカー上に落ちた
+ * 場合は、セグメント中央を境に近い側の可視境界（手前/奥）へ丸める
  * （キャレットは記法の内部を指せないため、見た目上の直近の位置に寄せる）。
  *
  * @param {string} inlineRaw マーカーを除いた raw 行の残り
@@ -137,6 +147,16 @@ function visibleOffsetFromRawOffset(inlineRaw, rawOffset) {
       continue;
     }
     if (rawOffset <= seg.srcStart) return consumed;
+    // charMap がある場合は中身の raw 範囲を厳密対応し、マーカー上に落ちた raw 位置は
+    // 同じ側の可視境界（開きマーカー → セグメント先頭、閉じマーカー → セグメント末尾）へ寄せる。
+    // 中央値丸めに落とすと raw を右へ進めたとき可視位置が戻る（単調性が壊れる）ため使わない
+    if (seg.charMap) {
+      const cs = seg.charMap.srcStart;
+      const ce = cs + seg.charMap.len;
+      if (rawOffset <= cs) return consumed;
+      if (rawOffset >= ce) return consumed + segLen;
+      return consumed + (rawOffset - cs);
+    }
     const isPlain = seg.visibleText === inlineRaw.slice(seg.srcStart, seg.srcEnd);
     if (isPlain) return consumed + (rawOffset - seg.srcStart);
     const mid = (seg.srcStart + seg.srcEnd) / 2;

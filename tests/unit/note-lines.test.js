@@ -367,19 +367,27 @@ describe("visibleOffsetToRawOffset", () => {
     assert.equal(visibleOffsetToRawOffset("**bold** tail", 4, false), 8);
   });
 
-  // ── 装飾セグメント内部への境界（丸め） ─────────────────
-  test("装飾セグメント内部・開始端（isEnd=false）は srcStart に丸める（記法を欠けさせない）", () => {
-    // 可視 "bo|ld"（2 文字目、"**bold**" の内部）→ 開始端なら raw 全体の先頭へ拡張
-    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, false), 0);
+  // ── 装飾セグメント内部（charMap による厳密対応） ─────────────
+  test("装飾セグメント内部は charMap で厳密対応する（isEnd に関わらず同じ raw オフセット）", () => {
+    // 可視 "bo|ld"（2 文字目、"**bold**" の内部）→ "bold" は raw[2,6) なので raw 4
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, false), 4);
+    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, true), 4);
   });
 
-  test("装飾セグメント内部・終了端（isEnd=true）は srcEnd に丸める（記法を欠けさせない）", () => {
-    assert.equal(visibleOffsetToRawOffset("**bold** tail", 2, true), 8);
+  test("装飾セグメント内部の全位置が raw と 1:1 対応する（往復整合）", () => {
+    const raw = "**bold** tail";
+    // "bold" の厳密に内部（両端の境界 0・4 は charMap でなく srcStart/srcEnd を返す規約のため対象外）の
+    // 可視位置 1..3 は raw[3..5) に厳密対応する
+    for (let i = 1; i <= 3; i++) {
+      assert.equal(visibleOffsetToRawOffset(raw, i, false), 2 + i);
+      assert.equal(visibleOffsetToRawOffset(raw, i, true), 2 + i);
+    }
   });
 
-  test("取り消し線 ~~del~~ でも同様に丸める", () => {
-    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, false), 0);
-    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, true), 7);
+  test("取り消し線 ~~del~~ でも同様に厳密対応する", () => {
+    // "del" は raw[2,5) なので可視 1（"d" の直後）は raw 3
+    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, false), 3);
+    assert.equal(visibleOffsetToRawOffset("~~del~~", 1, true), 3);
   });
 
   // ── 画像記法: 可視文字数 0 ─────────────────────────────
@@ -393,12 +401,13 @@ describe("visibleOffsetToRawOffset", () => {
   });
 
   // ── コードスパン ────────────────────────────────────────
-  test("`code` の内部も装飾セグメントとして境界を欠けさせない", () => {
+  test("`code` の内部も charMap で厳密対応する", () => {
     const raw = "see `foo` here";
-    // 可視 "foo" は raw の "`foo`"（5 文字）に対応
+    // 可視 "foo" は raw の "`foo`"（backtick を除く "foo" は raw[5,8)）に対応
     assert.equal(visibleOffsetToRawOffset(raw, 4, false), 4); // "see " の直後は 1:1
-    assert.equal(visibleOffsetToRawOffset(raw, 5, true), 9); // "foo" の直後 → "`foo`" の直後
-    assert.equal(visibleOffsetToRawOffset(raw, 5, false), 4); // "foo" の内部1文字目 → 開始端に丸め
+    assert.equal(visibleOffsetToRawOffset(raw, 7, true), 9); // "foo" の直後（segLen 到達）→ srcEnd
+    assert.equal(visibleOffsetToRawOffset(raw, 5, true), 6); // "foo" の内部1文字目 → raw[5]+1
+    assert.equal(visibleOffsetToRawOffset(raw, 5, false), 6); // isEnd に関わらず同じ raw オフセット
   });
 
   // ── HTML エンティティを生む文字 ─────────────────────────
@@ -474,6 +483,79 @@ describe("visibleOffsetFromRawOffset", () => {
     const raw = "see `foo` here";
     assert.equal(visibleOffsetToRawOffset(raw, 7, true), 9); // 既存の往路の確認（コードスパンは isEnd に依らず境界へ丸める）
     assert.equal(visibleOffsetFromRawOffset(raw, 9), 7);
+  });
+
+  // ── 装飾セグメントの中身（charMap の範囲）は厳密対応する ─────
+  test("装飾セグメントの中身に落ちた raw 位置は charMap で厳密対応する（マーカーの丸めとは別枠）", () => {
+    // "**bold**" の raw 3（"bold" の内部、"b" の直後）→ 可視 1
+    assert.equal(visibleOffsetFromRawOffset("**bold** tail", 3), 1);
+  });
+
+  test("装飾セグメントの中身は visibleOffsetToRawOffset と全位置で往復一致する", () => {
+    const raw = "**bold** tail";
+    // 中身の raw 範囲 [2,6] のうち、両端（マーカー直後・直前）は境界規約で srcStart/srcEnd に
+    // 丸められるため往復一致の対象外。厳密に内部の raw 3..5 だけを確認する
+    for (let raw_i = 3; raw_i <= 5; raw_i++) {
+      const visible = visibleOffsetFromRawOffset(raw, raw_i);
+      assert.equal(visibleOffsetToRawOffset(raw, visible, false), raw_i);
+    }
+  });
+
+  test("`code` の中身も charMap で厳密対応する", () => {
+    const raw = "see `foo` here";
+    // raw 6（"foo" の "f" の直後）→ 可視 5（"see f" の直後）
+    assert.equal(visibleOffsetFromRawOffset(raw, 6), 5);
+  });
+
+  // ── ネストした装飾は charMap を持たず現行の丸めへフォールバックする ─────
+  test("ネストした装飾（bold の中に code）は charMap を持たず中央値丸めのまま", () => {
+    const raw = "**bold `code` here**"; // srcStart=0, srcEnd=20, mid=10, 可視 "bold code here"（14文字）
+    assert.equal(visibleOffsetFromRawOffset(raw, 5), 0); // mid より手前 → 開始側
+    assert.equal(visibleOffsetFromRawOffset(raw, 15), 14); // mid 以降 → 終了側（segLen）
+  });
+
+  // ── リンクラベル・裸URLも charMap で厳密対応する ─────────
+  test("リンクラベルの内部は charMap で厳密対応する", () => {
+    const raw = "[label](https://example.com)";
+    // ラベル "label" は raw[1,6)。可視 2（"la" の直後）→ raw 3
+    assert.equal(visibleOffsetToRawOffset(raw, 2, false), 3);
+    assert.equal(visibleOffsetFromRawOffset(raw, 3), 2);
+  });
+
+  test("裸URLの内部は charMap で厳密対応する", () => {
+    const raw = "see https://example.com here";
+    // 裸URLは raw[4,...) から始まる。"see " の直後（可視4）+ "https://"（8文字）＝可視12 → raw 12
+    assert.equal(visibleOffsetToRawOffset(raw, 12, false), 12);
+    assert.equal(visibleOffsetFromRawOffset(raw, 12), 12);
+  });
+
+  // ── マーカー上に落ちた raw 位置は同じ側の可視境界へ寄せる ─────
+  test("リンクの閉じ記号（] や URL 部）に落ちた raw 位置はラベル末尾へ寄せる", () => {
+    const raw = "[label](https://e.com)";
+    // charMap の中身はラベル "label"（raw [1,6)）。それより奥はすべて可視末尾（5）
+    assert.equal(visibleOffsetFromRawOffset(raw, 6), 5); // "]" の位置
+    assert.equal(visibleOffsetFromRawOffset(raw, 7), 5); // "(" の位置
+    assert.equal(visibleOffsetFromRawOffset(raw, 15), 5); // URL の内部
+  });
+
+  test("raw オフセットを右へ進めても可視オフセットは戻らない（単調性）", () => {
+    const corpus = [
+      "**bold** tail",
+      "[label](https://e.com)",
+      "see `foo` here",
+      "~~del~~ x",
+      "a **b** `c` [d](http://e) f",
+      "**bold `code` here**",
+      "see https://example.com here",
+    ];
+    for (const raw of corpus) {
+      let prev = 0;
+      for (let i = 0; i <= raw.length; i++) {
+        const visible = visibleOffsetFromRawOffset(raw, i);
+        assert.ok(visible >= prev, `${JSON.stringify(raw)} raw ${i}: 可視 ${visible} < 直前 ${prev}`);
+        prev = visible;
+      }
+    }
   });
 
   // ── 可視末尾を超えるオフセット ───────────────────────────

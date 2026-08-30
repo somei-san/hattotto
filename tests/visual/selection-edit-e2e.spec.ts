@@ -120,6 +120,18 @@ test.describe("行またぎ選択の ⌘X", () => {
 
     expect(await getContent(page)).toBe("");
   });
+
+  test("選択の端が装飾の内部に落ちても、クリップボードの内容と削除される範囲が一致する", async ({ openNote }) => {
+    const page = await openNote({ content: "abc **bold** def\ntail" });
+
+    // 可視 "abc bold def" の 5 = 太字の中身 "o" の直前（raw では "old def" が選択に入る）
+    await selectMarkdownRange(page, 0, 5, 1, 2);
+    const { notCanceled, plain } = await dispatchCutWithClipboardData(page);
+
+    expect(notCanceled).toBe(false); // preventDefault された
+    expect(plain).toBe("old def\nta");
+    expect(await getContent(page)).toBe("abc **bil");
+  });
 });
 
 test.describe("行またぎ選択の Escape", () => {
