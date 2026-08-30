@@ -402,7 +402,10 @@ function renderMarkdown(text) {
   if (!text) {
     // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト・node 環境等）でも壊れないようフォールバックする
     const placeholder = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('notePlaceholder') : 'メモを入力…';
-    return `<div class="md-placeholder">${placeholder}</div>`;
+    // data-line 付きの空ブロックにし、プレースホルダ文言は ::before の CSS content（data-placeholder
+    // 属性）で表示だけする。文言をテキストノードとして直接持たせると、それ自体がキャレットの
+    // 着地点・編集対象になってしまい、空の付箋へキャレットを置けなくなる
+    return `<div class="md-empty md-placeholder" data-line="0" data-placeholder="${escapeAttr(placeholder)}"></div>`;
   }
   // Normalize non-breaking spaces (contenteditable often inserts \u00A0)
   const lines = text.replace(/\u00A0/g, ' ').split('\n');

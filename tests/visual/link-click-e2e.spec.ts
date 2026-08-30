@@ -94,8 +94,7 @@ test.describe("リンククリック", () => {
     // リンクをクリック
     await link.click();
 
-    // 描画されたままであることを確認
+    // 描画されたままであることを確認（クリックでキャレットが割り込まない）
     await expect(link).toBeVisible();
-    await expect(page.locator("#editor")).toHaveCount(0);
   });
 });

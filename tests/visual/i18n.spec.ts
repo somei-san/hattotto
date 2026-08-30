@@ -57,7 +57,9 @@ test.describe("付箋の英語化", () => {
     await expect(page.locator("#btn-color")).toHaveAttribute("title", "Color");
     await expect(page.locator("#btn-pin")).toHaveAttribute("aria-label", "Pin");
     await expect(page.locator("#markdown-view")).toHaveAttribute("aria-label", "Note content");
-    await expect(page.locator(".md-placeholder")).toHaveText("Type a note…");
+    // プレースホルダ文言はテキストノードではなく ::before の CSS content（data-placeholder
+    // 属性）で表示している（自身が誤って編集対象にならないようにするため）
+    await expect(page.locator(".md-placeholder")).toHaveAttribute("data-placeholder", "Type a note…");
   });
 
   test("ピン留め中に settings-changed で言語を en に切り替えると、ピンボタンの aria-label が Unpin になる", async ({ openNote }) => {

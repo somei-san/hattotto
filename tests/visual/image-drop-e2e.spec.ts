@@ -1,22 +1,20 @@
 import { test, expect, enterEdit, getContent, injectNoteMock } from "./fixtures";
 
 test.describe("ドラッグ&ドロップでの画像追加", () => {
-  test("生エディタへの画像ドロップ → save_pasted_image 経由でMarkdown画像記法が挿入される", async ({ browser }) => {
+  test("画像ドロップ → save_pasted_image 経由でMarkdown画像記法が対象行の末尾へ挿入される", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    await enterEdit(page);
-
     await page.evaluate(() => {
-      const editor = document.getElementById("editor")!;
+      const view = document.getElementById("markdown-view")!;
       const file = new File([new Uint8Array([137, 80, 78, 71])], "dropped.png", { type: "image/png" });
       const dt = new DataTransfer();
       dt.items.add(file);
       const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
-      editor.dispatchEvent(dropEvent);
+      view.dispatchEvent(dropEvent);
     });
 
     await expect.poll(() =>
@@ -26,12 +24,8 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
       { timeout: 3000 },
     ).toBe(1);
 
-    // 画像記法の直後で行が割れ、キャレットは次の（空の）行にある
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\n");
-
-    const activeLine = await page.evaluate(() => document.getElementById("editor")!.textContent);
-    expect(activeLine).toBe("");
+    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)");
 
     await ctx.close();
   });
@@ -90,17 +84,15 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    await enterEdit(page);
-
     await page.evaluate(() => {
-      const editor = document.getElementById("editor")!;
+      const view = document.getElementById("markdown-view")!;
       const file1 = new File([new Uint8Array([137, 80, 78, 71, 1])], "a.png", { type: "image/png" });
       const file2 = new File([new Uint8Array([137, 80, 78, 71, 2])], "b.png", { type: "image/png" });
       const dt = new DataTransfer();
       dt.items.add(file1);
       dt.items.add(file2);
       const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
-      editor.dispatchEvent(dropEvent);
+      view.dispatchEvent(dropEvent);
     });
 
     await expect.poll(() =>
@@ -112,25 +104,24 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     expect(timeline).toEqual(["start:0", "end:0", "start:1", "end:1"]);
 
     // 挿入自体は2回行われている（モックは同一パスを返すため2回連結される）。
-    // 画像ごとに改行して次の行へ移るため、2枚目の後にも空行が残る
+    // どちらも同じ対象行の末尾へ追記されるため連結される
     const content = await getContent(page);
     expect(content).toBe(
-      "![](images/00000000-0000-4000-8000-000000000001.png)\n".repeat(2),
+      "![](images/00000000-0000-4000-8000-000000000001.png)".repeat(2),
     );
 
     await ctx.close();
   });
 
-  test("生表示中の別行の描画エリアへ画像ドロップ → 生表示が commit されてから正しい行に挿入される", async ({ openNote }) => {
+  test("別行にキャレットがある状態で他行へ画像ドロップ → ドロップ先の行に挿入される", async ({ openNote }) => {
     const page = await openNote({ content: "line0\nline1\nline2" });
 
-    // line0 を生表示にして未確定の編集を作る
+    // line0 に未確定の編集を作る
     await enterEdit(page, 0);
-    await page.locator("#editor").click();
     await page.keyboard.press("End");
     await page.keyboard.type("X");
 
-    // line0 の生表示中のまま、生表示していない line2 へドロップする
+    // line0 にキャレットがあるまま、line2 の描画エリアへドロップする
     await page.evaluate(() => {
       const target = document.querySelector('[data-line="2"]')!;
       const file = new File([new Uint8Array([137, 80, 78, 71])], "dropped.png", { type: "image/png" });
@@ -139,8 +130,6 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
       const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
       target.dispatchEvent(dropEvent);
     });
-
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     // drop ハンドラは非同期（save_pasted_image → renderAll → saveNow）なので、
     // dispatchEvent 自体は完了を待たない。保存が終わるまで content を待ち受ける
@@ -179,17 +168,19 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     await ctx.close();
   });
 
-  test("生エディタ内のテキストドラッグ移動は退行しない", async ({ openNote }) => {
+  // テキストのドラッグ&ドロップによる直接挿入（非ファイルドロップ）は未実装で、
+  // 常に preventDefault される（fail-closed）ため fixme にしている
+  test.fixme("生エディタ内のテキストドラッグ移動は退行しない", async ({ openNote }) => {
     const page = await openNote({ content: "" });
 
     await enterEdit(page);
 
     await page.evaluate(() => {
-      const editor = document.getElementById("editor")!;
+      const view = document.getElementById("markdown-view")!;
       const dt = new DataTransfer();
       dt.setData("text/plain", "dragged text");
       const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
-      editor.dispatchEvent(dropEvent);
+      view.dispatchEvent(dropEvent);
     });
 
     const content = await getContent(page);

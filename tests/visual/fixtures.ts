@@ -210,19 +210,9 @@ async function injectTrashMock(
 }
 
 // ── Editor helpers ─────────────────────────────────────────
-
-/**
- * 指定行をクリックして生表示にする。省略時は最終行。
- * 生表示中の行だけが `#editor`（`.raw-editor`）になる。
- */
-export async function enterEdit(page: Page, lineIndex?: number) {
-  if (lineIndex == null) {
-    await page.click("#markdown-view");
-  } else {
-    await page.locator(`#markdown-view [data-line="${lineIndex}"]`).first().click();
-  }
-  await page.waitForSelector("#editor", { state: "visible" });
-}
+// #markdown-view 自体が contenteditable なので「生表示に入る」という別状態は無い。
+// 指定行にキャレットを置く操作はすべて window.placeCaretAtRaw 経由（クリック相当も含めて
+// 決め打ちできるよう、実クリックの代わりにこちらを使う）。
 
 /**
  * 指定行の指定列に直接キャレットを置く（col 省略で行末）。
@@ -231,14 +221,20 @@ export async function enterEdit(page: Page, lineIndex?: number) {
  */
 export async function placeCaret(page: Page, line: number, col?: number) {
   await page.evaluate(
-    ([l, c]) => (window as unknown as { enterLine(l: number, c: number | null): void })
-      .enterLine(l as number, (c ?? null) as number | null),
+    ([l, c]) => (window as unknown as { placeCaretAtRaw(l: number, c: number | null): void })
+      .placeCaretAtRaw(l as number, (c ?? null) as number | null),
     [line, col] as const,
   );
-  await page.waitForSelector("#editor", { state: "visible" });
 }
 
-/** 生表示中の行を書き戻したうえでの、付箋のソーステキスト全体。 */
+/** 指定行の行末へキャレットを置く（省略時は最終行）。 */
+export async function enterEdit(page: Page, lineIndex?: number) {
+  const lineCount = await page.evaluate(() => (window as unknown as { getRawContent(): string })
+    .getRawContent().split("\n").length);
+  await placeCaret(page, lineIndex ?? lineCount - 1);
+}
+
+/** 付箋のソーステキスト全体（rawContent は常に最新）。 */
 export function getContent(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { getRawContent(): string }).getRawContent());
 }

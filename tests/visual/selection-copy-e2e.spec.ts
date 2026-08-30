@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock, enterEdit, selectMarkdownRange } from "./fixtures";
+import { test, expect, injectNoteMock, selectMarkdownRange } from "./fixtures";
 
 // 描画部分（markdown-view）のテキスト選択に対するコピー挙動（issue #70）。
 // - 通常コピー（⌘C 相当）: text/html（装飾付き）と text/plain を同時にクリップボードへ載せる。
@@ -73,29 +73,6 @@ test.describe("通常コピー（markdown-view のテキスト選択、⌘C 相�
     expect(html).not.toContain(IMAGE_PATH);
     expect(html).toContain("caption");
     expect(plain).not.toContain("![");
-
-    await ctx.close();
-  });
-
-  test(".raw-editor 内の選択に触れる copy は preventDefault されない（既定動作に任せる）", async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
-    const page = await ctx.newPage();
-    await injectNoteMock(page, { content: "editable line" }, {}, { captureInvokes: true });
-    await page.goto("/note.html?id=test-note-id");
-    await page.waitForLoadState("networkidle");
-
-    await enterEdit(page, 0);
-    await page.evaluate(() => {
-      const ed = document.querySelector("#editor")!;
-      const range = document.createRange();
-      range.selectNodeContents(ed);
-      const sel = window.getSelection()!;
-      sel.removeAllRanges();
-      sel.addRange(range);
-    });
-
-    const { notCanceled } = await dispatchCopyWithClipboardData(page);
-    expect(notCanceled).toBe(true); // preventDefault されていない = 既定のコピーに任せた
 
     await ctx.close();
   });

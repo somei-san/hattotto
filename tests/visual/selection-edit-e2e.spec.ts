@@ -8,15 +8,35 @@ import { test, expect, enterEdit, getContent, selectMarkdownRange } from "./fixt
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
 
-/** 生エディタ内のキャレット位置（#editor 内での文字オフセット）。 */
-function caretOffsetInEditor(page: import("@playwright/test").Page) {
+/** 現在のキャレットが属する行番号（data-line）。無ければ null。 */
+function caretLine(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
-    const ed = document.getElementById("editor")!;
-    const range = window.getSelection()!.getRangeAt(0);
-    const pre = range.cloneRange();
-    pre.selectNodeContents(ed);
+    const node = window.getSelection()?.anchorNode ?? null;
+    const el = node instanceof Element ? node : node?.parentElement;
+    const line = el?.closest("[data-line]")?.getAttribute("data-line");
+    return line == null ? null : Number(line);
+  });
+}
+
+/** 現在のキャレット位置の raw 列（行頭マーカーぶんを加算した位置）。インデント付き
+ * マーカーは対象外（このファイルのフィクスチャはインデント無しのマーカーのみ使う）。 */
+function caretRawColumn(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return -1;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    const lineEl = el?.closest("[data-line]");
+    if (!lineEl) return -1;
+    const pre = document.createRange();
+    pre.selectNodeContents(lineEl);
     pre.setEnd(range.startContainer, range.startOffset);
-    return pre.toString().length;
+    const visible = pre.toString().length;
+    const lineIdx = Number(lineEl.getAttribute("data-line"));
+    const raw = ((window as unknown as { getRawContent(): string }).getRawContent().split("\n"))[lineIdx];
+    const m = raw.match(/^(#{1,3} |[-*] \[[ xX]\] |[-*] |> |\d+\. )/);
+    return (m ? m[0].length : 0) + visible;
   });
 }
 
@@ -32,13 +52,12 @@ function dispatchCutWithClipboardData(page: import("@playwright/test").Page) {
 }
 
 test.describe("⌘A（selectAllNote）", () => {
-  test("生エディタが開いた状態からの ⌘A → 生エディタが閉じ、付箋全体が選択される", async ({ openNote }) => {
+  test("キャレットが置かれた状態からの ⌘A → 付箋全体が選択される", async ({ openNote }) => {
     const page = await openNote({ content: "# Heading\nbody line\n- item" });
     await enterEdit(page, 1);
 
     await page.keyboard.press("Meta+a");
 
-    await expect(page.locator("#editor")).toHaveCount(0);
     expect(await page.evaluate(() => window.getSelection()!.isCollapsed)).toBe(false);
     expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("Heading\nbody line\nitem");
   });
@@ -49,7 +68,6 @@ test.describe("⌘A（selectAllNote）", () => {
     await page.keyboard.press("Meta+a");
 
     expect(await page.evaluate(() => window.getSelection()!.rangeCount)).toBe(0);
-    await expect(page.locator("#editor")).toHaveCount(0);
   });
 });
 
@@ -90,8 +108,8 @@ test.describe("行またぎ選択の Backspace / Delete 削除", () => {
     await page.keyboard.press("Backspace");
 
     expect(await getContent(page)).toBe("helrld");
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await caretOffsetInEditor(page)).toBe(3);
+    expect(await caretLine(page)).toBe(0);
+    expect(await caretRawColumn(page)).toBe(3);
   });
 
   test("付箋全体を選択して削除 → 空 1 行になり、キャレットは (0,0)", async ({ openNote }) => {
@@ -101,8 +119,8 @@ test.describe("行またぎ選択の Backspace / Delete 削除", () => {
     await page.keyboard.press("Backspace");
 
     expect(await getContent(page)).toBe("");
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await caretOffsetInEditor(page)).toBe(0);
+    expect(await caretLine(page)).toBe(0);
+    expect(await caretRawColumn(page)).toBe(0);
   });
 });
 
@@ -142,7 +160,6 @@ test.describe("行またぎ選択の Escape", () => {
     await page.keyboard.press("Escape");
 
     expect(await page.evaluate(() => window.getSelection()!.rangeCount)).toBe(0);
-    await expect(page.locator("#editor")).toHaveCount(0);
     expect(await getContent(page)).toBe("line1\nline2");
   });
 });
@@ -154,10 +171,9 @@ test.describe("行またぎ選択の無修飾矢印キー", () => {
     await selectMarkdownRange(page, 0, 1, 2, 2);
     await page.keyboard.press("ArrowLeft");
 
-    await expect(page.locator("#editor")).toBeVisible();
     expect(await page.evaluate(() => window.getSelection()!.isCollapsed)).toBe(true);
-    expect(await caretOffsetInEditor(page)).toBe(1);
-    expect(await page.locator("#editor").textContent()).toBe("abc");
+    expect(await caretLine(page)).toBe(0);
+    expect(await caretRawColumn(page)).toBe(1);
   });
 
   test("→/↓ で選択終了端へキャレットが畳まれる", async ({ openNote }) => {
@@ -166,10 +182,9 @@ test.describe("行またぎ選択の無修飾矢印キー", () => {
     await selectMarkdownRange(page, 0, 1, 2, 2);
     await page.keyboard.press("ArrowRight");
 
-    await expect(page.locator("#editor")).toBeVisible();
     expect(await page.evaluate(() => window.getSelection()!.isCollapsed)).toBe(true);
-    expect(await caretOffsetInEditor(page)).toBe(2);
-    expect(await page.locator("#editor").textContent()).toBe("ghi");
+    expect(await caretLine(page)).toBe(2);
+    expect(await caretRawColumn(page)).toBe(2);
   });
 });
 
@@ -188,13 +203,18 @@ test.describe("行またぎ選択中は引き続きブロックされる操作�
     expect(await getContent(page)).toBe("abc\ndef");
   });
 
-  test("⌥Backspace はブロックされ、内容が変わらない", async ({ openNote }) => {
+  // 選択がある状態の Alt+Backspace は、ブラウザが単語削除ではなく通常の
+  // deleteContentBackward（選択の削除）として beforeinput を発火させる。これは他の
+  // エディタ（ブラウザの contenteditable 全般）と同じ標準的な挙動で、選択が無いときの
+  // 単語削除（deleteWordBackward）は beforeinput ディスパッチャの実装対象外として
+  // fail-closed のまま（no-op）
+  test("選択がある状態の ⌥Backspace は通常の Backspace と同じく選択範囲を削除する", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length);
     await page.keyboard.press("Alt+Backspace");
 
-    expect(await getContent(page)).toBe("abc\ndef");
+    expect(await getContent(page)).toBe("");
   });
 });
 
@@ -210,79 +230,6 @@ test.describe("行またぎ選択の削除は undo で戻る", () => {
     await page.waitForTimeout(400);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-});
-
-test.describe("行またぎ選択中でも生エディタに触れる選択は既定の編集操作に譲る（ガードの誤ブロック防止）", () => {
-  /** 生エディタ内の起点から、別の描画済み行（mdView 側）まで伸びる DOM 選択を張る。
-   * 生エディタが focus を持ったまま、選択（Range）だけが行をまたぐ状態を再現する
-   * （selectionSpansLines は true だが、選択は生エディタに触れている）。 */
-  async function selectFromEditorIntoRenderedLine(page: import("@playwright/test").Page, renderedLine: number) {
-    await page.evaluate((l) => {
-      const ed = document.getElementById("editor")!;
-      const other = document.querySelector(`#markdown-view [data-line="${l}"]`)!;
-      const range = document.createRange();
-      range.setStart(ed.firstChild ?? ed, 0);
-      range.setEnd(other.firstChild ?? other, 0);
-      const sel = window.getSelection()!;
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }, renderedLine);
-  }
-
-  test("Shift+Enter はブロックされ、行分割されない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    await page.keyboard.press("Shift+Enter");
-
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-
-  test("Shift+Tab はブロックされ、インデントされない", async ({ openNote }) => {
-    const page = await openNote({ content: "- abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    await page.keyboard.press("Shift+Tab");
-
-    expect(await getContent(page)).toBe("- abc\ndef");
-  });
-
-  test("⌥Backspace はブロックされ、単語削除されない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    await page.keyboard.press("Alt+Backspace");
-
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-
-  test("実キー ⌘X はネイティブ cut に委ねられず、何も変更しない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    await page.keyboard.press("ControlOrMeta+x");
-
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-
-  // 実アプリではネイティブ Edit メニューの Cut が ⌘X を先取りし、keydown ガードを通らずに
-  // cut イベントが直接届く。その経路（cut イベントの直接 dispatch で再現）でもブロックされること
-  test("cut イベント直接（ネイティブメニュー経由相当）もブロックされ、何も変更しない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    const { notCanceled, html, plain } = await dispatchCutWithClipboardData(page);
-
-    expect(notCanceled).toBe(false); // preventDefault されている（既定の cut に落ちない）
-    expect(html).toBe("");
-    expect(plain).toBe("");
     expect(await getContent(page)).toBe("abc\ndef");
   });
 });
@@ -326,9 +273,8 @@ test.describe("マーカー付き行を終端とする選択の →/↓ 畳み",
     await selectMarkdownRange(page, 0, 1, 1, 0);
     await page.keyboard.press("ArrowRight");
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("- item");
-    expect(await caretOffsetInEditor(page)).toBe(2); // "- " の直後（マーカー分の 2 列目）
+    expect(await caretLine(page)).toBe(1);
+    expect(await caretRawColumn(page)).toBe(2); // "- " の直後（マーカー分の 2 列目）
   });
 });
 
@@ -340,9 +286,8 @@ test.describe("マーカー付き行を開始端とする選択の ←/↑ 畳�
     await selectMarkdownRange(page, 0, 0, 1, 2);
     await page.keyboard.press("ArrowLeft");
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("- item");
-    expect(await caretOffsetInEditor(page)).toBe(2); // "- " の直後（マーカー分の 2 列目）
+    expect(await caretLine(page)).toBe(0);
+    expect(await caretRawColumn(page)).toBe(2); // "- " の直後（マーカー分の 2 列目）
   });
 });
 
@@ -354,18 +299,18 @@ test.describe("画像行を含む範囲削除", () => {
     await page.keyboard.press("Backspace");
 
     expect(await getContent(page)).toBe(`${IMAGE_LINE}\ndef`);
-    // 生エディタも画像選択も無い操作不能状態になっていないこと
-    const editorCount = await page.locator("#editor").count();
+    // キャレットも画像選択も無い操作不能状態になっていないこと
+    const line = await caretLine(page);
     const selectedImageCount = await page.locator(".img-selected").count();
-    expect(editorCount > 0 || selectedImageCount > 0).toBe(true);
+    expect(line != null || selectedImageCount > 0).toBe(true);
   });
 
   test("削除範囲外の画像が選択中でも、テキスト範囲の Backspace で表示が壊れない", async ({ openNote }) => {
     const page = await openNote({ content: `${IMAGE_LINE}\nabc\ndef\nghi` });
 
-    // 0行目（画像のみの行）へ enterLine すると selectImage が呼ばれ、画像選択状態になる
+    // 0行目（画像のみの行）へ placeCaretAtRaw すると selectImage が呼ばれ、画像選択状態になる
     await page.evaluate(
-      () => (window as unknown as { enterLine(l: number, c: number | null): void }).enterLine(0, null),
+      () => (window as unknown as { placeCaretAtRaw(l: number, c: number | null): void }).placeCaretAtRaw(0, null),
     );
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
@@ -373,7 +318,7 @@ test.describe("画像行を含む範囲削除", () => {
     await page.keyboard.press("Backspace");
 
     expect(await getContent(page)).toBe(`${IMAGE_LINE}\n\nghi`);
-    await expect(page.locator("#editor")).toBeVisible();
+    expect(await caretLine(page)).toBe(1);
     // 画像自体は消えておらず、表示も壊れていない
     await expect(page.locator("#markdown-view img")).toHaveCount(1);
   });

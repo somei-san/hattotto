@@ -172,70 +172,16 @@
     line-height: 1.5;
     user-select: text;
     -webkit-user-select: text;
-  }
-
-  /* 生エディタ（`.raw-editor`）— 描画済みの行と差し替えて生 Markdown を出す */
-  .raw-editor {
     outline: none;
-    background: rgba(0,0,0,0.04);
-    border-radius: 3px;
-    padding: 0 2px;
-    margin: 0 -2px;
-    min-height: 21px;
-    font: inherit;
-    white-space: pre-wrap;
-    word-break: break-word;
   }
 
-  .raw-editor.atomic {
-    white-space: pre;
-    overflow-x: auto;
-    font-family: "SF Mono", Menlo, monospace;
-    font-size: 0.9em;
-    line-height: 1.4;
-  }
-
-  /* プレビューが続くときだけ、ed の下側の角丸を落として 1 枚のカードに繋げる
-     （margin は元々 0 -2px で下側の隙間が無いので、角丸だけ合わせれば繋がって見える） */
-  .raw-editor.has-preview {
-    border-radius: 3px 3px 0 0;
-  }
-  /* atomic（横スクロール）のスクロールバーが太い帯に見えてカードの一体感を壊すため、
-     プレビューと繋がるとき（has-preview）だけ隠す。スクロール自体・キャレット追従の
-     自動スクロールは残る（overflow-x: auto のまま）。フェンスの atomic（has-preview
-     が付かない）には影響しない */
-  .raw-editor.has-preview.atomic {
-    scrollbar-width: none;
-  }
-  .raw-editor.has-preview.atomic::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* 画像を含む行を生表示にしたときだけ、ed の直下に出す編集不可のプレビュー。
-     生エディタへの差し替えで画像の高さぶん表示がずれるのを抑える（操作対象にはしない）。
-     背景・左右 padding/margin・角丸を ed と揃え、「この記法とこの画像は同じもの」と
-     分かる 1 枚のカードに見せる */
-  .raw-editor-preview {
-    background: rgba(0,0,0,0.04);
-    border-radius: 0 0 3px 3px;
-    padding: 0 2px;
-    margin: 0 -2px;
-    /* 自身はクリックを受け取り mdView の「余白クリック→最終行へ」分岐に落とさせない
-       （note.js の mouseup ハンドラで .raw-editor-preview 自体は無視する）。
-       子孫（img 等）は操作対象にしないため pointer-events: none を継承させる */
-    pointer-events: auto;
-    user-select: none;
-  }
-  .raw-editor-preview * {
+  /* 空ブロック自身は無地のまま（キャレットの着地点）にし、文言は ::before だけに表示する
+     （テキストノードとして持たせると、それ自体が編集対象になってしまう） */
+  .md-placeholder::before {
+    content: attr(data-placeholder);
+    color: var(--text-muted);
     pointer-events: none;
   }
-  /* 淡さは画像そのものだけに掛ける。ラッパーに掛けると背景（カードの地の色）まで
-     淡くなってしまい、ed と繋がった 1 枚のカードに見えなくなる */
-  .raw-editor-preview img {
-    opacity: 0.55;
-  }
-
-  .md-placeholder { color: var(--text-muted); }
   .md-line, .md-empty { min-height: 21px; word-break: break-word; }
   #markdown-view img { max-width: 100%; }
   /* クリックでは編集に入らない（ダブルクリックで開く）ため、操作できることをホバーで示す */
@@ -448,7 +394,7 @@
 
     <!-- Content -->
     <div class="content">
-      <div class="markdown-view" id="markdown-view" role="document" aria-label="付箋の内容" data-i18n-aria-label="noteContentAriaLabel"></div>
+      <div class="markdown-view" id="markdown-view" role="textbox" aria-multiline="true" aria-label="付箋の内容" data-i18n-aria-label="noteContentAriaLabel" contenteditable="true" spellcheck="false" autocorrect="off" autocapitalize="off"></div>
     </div>
   </div>
 
