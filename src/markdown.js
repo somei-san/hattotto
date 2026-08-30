@@ -74,6 +74,18 @@ function buildDelHtml(inner) {
   return `<del>${inner}</del>`;
 }
 
+// ── inlineSegments 用の content range（applyInlineStep の contentRange 引数） ──────
+// 対称マーカーの装飾・リンクラベル・裸URLは、出力の可視部分がマッチの部分文字列そのままの
+// コピーなので、その範囲（現在の state.text 上の [start, end)）を返す。画像のように
+// alt/src が属性にしか現れない記法は contentRange を渡さない（常に非トラッキング）
+function codeContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+function boldContentRange(m) { return { start: m.index + 2, end: m.index + 2 + m[1].length }; }
+function italicContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+function delContentRange(m) { return { start: m.index + 2, end: m.index + 2 + m[1].length }; }
+function linkContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+// 裸URLは pre + url がそのまま出力の可視部分になる（マーカーで包まれない）ので範囲はマッチ全体
+function bareUrlContentRange(m) { return { start: m.index, end: m.index + m[0].length }; }
+
 /**
  * escapeHtml 済みの文字列からインライン装飾を解決する。note.js の描画パス本体で、
  * 呼び出し頻度が高いためオフセット追跡は一切行わない素の逐次置換チェーン。
@@ -114,6 +126,10 @@ function inlineMarkdown(escaped) {
 // 不変条件: 1 つの group の文字が 2 つ以上のセグメントに分かれることは絶対にない
 // （崩れると閉じタグが割れて本文が二重出力される。例: `**https://u**https://u` で
 // 裸URLステップが bold group の途中に部分的に触れるケース）。
+// groupSpans[gid].content は、可視文字ごとの raw オフセット写像（segment.charMap）の元になる
+// 情報 { srcStart, len }（raw 上での内容の開始位置と可視文字数）。1 マッチ 1 ピースの comp のみ、
+// contentRange（またはコード復元ステップの 'inherit'）から埋める。複数マッチが合併した comp や
+// ネストした装飾を含む内容は content を null のままにし、note-lines.js 側の丸めにフォールバックする
 // これを守るため、1 回のステップ内の処理は 2 フェーズに分ける:
 //   フェーズ A: そのステップの全マッチと、マッチが触れる既存 group ブロックを
 //     安定するまで合併し、出力の区間分割を先に確定する
@@ -123,7 +139,28 @@ function inlineMarkdown(escaped) {
 // 割り当てる（既存 id の使い回しは、その group をさらに別の合併が巻き込むケースで
 // 区間分割の再計算を招くため）
 
-function applyInlineStep(state, regex, buildHtml) {
+/**
+ * comp の content（{ srcStart, len } | null）を求める。1 マッチ 1 ピースの comp だけが対象で、
+ * 複数マッチが合併した comp は常に null（挙動不変の丸めへフォールバック）。
+ * contentRange === 'inherit'（コード復元ステップ）は、comp がプレースホルダ全体＝直前ステップの
+ * 単一 group とちょうど一致する前提で、その group の content をそのまま引き継ぐ。
+ */
+function computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches) {
+  if (comp.pieces.length !== 1 || !contentRange) return null;
+  if (contentRange === 'inherit') {
+    const g0 = grp[comp.start];
+    if (g0 === -1 || grp[comp.end - 1] !== g0) return null;
+    return groupSpans[g0] ? groupSpans[g0].content : null;
+  }
+  const r = contentRange(matches[comp.pieces[0]]);
+  if (!r || r.end <= r.start) return null;
+  for (let i = r.start; i < r.end; i++) {
+    if (grp[i] !== -1) return null; // ネストした装飾は char 単位で追跡しない
+  }
+  return { srcStart: srcIdx[r.start], len: srcIdx[r.end - 1] - srcIdx[r.start] + 1 };
+}
+
+function applyInlineStep(state, regex, buildHtml, contentRange) {
   const { text, grp, srcIdx, groupSpans } = state;
   // ゼロ幅マッチは除去する。残すと [start, start) の空区間を持つ comp ができ、
   // フェーズ A/B の区間分割（区間は必ず非空という前提）が壊れる
@@ -221,7 +258,7 @@ function applyInlineStep(state, regex, buildHtml) {
       if (span.srcEnd > srcEnd) srcEnd = span.srcEnd;
     }
     const gid = state.nextGroupId++;
-    groupSpans[gid] = { srcStart, srcEnd };
+    groupSpans[gid] = { srcStart, srcEnd, content: computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches) };
 
     const pieces = comp.pieces.slice().sort((a, b) => matches[a].index - matches[b].index);
     let pos = comp.start;
@@ -307,11 +344,15 @@ function stripTagsQuoteAware(html) {
 
 /**
  * raw（escapeHtml 前）の行テキストからインライン装飾を解決し、セグメント列を返す。
- * 各セグメントは { srcStart, srcEnd, html, visibleText }。
+ * 各セグメントは { srcStart, srcEnd, html, visibleText, charMap }。
  *   - srcStart/srcEnd は raw 文字列上のオフセット（[srcStart, srcEnd) の半開区間）。
  *     全セグメントの srcStart/srcEnd は [0, raw.length) を隙間なく覆う
  *   - html は全セグメント連結すると inlineMarkdown(escapeHtml(raw)) と完全一致する
  *   - visibleText は DOM の textContent 相当（タグを除去しエンティティをデコードした可視文字）
+ *   - charMap は { srcStart, len } | null。非 null なら可視文字 i（0 <= i < len）が
+ *     raw オフセット charMap.srcStart + i に厳密対応する（対称マーカーの装飾・リンクラベル・
+ *     裸URLで、ネストした装飾を含まない場合のみ）。null は画像・ネスト装飾など、
+ *     可視文字と raw 位置が 1:1 対応しない（呼び出し側は srcStart/srcEnd への丸めに頼る）
  * srcStart/srcEnd は「トップレベルの構成要素」単位（ネストした装飾は外側 1 セグメントの html に含まれる）。
  */
 function inlineSegments(raw) {
@@ -328,14 +369,14 @@ function inlineSegments(raw) {
   applyInlineStep(state, CODE_RE, (m) => {
     codeBlocks.push(m[1]);
     return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
-  });
-  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]));
-  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]));
-  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]));
+  }, codeContentRange);
+  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]), boldContentRange);
+  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]), italicContentRange);
+  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]), delContentRange);
   applyInlineStep(state, IMAGE_RE, (m) => buildImageHtml(m[1], m[2]));
-  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]));
-  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]));
-  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>');
+  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]), linkContentRange);
+  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]), bareUrlContentRange);
+  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>', 'inherit');
 
   const segments = [];
   let i = 0;
@@ -344,9 +385,14 @@ function inlineSegments(raw) {
     let j = i + 1;
     while (j < state.text.length && state.grp[j] === g) j++;
     const html = state.text.slice(i, j);
-    const { srcStart, srcEnd } =
-      g === -1 ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1 } : state.groupSpans[g];
-    segments.push({ srcStart, srcEnd, html, visibleText: decodeEntities(stripTagsQuoteAware(html)) });
+    const { srcStart, srcEnd, content } =
+      g === -1
+        ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1, content: null }
+        : state.groupSpans[g];
+    const visibleText = decodeEntities(stripTagsQuoteAware(html));
+    // content.len は可視文字数のはずだが、想定外の不一致があれば安全側（丸めへのフォールバック）に倒す
+    const charMap = content && content.len === visibleText.length ? content : null;
+    segments.push({ srcStart, srcEnd, html, visibleText, charMap });
     i = j;
   }
   return segments;
