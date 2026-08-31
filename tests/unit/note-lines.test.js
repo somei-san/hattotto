@@ -21,6 +21,9 @@ const {
   visibleOffsetToRawOffset,
   visibleOffsetFromRawOffset,
   revealTargetAt,
+  inlineDecorationKeepRanges,
+  deletionSurvivingFragment,
+  widenRangeForEmptiedDecorations,
 } = require("../../src/note-lines.js");
 
 describe("getAutoPrefix", () => {
@@ -649,6 +652,203 @@ describe("revealTargetAt", () => {
   test("ネストした装飾（charMap が無いセグメント）も外側の raw 範囲全体が対象になる", () => {
     const raw = "**bold `code` here**";
     assert.deepEqual(revealTargetAt(raw, 10), { start: 0, end: raw.length });
+  });
+});
+
+// "abc **bold** def" の raw インデックス（インライン部＝行頭マーカーなし）:
+// a0 b1 c2 sp3 *4 *5 b6 o7 l8 d9 *10 *11 sp12 d13 e14 f15
+// 装飾セグメントは srcStart=4, srcEnd=12, 内容（charMap）は srcStart=6, len=4（"bold"）。
+const BOLD_LINE = "abc **bold** def";
+
+describe("inlineDecorationKeepRanges", () => {
+  test("装飾の可視 1 文字目だけを覆う範囲 → 開きマーカーの raw 区間を保存対象にする", () => {
+    // 可視 "b" だけ選択した場合の resolveSelectionBounds 相当（境界規約により lo は
+    // srcStart(4) へスナップされ、hi は charMap 経由で内容内部の 7 になる）
+    assert.deepEqual(inlineDecorationKeepRanges(BOLD_LINE, 4, 7), [[4, 6]]);
+  });
+
+  test("装飾の内容途中〜装飾の外まで覆う範囲 → 閉じマーカーの raw 区間を保存対象にする", () => {
+    assert.deepEqual(inlineDecorationKeepRanges(BOLD_LINE, 7, 15), [[10, 12]]);
+  });
+
+  test("装飾全体（マーカー込み）を覆う範囲 → 保存対象なし（従来どおりマーカーごと削除）", () => {
+    assert.deepEqual(inlineDecorationKeepRanges(BOLD_LINE, 4, 12), []);
+  });
+
+  test("装飾と重ならない範囲 → 保存対象なし", () => {
+    assert.deepEqual(inlineDecorationKeepRanges(BOLD_LINE, 0, 4), []);
+    assert.deepEqual(inlineDecorationKeepRanges(BOLD_LINE, 12, 16), []);
+  });
+
+  test("charMap を持たないセグメント（画像等）は対象外", () => {
+    assert.deepEqual(inlineDecorationKeepRanges("see ![alt](images/a.png) here", 4, 25), []);
+  });
+});
+
+describe("deletionSurvivingFragment — 部分選択マーカー保存の例", () => {
+  test("例1: 可視「b」だけ削除 → 太字は維持され中身だけ削る（マーカーが挿入位置の前に残る）", () => {
+    const result = deletionSurvivingFragment(BOLD_LINE, 4, 7);
+    assert.deepEqual(result, { text: "**", insertOffset: 2 });
+    // 呼び出し元（note.js の spliceSelectionRange）が組み立てる最終行と同じ形で検証する
+    const line = BOLD_LINE.slice(0, 4) + result.text.slice(0, result.insertOffset)
+      + result.text.slice(result.insertOffset) + BOLD_LINE.slice(7);
+    assert.equal(line, "abc **old** def");
+  });
+
+  test("例2: 可視「old de」を削除 → 残った「b」がマーカー付きで残る", () => {
+    const result = deletionSurvivingFragment(BOLD_LINE, 7, 15);
+    assert.deepEqual(result, { text: "**", insertOffset: 0 });
+    const line = BOLD_LINE.slice(0, 7) + result.text + BOLD_LINE.slice(15);
+    assert.equal(line, "abc **b**f");
+  });
+
+  test("例3: 装飾全体を覆う削除は従来どおりマーカーごと消える", () => {
+    const result = deletionSurvivingFragment(BOLD_LINE, 4, 12);
+    assert.deepEqual(result, { text: "", insertOffset: 0 });
+    const line = BOLD_LINE.slice(0, 4) + result.text + BOLD_LINE.slice(12);
+    assert.equal(line, "abc  def");
+  });
+
+  test("例4: 装飾をまたぐ選択は両側それぞれの部分覆いセグメントのマーカーを保存する", () => {
+    const line2 = "**bold** and *italic*";
+    // 太字内容の途中（"bo|ld"）〜 斜字内容の途中（"ita|lic"）を削除
+    const result = deletionSurvivingFragment(line2, 4, 17);
+    assert.deepEqual(result, { text: "***", insertOffset: 0 });
+    const rebuilt = line2.slice(0, 4) + result.text + line2.slice(17);
+    assert.equal(rebuilt, "**bo***lic*");
+    // 太字「bo」と斜字「lic」がそれぞれ独立に生き残る（両側のマーカーが保存された結果）
+    assert.deepEqual(
+      markdownModule.inlineSegments(rebuilt).map((s) => [s.kind, s.visibleText]),
+      [["bold", "bo"], ["italic", "lic"]],
+    );
+  });
+
+  test("置換（タイピング・ペースト）は削除範囲の位置＝装飾の中に挿入テキストが入る", () => {
+    const result = deletionSurvivingFragment(BOLD_LINE, 4, 7);
+    const line = BOLD_LINE.slice(0, 4)
+      + result.text.slice(0, result.insertOffset) + "X" + result.text.slice(result.insertOffset)
+      + BOLD_LINE.slice(7);
+    assert.equal(line, "abc **Xold** def");
+  });
+
+  test("リンクも部分選択ではマーカー（[]・(url)）を保存する", () => {
+    const link = "[hi](https://example.com)";
+    // 可視「h」だけ削除
+    const from = link.indexOf("hi");
+    const result = deletionSurvivingFragment(link, from, from + 1);
+    const rebuilt = link.slice(0, from) + result.text + link.slice(from + 1);
+    assert.equal(rebuilt, "[i](https://example.com)");
+  });
+
+  test("選択なし（collapsed）は挿入テキストがそのまま入る", () => {
+    assert.deepEqual(deletionSurvivingFragment(BOLD_LINE, 7, 7), { text: "", insertOffset: 0 });
+  });
+
+  test("インライン生表示（reveal）中はマーカー自体が直接削除の対象になる（保存しない）", () => {
+    // "a**b**c" の可視末尾（"**b**" の直後）で Backspace すると、reveal 中は装飾全体
+    // （マーカー込み）が可視 = raw 1:1 の生テキスト扱いになるため、閉じマーカーの 1 文字目
+    // （raw [4,5)）がそのまま削除される（マーカー保存の対象にならない）
+    const line = "a**b**c";
+    const reveal = { start: 1, end: 6 };
+    const result = deletionSurvivingFragment(line, 4, 5, undefined, reveal);
+    assert.deepEqual(result, { text: "", insertOffset: 0 });
+    const rebuilt = line.slice(0, 4) + result.text + line.slice(5);
+    assert.equal(rebuilt, "a**b*c");
+  });
+
+  test("フェンス内容行は markerLen=0 を明示しないと、コードの文字を装飾記法として誤認する", () => {
+    // フェンス内容行の raw は可視テキストそのまま（先頭の "* " も実コードの一部）。呼び出し元
+    // （note.js）は lineStartColumn（フェンス内容行なら常に 0）を渡すこと。省略時の既定
+    // markerLength は "* " をリストマーカーと誤認して markerLen=2 を返すため、markerLen 分だけ
+    // 手前を切り落とした残り "*x*" を widenRangeForEmptiedDecorations が斜字装飾として解釈して
+    // しまい、実際にはコードの一部でしかない "*" を含めてマーカーごと広げてしまう
+    const fenceLine = "* *x*";
+    const wrongWiden = widenRangeForEmptiedDecorations(fenceLine, 3, 4); // markerLen 省略（誤り）
+    assert.deepEqual(wrongWiden, { lo: 2, hi: 5 }); // "*x*" ごと広がる（コードを装飾扱いした）
+
+    const rightWiden = widenRangeForEmptiedDecorations(fenceLine, 3, 4, 0); // markerLen=0 を明示
+    assert.deepEqual(rightWiden, { lo: 3, hi: 4 }); // 選択した "x" 一文字だけ（広がらない）
+
+    const wrongResult = deletionSurvivingFragment(fenceLine, wrongWiden.lo, wrongWiden.hi, 2);
+    const wrongRebuilt = fenceLine.slice(0, wrongWiden.lo) + wrongResult.text + fenceLine.slice(wrongWiden.hi);
+    assert.equal(wrongRebuilt, "* "); // "*x*" ごと消えてしまう
+
+    const rightResult = deletionSurvivingFragment(fenceLine, rightWiden.lo, rightWiden.hi, 0);
+    const rightRebuilt = fenceLine.slice(0, rightWiden.lo) + rightResult.text + fenceLine.slice(rightWiden.hi);
+    assert.equal(rightRebuilt, "* **"); // "x" だけが消える
+  });
+});
+
+describe("widenRangeForEmptiedDecorations — 空マーカー正規化", () => {
+  const line = "abc **x** def"; // 内容が 1 文字だけの太字。charMap は srcStart=6, len=1
+
+  test("内容が丸ごと消える範囲 → マーカーごと含むよう広げる", () => {
+    assert.deepEqual(widenRangeForEmptiedDecorations(line, 6, 7), { lo: 4, hi: 9 });
+  });
+
+  test("内容の一部だけが残る範囲 → 広げない（部分選択の保存に任せる）", () => {
+    const multiChar = "abc **xy** def"; // 内容 "xy"（2 文字）のうち 1 文字だけ消える
+    assert.deepEqual(widenRangeForEmptiedDecorations(multiChar, 6, 7), { lo: 6, hi: 7 });
+  });
+
+  test("既にマーカーごと覆っている範囲 → 変化しない（二重に広げない）", () => {
+    assert.deepEqual(widenRangeForEmptiedDecorations(line, 4, 9), { lo: 4, hi: 9 });
+  });
+
+  test("リンクは対象外（ラベルが空でも URL が実体として残るため正規化しない）", () => {
+    const link = "[hi](https://example.com)";
+    const from = link.indexOf("hi");
+    assert.deepEqual(
+      widenRangeForEmptiedDecorations(link, from, from + 2),
+      { lo: from, hi: from + 2 },
+    );
+  });
+
+  test("装飾と重ならない範囲は変化しない", () => {
+    assert.deepEqual(widenRangeForEmptiedDecorations(line, 0, 4), { lo: 0, hi: 4 });
+  });
+
+  test("widen 後に deletionSurvivingFragment を通すと raw にマーカーが残らない（undo 1 手の下地）", () => {
+    const { lo, hi } = widenRangeForEmptiedDecorations(line, 6, 7);
+    const result = deletionSurvivingFragment(line, lo, hi);
+    const rebuilt = line.slice(0, lo) + result.text + line.slice(hi);
+    assert.equal(rebuilt, "abc  def");
+    assert.doesNotMatch(rebuilt, /\*/);
+  });
+
+  test("マーカー文字自体だけを含む範囲（内容には触れていない）は広げない", () => {
+    // "abc **x** def" の閉じマーカー 1 文字目（raw [7, 8)）だけを対象にしても、
+    // 内容 "x"（raw [6, 7)）はまだ残っているので正規化の対象にならない
+    // （インライン生表示中にマーカー文字を直接削除する操作はこの形になる。widen は reveal を
+    // 受け取らないが、内容に触れていない限り結果は変わらない。理由は関数コメント参照）
+    assert.deepEqual(widenRangeForEmptiedDecorations(line, 7, 8), { lo: 7, hi: 8 });
+  });
+});
+
+describe("widenRangeForEmptiedDecorations — 返り値は常に入力範囲を包含する", () => {
+  // lo・hi が markerLen 未満（inline 座標へ変換すると負になる）のとき、負の座標をクランプすると
+  // 「クランプで失われた分だけ返り値が入力より狭くなる」（widen のはずが縮む）。行頭マーカーを
+  // 含む選択は resolveSelectionBounds の正規化で lo=0 や hi=0 になる（note.js 参照）ため、
+  // マーカー付き行を含む行またぎ選択の削除・置換で常態的に踏む経路になる
+
+  test("開始行が可視行頭（lo=0）から始まる範囲 → マーカーごと含めたまま広げる", () => {
+    assert.deepEqual(widenRangeForEmptiedDecorations("- item", 0, 6, 2), { lo: 0, hi: 6 });
+    assert.deepEqual(widenRangeForEmptiedDecorations("# head", 0, 6, 2), { lo: 0, hi: 6 });
+    assert.deepEqual(widenRangeForEmptiedDecorations("> quote", 0, 7, 2), { lo: 0, hi: 7 });
+  });
+
+  test("終了行が可視行頭で終わる範囲（hi=0、内容は 1 文字も選んでいない） → 変化しない", () => {
+    // hi=0 を markerLen 分だけクランプ後に markerLen へ戻すと hi=2 になり、選んでいない
+    // マーカー（"- "）まで削除対象に含めてしまう（呼び出し元はこの結果をそのまま
+    // lines[line].slice(0, hi) の hi に使うため、この行のマーカーが丸ごと消える）
+    assert.deepEqual(widenRangeForEmptiedDecorations("- item", 0, 0, 2), { lo: 0, hi: 0 });
+  });
+
+  test("lo がマーカー内部でも、マーカーの外側にある装飾はそれと無関係に広がる", () => {
+    // "> **x** y" の内容 "x" が丸ごと選択範囲に入っていれば、lo がマーカー内部（0 < markerLen）
+    // でも装飾のマーカーごと広げる判定自体は独立して働く（ループが負の inline 座標下で死んで
+    // いないことの確認）
+    assert.deepEqual(widenRangeForEmptiedDecorations("> **x** y", 0, 5, 2), { lo: 0, hi: 7 });
   });
 });
 

@@ -28,6 +28,8 @@ const noteLines = {
   visibleOffsetToRawOffset: "readonly",
   visibleOffsetFromRawOffset: "readonly",
   revealTargetAt: "readonly",
+  deletionSurvivingFragment: "readonly",
+  widenRangeForEmptiedDecorations: "readonly",
 };
 const history = {
   createHistory: "readonly",

@@ -124,6 +124,72 @@ test.describe("行またぎ選択の Backspace / Delete 削除", () => {
   });
 });
 
+test.describe("行頭マーカーを含む行またぎ選択の削除", () => {
+  // resolveSelectionBounds は「開始行の可視オフセットが 0（マーカー直後）」の選択を raw col 0
+  // （マーカー込み）へ正規化し、「終了行の可視オフセットが 0（内容は 1 文字も選んでいない）」の
+  // 選択は raw col 0 のまま（マーカーへは踏み込まない）にする。この 2 つの正規化がそれぞれ
+  // widenRangeForEmptiedDecorations を lo < markerLen・hi < markerLen で呼ぶ経路になる。
+
+  test("開始行が可視行頭から始まる選択 → 開始行はマーカーごと削除される", async ({ openNote }) => {
+    const page = await openNote({ content: "- item\nxyz" });
+
+    // "- |item" の可視行頭（マーカー直後）〜 "xy|z"（可視オフセット 2）
+    await selectMarkdownRange(page, 0, 0, 1, 2);
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("z");
+  });
+
+  test("見出し行が開始行でも同様にマーカーごと削除される", async ({ openNote }) => {
+    const page = await openNote({ content: "# head\nxyz" });
+
+    await selectMarkdownRange(page, 0, 0, 1, 3);
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("");
+  });
+
+  test("終了行が可視行頭で終わる選択（内容は 1 文字も選んでいない） → 終了行はマーカーごと丸ごと残る", async ({ openNote }) => {
+    const page = await openNote({ content: "abc\n- item" });
+
+    // "abc" 全体 〜 "- |item"（"- item" の可視行頭。内容には触れていない）
+    await selectMarkdownRange(page, 0, 0, 1, 0);
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("- item");
+  });
+
+  test("開始行・終了行ともマーカー付きの部分選択（通常の行またぎ削除）は従来どおり動く", async ({ openNote }) => {
+    const page = await openNote({ content: "- start line\n- end line" });
+
+    // "- st|art line" 〜 "- end|" line（どちらもマーカーの内側・行末より手前で切れる部分選択）
+    await selectMarkdownRange(page, 0, 2, 1, 3);
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("- st line");
+  });
+});
+
+test.describe("マーカー付き単一行の全選択削除", () => {
+  test("- item を ⌘A → Backspace で全消去される", async ({ openNote }) => {
+    const page = await openNote({ content: "- item" });
+
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("");
+  });
+
+  test("> quote を ⌘A → Backspace で全消去される", async ({ openNote }) => {
+    const page = await openNote({ content: "> quote" });
+
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("");
+  });
+});
+
 test.describe("行またぎ選択中の Enter / Shift+Enter", () => {
   test("Enter → 選択範囲を削除したうえで行を分割する", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
@@ -159,7 +225,7 @@ test.describe("行またぎ選択の ⌘X", () => {
     expect(await getContent(page)).toBe("");
   });
 
-  test("選択の端が装飾の内部に落ちても、クリップボードの内容と削除される範囲が一致する", async ({ openNote }) => {
+  test("選択の端が装飾の内部に落ちても、クリップボードの内容と削除される可視範囲が一致する", async ({ openNote }) => {
     const page = await openNote({ content: "abc **bold** def\ntail" });
 
     // 可視 "abc bold def" の 5 = 太字の中身 "o" の直前（raw では "old def" が選択に入る）
@@ -168,7 +234,9 @@ test.describe("行またぎ選択の ⌘X", () => {
 
     expect(notCanceled).toBe(false); // preventDefault された
     expect(plain).toBe("old def\nta");
-    expect(await getContent(page)).toBe("abc **bil");
+    // 太字は選択が部分的にしか覆っていない（"b" が選択の外）ため、マーカーは保存され
+    // 中身の削除範囲だけが取り除かれる（"abc **b" + "**"（保存） + "il"）
+    expect(await getContent(page)).toBe("abc **b**il");
   });
 });
 

@@ -68,6 +68,16 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     expect(await getContent(page)).toBe("aXYef\nghi");
   });
 
+  test("開始行が可視行頭から始まる選択へのペースト → 開始行のマーカーごと置き換わる", async ({ openNote }) => {
+    const page = await openNote({ content: "- item\nxyz" });
+
+    // "- |item" の可視行頭（マーカー直後）〜 "xy|z"（可視オフセット 2）
+    await selectMarkdownRange(page, 0, 0, 1, 2);
+    await dispatchPaste(page, "NEW");
+
+    expect(await getContent(page)).toBe("NEWz");
+  });
+
   test("複数行テキストのペーストで置換され、行が展開される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef\nghi" });
 

@@ -40,7 +40,11 @@ const BOLD_RE = /\*\*(.+?)\*\*/g;
 const ITALIC_RE = /\*([^*]+)\*/g;
 const DEL_RE = /~~([^~]+)~~/g;
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+// ラベルは IMAGE_RE と同じく空を許す（`[^\]]*`）。空マーカー正規化（note-lines.js の
+// widenRangeForEmptiedDecorations）はリンクのラベルが空になっても URL が実体として残るため
+// マーカーごと消さない仕様（`[](url)` のまま）で、ラベル必須（`+`）のままだとこの raw が
+// リンクとして解決できず、代わりに BAREURL_RE が URL 側の `)` まで巻き込んでリンク化してしまう
+const LINK_RE = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
 const BAREURL_RE = /((?:^|[^"=]))((https?:\/\/)[^\s<]+)/g;
 // eslint-disable-next-line no-control-regex -- \x00 is the placeholder marker
 const CODE_RESTORE_RE = /\x00CODE(\d+)\x00/g;

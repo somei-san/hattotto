@@ -198,10 +198,152 @@ function revealTargetAt(inlineRaw, col) {
   return null;
 }
 
+// ── 選択削除・置換のマーカー保存 ─────────────────────────
+// 装飾のマーカー（`**`・`` ` ``・`~~`・`[`〜`](url)`）と内容は不可分な 1 つの記法で、選択が
+// 内容の一部だけに触れている（装飾全体を覆っていない）ときにマーカーごと削除すると、開き・
+// 閉じの片方だけが残ってリテラル露出する（例: `**bold**` の "b" だけ選んで削除すると
+// `**b` が消えて `old**` が壊れた記法として残る）。commitSelectionReplacement（note.js）は
+// これらの関数で「削除範囲のうち装飾のマーカー部分だけを避ける」よう組み立て直す。
+
+/**
+ * [lo, hi) と重なる装飾セグメント（charMap を持つもの＝太字/斜字/取り消し線/インラインコード/
+ * リンク）のうち、内容(charMap の範囲)全体までは覆っていないもの（部分選択）について、
+ * 開き・閉じマーカーのうち [lo, hi) に入っている部分を「保存区間」として返す。内容全体が
+ * [lo, hi) に覆われているセグメントはマーカーごと削除してよいので含めない。charMap を持たない
+ * セグメント（画像・ネストした装飾等）は対象外（従来どおり丸ごと削除される）。
+ *
+ * reveal（該当行の revealState）を渡すと、その範囲に一致するセグメントは inlineSegments が
+ * マーカー込みの raw 全体を 1 つの charMap（可視 = raw が 1:1）として返す（srcStart===charMap の
+ * 開始、srcEnd===charMap の終了になる）ため、開き・閉じマーカーの区間が幅 0 になり保存対象から
+ * 自然に外れる。インライン生表示中はマーカー自体が見えている生テキストで、それを直接削除するのは
+ * 装飾解除そのもの（reveal の仕様）であり、部分選択のマーカー保存とは別の操作だからそこは避けない。
+ *
+ * @param {string} inlineRaw マーカーを除いた raw 行の残り
+ * @param {number} lo [lo, hi) の開始（inlineRaw 上のオフセット）
+ * @param {number} hi [lo, hi) の終了
+ * @param {{start: number, end: number} | null} [reveal] インライン生表示中の範囲（inlineSegments 参照）
+ * @returns {[number, number][]} 保存する raw 区間（開始位置の昇順、inlineRaw 上のオフセット）
+ */
+function inlineDecorationKeepRanges(inlineRaw, lo, hi, reveal) {
+  const segments = inlineSegments(inlineRaw, reveal);
+  const keep = [];
+  for (const seg of segments) {
+    if (!seg.charMap) continue;
+    if (seg.srcEnd <= lo || seg.srcStart >= hi) continue; // [lo, hi) と重ならない
+    if (lo <= seg.srcStart && hi >= seg.srcEnd) continue; // 装飾全体を覆う → マーカーごと削除してよい
+    const cs = seg.charMap.srcStart;
+    const ce = cs + seg.charMap.len;
+    const openStart = Math.max(seg.srcStart, lo);
+    const openEnd = Math.min(cs, hi);
+    if (openEnd > openStart) keep.push([openStart, openEnd]);
+    const closeStart = Math.max(ce, lo);
+    const closeEnd = Math.min(seg.srcEnd, hi);
+    if (closeEnd > closeStart) keep.push([closeStart, closeEnd]);
+  }
+  return keep;
+}
+
+/**
+ * lineText の [lo, hi) を、部分的に覆われた装飾のマーカーを保存しながら削除した結果を返す。
+ * text は [lo, hi) の生き残り（inlineDecorationKeepRanges の保存区間を連結したもの。それ以外は
+ * 削除される）。insertOffset は text 内で最初に実際の削除が起きた位置で、置換テキストは
+ * ここへ挿し込む（commitSelectionReplacement の「削除範囲の位置に挿入する」という既存の
+ * 意味論を、マーカー保存後も保つ）。[0, lo) と [hi, lineText.length) はこの関数の対象外
+ * （呼び出し元がそのまま残す）。
+ *
+ * markerLen（行頭マーカー長）は既定で markerLength(lineText) を使うが、フェンス内容行は
+ * 呼び出し元（note.js の lineStartColumn）から明示的に 0 を渡すこと。フェンス内容行の raw は
+ * 可視テキストそのもの（先頭の空白もインデントではなく実コードの一部）で、markerLength を
+ * そのまま適用すると空白をマーカー扱いして削除範囲がずれる。
+ *
+ * @param {string} lineText
+ * @param {number} lo raw 列（行頭マーカー込みのオフセット）
+ * @param {number} hi
+ * @param {number} [markerLen] 行頭マーカー長。省略時は markerLength(lineText)
+ * @param {{start: number, end: number} | null} [reveal] インライン生表示中の範囲
+ *   （inlineDecorationKeepRanges 参照）
+ * @returns {{ text: string, insertOffset: number }}
+ */
+function deletionSurvivingFragment(lineText, lo, hi, markerLen = markerLength(lineText), reveal) {
+  const inlineRaw = lineText.slice(markerLen);
+  const inlineLo = Math.max(0, lo - markerLen);
+  const inlineHi = Math.max(0, hi - markerLen);
+  const keep = inlineDecorationKeepRanges(inlineRaw, inlineLo, inlineHi, reveal);
+
+  let text = '';
+  let insertOffset = null;
+  let cursor = inlineLo;
+  for (const [s, e] of keep) {
+    if (s > cursor && insertOffset === null) insertOffset = text.length;
+    text += inlineRaw.slice(s, e);
+    cursor = e;
+  }
+  if (insertOffset === null) insertOffset = text.length;
+  return { text, insertOffset };
+}
+
+/**
+ * [lo, hi) を、内容(charMap の範囲)が丸ごと [lo, hi) に収まってしまう装飾のマーカーごと含むよう
+ * 広げる。マーカーと内容は不可分な 1 つの記法なので、内容が全部消えるならマーカーも同じ削除に
+ * 含めて装飾ごと消す（正規化を別の splice に分けると undo が 2 手に割れるため、削除範囲を
+ * 広げる形で同じ splice に含める。分けないと空になった `` **** `` 等が raw にリテラルとして
+ * 残ってしまう＝閉じられない記法として描画される）。リンクはラベルが空でも URL が実体として
+ * 残るため対象外（`[](url)` は正常な状態）。
+ *
+ * inlineDecorationKeepRanges と異なり reveal を受け取らず、常に通常（非 reveal）のセグメント
+ * 構造で内容の範囲を判定する。1 文字だけの内容（例: `**x**`）は、インライン生表示中の装飾
+ * すべてに対して選択が及ぶあいだキャレットが必ず reveal 対象になる（selectionchange の
+ * 不変条件）ため、この関数の呼び出し元（deleteAdjacentVisibleChar 経由）は「内容の 1 文字を
+ * 消す」操作もほぼ常に reveal 中に発生する。reveal 中のセグメントは charMap が raw 全体
+ * （マーカー込み）を指すため、reveal を渡すと「内容」がマーカーごと raw 全体になってしまい、
+ * 本来の内容（例の "x"）だけが消えたケースを検出できなくなる。マーカー文字そのものを直接
+ * 消す編集（inlineDecorationKeepRanges 側で reveal 対応する対象）とは区別されるべき操作
+ * なので、ここでは reveal に関わらず常に「内容が全部消えたか」を素の raw 構造で判定する。
+ *
+ * markerLen の既定・フェンス内容行での扱いは deletionSurvivingFragment と同じ
+ * （呼び出し元から lineStartColumn を明示的に渡すこと）。
+ *
+ * lo・hi がマーカーの内部（lo < markerLen または hi < markerLen）を指す場合、inline 座標
+ * （lo - markerLen 等）は負になりうるが、あえてクランプしない。クランプすると「マーカー未満
+ * だった」という情報が失われ、raw 座標へ戻すときに常に markerLen そのものへ丸め込まれてしまう
+ * （返り値が入力範囲を包含しない＝widen のはずが縮む）。segments の cs/ce/srcStart/srcEnd は
+ * 常に 0 以上なので、負の inline 座標との比較（`seg.srcStart < inlineLo` 等）は「入力がそもそも
+ * マーカー側まで達している」を正しく素通りし、返り値は常に入力 [lo, hi) を包含する
+ * （inlineLo は初期値からしか減らず、inlineHi は初期値からしか増えないため）。
+ *
+ * @param {string} lineText
+ * @param {number} lo raw 列
+ * @param {number} hi
+ * @param {number} [markerLen] 行頭マーカー長。省略時は markerLength(lineText)
+ * @returns {{ lo: number, hi: number }}
+ */
+function widenRangeForEmptiedDecorations(lineText, lo, hi, markerLen = markerLength(lineText)) {
+  const inlineRaw = lineText.slice(markerLen);
+  let inlineLo = lo - markerLen;
+  let inlineHi = hi - markerLen;
+  const segments = inlineSegments(inlineRaw);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const seg of segments) {
+      if (!seg.charMap || seg.kind === 'link') continue;
+      const cs = seg.charMap.srcStart;
+      const ce = cs + seg.charMap.len;
+      const contentGone = cs >= inlineLo && ce <= inlineHi;
+      const outerCovered = seg.srcStart >= inlineLo && seg.srcEnd <= inlineHi;
+      if (!contentGone || outerCovered) continue;
+      if (seg.srcStart < inlineLo) { inlineLo = seg.srcStart; changed = true; }
+      if (seg.srcEnd > inlineHi) { inlineHi = seg.srcEnd; changed = true; }
+    }
+  }
+  return { lo: inlineLo + markerLen, hi: inlineHi + markerLen };
+}
+
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
   module.exports = {
     blockOffset, markerLength, getAutoPrefix, isEmptyListItem, CHECKBOX_RE, isImageOnlyLine,
     isCheckboxLine, visibleOffsetToRawOffset, visibleOffsetFromRawOffset, revealTargetAt,
+    inlineDecorationKeepRanges, deletionSurvivingFragment, widenRangeForEmptiedDecorations,
   };
 }

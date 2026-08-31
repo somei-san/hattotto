@@ -67,6 +67,16 @@ describe("renderMarkdown — inline & block elements", () => {
     assert.match(html, /<a href="https:\/\/example\.com"/);
   });
 
+  test("link with empty label renders as a link with the correct href (not swallowed by bare-URL matching)", () => {
+    // 空マーカー正規化はリンクを対象外にする（ラベルが空でも URL は実体として
+    // 残るため）。ラベル必須の正規表現だとこの raw がリンクとして解決できず、代わりに裸URL側の
+    // 正規表現が閉じ括弧まで url に巻き込んでしまう
+    const html = renderMarkdown("[](https://example.com)");
+    assert.match(html, /<a href="https:\/\/example\.com"/);
+    assert.doesNotMatch(html, /href="https:\/\/example\.com\)"/);
+    assert.match(html, /<a [^>]*><\/a>/); // 可視テキスト（アンカーの中身）が空になっていること
+  });
+
   test("blockquote", () => {
     const html = renderMarkdown("> text");
     assert.match(html, /class="md-blockquote"/);

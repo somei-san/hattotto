@@ -2388,15 +2388,47 @@ function resolveDeletableBounds() {
 
 /** 行またぎ選択（生 Markdown の {start, end}）を insertedText で置き換える。start 行の手前と
  * end 行の続きの間へ insertedText を差し込む（改行を含めば複数行に展開される。空文字なら
- * 削除だけになる）。全体を空にすれば空 1 行になる。キャレットは insertedText の直後に置く
- * （applyLines が rawContent 更新 → renderAll → placeCaretAtRaw → 保存の順で行う。
- * 削除と挿入をここで 1 回の applyLines にまとめることで undo も 1 手にまとまる）。 */
+ * 削除だけになる）。全体を空にすれば空 1 行になる。キャレットは insertedText の直後（raw 位置
+ * としては、保存された装飾の閉じマーカーがあればその後ろになるが、マーカーは描画されないため
+ * 可視位置としては insertedText の直後と一致する）に置く（applyLines が rawContent 更新 →
+ * renderAll → placeCaretAtRaw → 保存の順で行う。削除と挿入をここで 1 回の applyLines に
+ * まとめることで undo も 1 手にまとまる）。
+ *
+ * start 行の末尾側 [start.col, 行末または end.col) と end 行の先頭側 [0 または start.col, end.col)
+ * は、削除する前に widenRangeForEmptiedDecorations で「内容が空になる装飾」のマーカーごと含める
+ * よう広げ、続けて deletionSurvivingFragment で「部分的に覆われた装飾」のマーカーを保存する
+ * （装飾はマーカーと内容が不可分な 1 つの記法なので、内容の一部だけを削除してマーカーの片方だけ
+ * 残すと記法が壊れる）。装飾は行をまたがないため、
+ * この処理は start 行・end 行それぞれで独立に閉じる（中間の行は丸ごと削除されるだけ）。
+ *
+ * revealRangeForLine を deletionSurvivingFragment（マーカー保存の判定）へ渡すのは、インライン
+ * 生表示中はマーカー自体が可視の生テキストであり、その直接削除・置換（装飾解除）を部分選択の
+ * マーカー保存と混同しないため（reveal 中のセグメントは charMap が raw 全体を指すので、保存
+ * 対象から自然に外れる）。widenRangeForEmptiedDecorations（空マーカー正規化）へは渡さない：
+ * 内容の 1 文字削除もほぼ常に reveal 中に起きるため、reveal を
+ * 渡すと正規化そのものが働かなくなる。lineStartColumn を明示的に渡すのは、フェンス内容行の
+ * 行頭空白を markerLength がインデントと誤認しないようにするため（lineStartColumn は 0 を返す）。 */
 function spliceSelectionRange(bounds, insertedText) {
   const { start, end } = bounds;
   const lines = getLines();
-  const prefix = lines[start.line].slice(0, start.col);
-  const suffix = lines[end.line].slice(end.col);
-  const parts = insertedText.split('\n');
+  const sameLine = start.line === end.line;
+
+  const startMarkerLen = lineStartColumn(start.line);
+  const tailHi = sameLine ? end.col : lines[start.line].length;
+  const startReveal = revealRangeForLine(start.line);
+  const tailRange = widenRangeForEmptiedDecorations(lines[start.line], start.col, tailHi, startMarkerLen);
+  const tail = deletionSurvivingFragment(lines[start.line], tailRange.lo, tailRange.hi, startMarkerLen, startReveal);
+
+  const endMarkerLen = sameLine ? startMarkerLen : lineStartColumn(end.line);
+  const endReveal = sameLine ? startReveal : revealRangeForLine(end.line);
+  const headRange = sameLine ? tailRange : widenRangeForEmptiedDecorations(lines[end.line], 0, end.col, endMarkerLen);
+  const headText = sameLine ? '' : deletionSurvivingFragment(lines[end.line], headRange.lo, headRange.hi, endMarkerLen, endReveal).text;
+
+  const middle = tail.text.slice(0, tail.insertOffset) + insertedText + tail.text.slice(tail.insertOffset) + headText;
+
+  const prefix = lines[start.line].slice(0, tailRange.lo);
+  const suffix = lines[end.line].slice(sameLine ? tailRange.hi : headRange.hi);
+  const parts = middle.split('\n');
   parts[0] = prefix + parts[0];
   const caretLine = start.line + parts.length - 1;
   const caretCol = parts[parts.length - 1].length;
