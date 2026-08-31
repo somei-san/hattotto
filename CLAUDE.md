@@ -27,6 +27,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 実行コマンドは DEVELOPMENT.md「テスト」を参照。フロントエンド（`src/note.js`, `src/settings.html`, `src/markdown.js` 等）を変更したら必ずテストを走らせること。ベースライン更新が必要なら `npm run test:update` で更新してコミットに含める。
 
+### リグレッション対策を最優先する
+
+実行コストが高くても、自動テストの拡充を優先する。
+
+- バグを修正するときは、修正前に落ちる再現テストを先に書いて固定する（実機 QA で見つかった不具合も同様）
+- 実機は WKWebView なので、エンジン差の疑いがある挙動は webkit プロジェクトの E2E で固定する
+- 自動化できないもの（実 IME の挙動等）は合成イベントで近似したテストを書いた上で、残りだけを実機の手動確認に回す
+
 ### テストファイル構成
 `tests/unit/` は node の単体テスト（`node --test`）、`tests/visual/` は Playwright（全一覧は `ls tests/visual/*.spec.ts` を参照）。Playwright 側でファイル名から区別できるのは E2E（`*-e2e.spec.ts`）のみで、VRT と UT は名前では分かれない。
 
@@ -34,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
   - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
 - UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
-- E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト
+- E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト。実機が WKWebView のため chromium に加えて webkit プロジェクトでも実行する（`playwright.config.ts` の `testMatch` で E2E のみに限定。VRT・UT は chromium のみ）
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
 
 ## アーキテクチャ
