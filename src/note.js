@@ -165,21 +165,132 @@ async function loadNote() {
 // ── Render ─────────────────────────────────────────
 const getLines = () => rawContent.split('\n');
 
-function renderAll() {
-  // 描画済み DOM を丸ごと差し替えるため、直前まで指していた画像の参照ごとハンドルを消す
-  // （放置すると detached な img へ書き込む・別画像の上にハンドルが残る事故になる）
+/**
+ * @param {{start: number, end: number} | null} [forceReplaceLines] 指定すると、その行範囲
+ *   （raw の行番号・両端含む）に重なるブロックは内容が前回と一致していても必ず作り直す。
+ *   IME 変換の巻き戻し・非 cancelable な beforeinput の巻き戻しなど、rawContent は変えずに
+ *   ネイティブ編集が DOM だけを直接書き換えた後の再描画で使う（patchMarkdownView 参照）。
+ */
+function renderAll(forceReplaceLines) {
+  // ハンドルは指していた画像の参照を保持するため、パッチで画像ブロックが差し替わると
+  // detached な img へ書き込む・別画像の上に残ることがある。再描画のたびに一旦隠す
   hideHandle();
-  mdView.innerHTML = renderMarkdown(rawContent, revealState);
-  markNonEditableElements();
+  patchMarkdownView(renderMarkdown(rawContent, revealState), forceReplaceLines);
   applySelectionHighlight();
+}
+
+const BLOCK_LINE_ATTR_RE = /data-line(-end)?="\d+"/g;
+// 選択中の画像は img.classList.add('img-selected')（applySelectionHighlight）で動的に付く
+// class 属性で、raw content とは無関係な DOM だけの状態。ここで無視しないと、選択の有無だけで
+// 内容キーが変わり、選択中の画像ブロックが無関係な編集のたびに作り直されてしまう
+const IMG_SELECTED_CLASS_RE = / class="img-selected"/g;
+
+/** data-line[-end] の値・.img-selected クラスを無視したブロックの内容キー（比較のたびに
+ * 現在の DOM から作る）。 */
+function blockContentKey(el) {
+  return el.outerHTML.replace(BLOCK_LINE_ATTR_RE, 'data-line$1=""').replace(IMG_SELECTED_CLASS_RE, '');
+}
+
+/** ブロック el が data-line[-end] で持つ raw 行範囲。 */
+function blockLineSpan(el) {
+  const start = Number(el.dataset.line);
+  const end = el.dataset.lineEnd != null ? Number(el.dataset.lineEnd) : start;
+  return { start, end };
+}
+
+/** 無変化ブロックの data-line / data-line-end を新しい行番号へ振り直す。ブロック直下だけでなく、
+ * 子孫が独自に data-line を持つ場合（チェックボックスの input 等。change ハンドラが
+ * e.target.dataset.line を直接読むため、ルートと独立して正しい値である必要がある）も同じ位置の
+ * 子孫同士で対応づけて振り直す。blockContentKey の正規化（BLOCK_LINE_ATTR_RE）が子孫の data-line
+ * も内容キーから無視して同一判定している以上、振り直しも同じ範囲を揃えないと、内容キーは
+ * 一致でも DOM 上は子孫の data-line だけ古い行番号のまま残る不整合になる。 */
+function syncLineAttrs(oldEl, newEl) {
+  const oldTargets = [oldEl, ...oldEl.querySelectorAll('[data-line]')];
+  const newTargets = [newEl, ...newEl.querySelectorAll('[data-line]')];
+  oldTargets.forEach((el, i) => {
+    const newTarget = newTargets[i];
+    el.setAttribute('data-line', newTarget.getAttribute('data-line'));
+    if (newTarget.hasAttribute('data-line-end')) {
+      el.setAttribute('data-line-end', newTarget.getAttribute('data-line-end'));
+    }
+  });
+}
+
+/**
+ * mdView.innerHTML の丸ごと差し替えの代わりに、変化したブロックだけ入れ替える。前回描画の
+ * ブロック列（現在の mdView.children そのもの。キャッシュではなく都度読むため、composition 等が
+ * DOM を直接書き換えていればその差分も自然に検出できる）と、新しい HTML のブロック列を、
+ * data-line[-end] の値を無視した内容キーで先頭・末尾から一致比較し、中間の変化区間だけ
+ * 入れ替える。無変化のブロックは data-line[-end] の値を振り直すだけで DOM ノードを再利用する
+ * （img の作り直し・選択破壊を避けるのが目的）。
+ *
+ * forceReplaceLines を渡すと、その範囲に重なるブロックは内容キーが一致していても再利用しない
+ * （outerHTML の文字列比較は空のテキストノードのような「見た目に出ない」DOM の変化を捉えられない
+ * ため、必ず作り直したい箇所は明示的に指定する）。
+ */
+function patchMarkdownView(html, forceReplaceLines) {
+  // mdView.innerHTML の丸ごと差し替えは、直下に紛れ込んだ非要素ノード（テキストノード等）も
+  // 毎回一緒に消していた。ブロック単位の入れ替えは mdView.children（要素のみ）しか見ないため、
+  // その自己修復性を保つには非要素ノードを別途都度取り除く必要がある
+  Array.from(mdView.childNodes).forEach((node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) node.remove();
+  });
+  const oldBlocks = Array.from(mdView.children);
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  // 既存ブロック（既に markNonEditableElements 済み）と内容キーで比較する前に、新ブロック側にも
+  // 同じ処理を済ませておく。挿入後にまとめてかけると、mdView へ入る前の新ブロックだけ
+  // contenteditable="false" を欠いた状態で比較され、img・チェックボックス等を含む無変化ブロックが
+  // 誤って「変化あり」と判定されてしまう
+  markNonEditableElements(template.content);
+  if (oldBlocks.length === 0) {
+    mdView.replaceChildren(template.content);
+    return;
+  }
+  const newBlocks = Array.from(template.content.children);
+
+  const oldKeys = oldBlocks.map((el) => {
+    if (forceReplaceLines) {
+      const span = blockLineSpan(el);
+      if (span.start <= forceReplaceLines.end && span.end >= forceReplaceLines.start) return null;
+    }
+    return blockContentKey(el);
+  });
+  const newKeys = newBlocks.map(blockContentKey);
+
+  const maxPrefix = Math.min(oldKeys.length, newKeys.length);
+  let prefix = 0;
+  while (prefix < maxPrefix && oldKeys[prefix] === newKeys[prefix]) prefix++;
+
+  let suffix = 0;
+  const maxSuffix = maxPrefix - prefix;
+  while (
+    suffix < maxSuffix &&
+    oldKeys[oldKeys.length - 1 - suffix] === newKeys[newKeys.length - 1 - suffix]
+  ) suffix++;
+
+  for (let i = 0; i < prefix; i++) syncLineAttrs(oldBlocks[i], newBlocks[i]);
+  for (let i = 0; i < suffix; i++) {
+    syncLineAttrs(oldBlocks[oldBlocks.length - 1 - i], newBlocks[newBlocks.length - 1 - i]);
+  }
+
+  const oldMidEnd = oldBlocks.length - suffix;
+  const anchor = oldBlocks[oldMidEnd] ?? null; // null なら mdView の末尾に追加
+  for (let i = prefix; i < oldMidEnd; i++) oldBlocks[i].remove();
+  for (const el of newBlocks.slice(prefix, newBlocks.length - suffix)) {
+    mdView.insertBefore(el, anchor);
+  }
 }
 
 /** キャレット・タイピングの対象から外す要素。img はネイティブ編集で書き換わると data-rel-src
  * との対応が壊れる。チェックボックスの input は change ハンドラで扱う。.md-order-num は表示専用の
  * 自動採番（raw に対応する文字が無い）で、キャレットがその内部へ落ちて余計な raw 位置に
- * 文字が入るのを防ぐ。 */
-function markNonEditableElements() {
-  mdView.querySelectorAll('img, input[type="checkbox"], .md-order-num').forEach((el) => {
+ * 文字が入るのを防ぐ。root は Element / DocumentFragment のどちらでもよい（後者は
+ * patchMarkdownView が mdView へ挿入する前のパース済みフラグメントに使う。ブロックの内容キーが
+ * mdView へ挿入済みの既存ブロック（既にこの処理を経て contenteditable="false" を持つ）と
+ * 挿入前の新ブロックとで食い違わないよう、挿入前に揃えておく必要がある）。 */
+function markNonEditableElements(root) {
+  root.querySelectorAll('img, input[type="checkbox"], .md-order-num').forEach((el) => {
     el.contentEditable = 'false';
   });
 }
@@ -249,7 +360,7 @@ function selectImageRange(img) {
 
 /**
  * selectedImage が指す img 要素に選択枠（.img-selected）と DOM 選択を付け直す。renderAll() の
- * 直後（mdView.innerHTML を丸ごと差し替えた直後）に呼び、選択状態を新しい DOM へ引き継ぐ。
+ * 直後に呼び、対象ブロックが入れ替わっていても選択状態を新しい DOM へ引き継ぐ。
  * 対象がもう存在しない（行が消えた・画像が無くなった等）場合は選択そのものを解除する。
  */
 function applySelectionHighlight() {
@@ -498,7 +609,7 @@ const IMAGE_RESIZE_MIN = 40;
 const IMAGE_RESIZE_MAX = 2000;
 
 // 共有 1 要素を画像ごとに位置だけ動かして使い回す（img 自体は置換要素で ::after が使えない）。
-// mdView.innerHTML を丸ごと差し替える renderAll() で消えないよう mdView の外（body 直下）に置き、
+// renderAll() のブロック入れ替えで指していた画像ごと消えないよう mdView の外（body 直下）に置き、
 // position: fixed でビューポート座標に直接置く（mdView のスクロールの影響を受けない）。
 const resizeHandle = document.createElement('div');
 resizeHandle.className = 'img-resize-handle';
@@ -1068,6 +1179,26 @@ function currentSelectionRange() {
   return sel.getRangeAt(0);
 }
 
+/**
+ * ネイティブ編集がそのまま DOM に適用されてしまった後の巻き戻し専用。range の開始点だけでなく
+ * 終了点も resolveSelectionPoint で解決し、caret 復元用の開始点（point）と、選択が及んだ
+ * 全行をカバーする forceReplaceLines をまとめて返す。開始点しか見ないと、選択が複数行に
+ * またがっていた場合に終了行側のブロックが古い DOM のまま取り残される。range が無い・開始点を
+ * 解決できない場合は両方 null。
+ *
+ * forceLines.start ≤ forceLines.end は DOM Range の不変条件（start は常に end と同じか手前）に
+ * 依っている。resolveSelectionPoint は DOM 上の位置を単調に行番号へ写すだけなので、この前提が
+ * 崩れることはない。
+ */
+function resolveRollbackTarget(range) {
+  if (!range) return { point: null, forceLines: null };
+  const point = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  if (!point) return { point: null, forceLines: null };
+  const endPoint = resolveSelectionPoint(range.endContainer, range.endOffset, true);
+  const endLine = endPoint ? endPoint.line : point.line;
+  return { point, forceLines: { start: point.line, end: endLine } };
+}
+
 mdView.addEventListener('beforeinput', (e) => {
   if (composing) return;
   if (suppressPostCompositionInput && (e.inputType === 'insertText' || e.inputType === 'insertParagraph')) {
@@ -1080,10 +1211,11 @@ mdView.addEventListener('beforeinput', (e) => {
     // composition 外の非 cancelable な beforeinput（一部の IME・自動置換等）は preventDefault
     // できず、ネイティブ編集がそのまま DOM に適用されてしまう。rawContent は変えないまま、
     // ネイティブ適用後の次のマイクロタスクで DOM を rawContent の状態へ描画し直して巻き戻す
-    const range = currentSelectionRange();
-    const point = range ? resolveSelectionPoint(range.startContainer, range.startOffset, false) : null;
+    const { point, forceLines } = resolveRollbackTarget(currentSelectionRange());
     queueMicrotask(() => {
-      renderAll();
+      // ネイティブ編集が書き込んだブロックは、巻き戻した rawContent と文字列が一致して
+      // しまう場合（空のテキストノードが残るだけ等）でも必ず作り直す
+      renderAll(forceLines);
       if (point) placeCaretAtRaw(point.line, point.col);
     });
     return;
@@ -1521,8 +1653,8 @@ function markPostCompositionSuppression() {
  * を明示的には呼ばない。compositionend 直後はフォーカス済みの contenteditable で composition の
  * 装飾が畳まれている最中で、ここで選択を空にすると編集領域先頭へキャレットが合成された状態が
  * 一瞬でき、直後の renderAll・placeCaretAtRaw までの間にそれが可視化されるとキャレットが行頭へ
- * 飛んで見える。選択は renderAll の innerHTML 差し替えでどのみち無効化されるため、明示的な
- * removeAllRanges は不要。 */
+ * 飛んで見える。選択は renderAll が対象ブロックを入れ替える際にどのみち無効化されるため、
+ * 明示的な removeAllRanges は不要。 */
 function commitCompositionReplacement(bounds, insertedText) {
   clearImageSelection();
   spliceSelectionRange(bounds, insertedText);
@@ -1542,17 +1674,17 @@ mdView.addEventListener('compositionend', (e) => {
 
   if (!bounds) {
     // 退避に失敗している（想定外）。現在の選択から可能な範囲でキャレット位置を読み取ってから
-    // 巻き戻す
-    const range = currentSelectionRange();
-    const point = range ? resolveSelectionPoint(range.startContainer, range.startOffset, false) : null;
-    renderAll();
+    // 巻き戻す。対象ブロックは内容キーが一致していても必ず作り直す（composition 中の
+    // ネイティブ DOM 書き込みは空のテキストノードのように outerHTML の差分に出ないことがある）
+    const { point, forceLines } = resolveRollbackTarget(currentSelectionRange());
+    renderAll(forceLines);
     if (point) placeCaretAtRaw(point.line, point.col);
     return;
   }
   if (!e.data) {
     // 変換取消。rawContent は変わらないので、WebKit が composition 中に書き込んだ DOM を
     // 巻き戻し、キャレットを退避位置へ戻す
-    renderAll();
+    renderAll({ start: bounds.start.line, end: bounds.end.line });
     placeCaretAtRaw(bounds.start.line, bounds.start.col);
     return;
   }
@@ -1560,7 +1692,7 @@ mdView.addEventListener('compositionend', (e) => {
     commitCompositionReplacement(bounds, e.data);
   } catch (err) {
     console.error('composition commit failed:', err);
-    renderAll();
+    renderAll({ start: bounds.start.line, end: bounds.end.line });
     placeCaretAtRaw(bounds.start.line, bounds.start.col);
   }
 });
