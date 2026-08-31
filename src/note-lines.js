@@ -63,6 +63,14 @@ function isEmptyListItem(lineText) {
 /** 打ち終えたチェックボックス記法。`- [ ] ` へ補完する対象を拾う。 */
 const CHECKBOX_RE = /^([-*])\s?\[([xX]?)\]$/;
 
+/** markdown.js のチェックボックス行判定（`- [ ] `/`- [x] `、インデント込み）と同じ形状。
+ * チェックボックス自身は contenteditable="false" の空要素なので、矢印キーでの行またぎ
+ * ナビゲーション（note.js）がこの行の内容先頭を素通りさせる対象を見分けるのに使う。 */
+const CHECKBOX_LINE_RE = /^ *[-*] \[[ xX]\] /;
+function isCheckboxLine(lineText) {
+  return CHECKBOX_LINE_RE.test(lineText);
+}
+
 // `save_pasted_image`（Rust 側）が生成するパスの形状（`images/<uuid v4>.<ext>`）と対応させる。
 // note.js の IMAGE_REL_PATH_RE と同じ形状だが、ここでは行全体が画像記法 1 個だけ
 // （前後は空白のみ）であることまで見る必要があるため、行頭・行末アンカー込みで別に持つ。
@@ -169,6 +177,6 @@ function visibleOffsetFromRawOffset(inlineRaw, rawOffset) {
 if (typeof module !== 'undefined') {
   module.exports = {
     blockOffset, markerLength, getAutoPrefix, isEmptyListItem, CHECKBOX_RE, isImageOnlyLine,
-    visibleOffsetToRawOffset, visibleOffsetFromRawOffset,
+    isCheckboxLine, visibleOffsetToRawOffset, visibleOffsetFromRawOffset,
   };
 }

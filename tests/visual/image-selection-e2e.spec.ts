@@ -4,12 +4,10 @@ import { test, expect, injectNoteMock, enterEdit, placeCaret, getContent } from 
 // #markdown-view のキャレット配置に入らず、代わりに「選択状態」になる（placeCaretAtRaw の
 // 関所）。削除は選択中の Backspace / Delete で行う（image-delete-e2e.spec.ts）。
 //
-// 矢印キーでテキスト行から画像のみの行へ「入る」ナビゲーションは、issue #84 段階①の設計
-// （「キャレット・矢印移動・選択・ドラッグはネイティブに任せる（ナビには介入しない）」）により
-// 意図的に対応外になった。img は contenteditable="false" で DOM 上にキャレットの着地点を
-// 持たないため、ネイティブな矢印移動は画像のみの行を素通りする。選択状態は既に選択中の画像から
-// 矢印キーで移動する経路（document レベルの keydown ハンドラ）でのみ機能する。テキスト行から
-// 矢印キーで画像のみの行へ入る系のテストは、この設計上のギャップにより test.fixme にしている。
+// img は contenteditable="false" で DOM 上にキャレットの着地点を持たないため、ネイティブな
+// 矢印移動は画像のみの行を素通りする。テキスト行から矢印キーで画像のみの行へ「入る」ナビゲーションは
+// document レベルの keydown ハンドラが検出して選択状態（selectImage）へ変換する。選択中の画像から
+// 抜ける経路（隣の行への移動）は別の document レベルの keydown ハンドラが対称に扱う。
 
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
@@ -90,7 +88,7 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test.fixme(
+  test(
     "↓ でテキスト行 → 画像のみの行（選択）→ テキスト行と遷移する",
     async ({ browser }) => {
       const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
@@ -112,7 +110,7 @@ test.describe("画像の選択状態", () => {
     },
   );
 
-  test.fixme(
+  test(
     "↑ で連続する画像のみの行を経ても、1 行ずつ選択状態が続く（飛び越えない）",
     async ({ browser }) => {
       const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
@@ -138,7 +136,7 @@ test.describe("画像の選択状態", () => {
     },
   );
 
-  test.fixme("↓ の先が無ければ選択を維持する（端）", async ({ browser }) => {
+  test("↓ の先が無ければ選択を維持する（端）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}` });
@@ -156,7 +154,7 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test.fixme("↑ の先が無ければ選択を維持する（端）", async ({ browser }) => {
+  test("↑ の先が無ければ選択を維持する（端）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `${IMAGE_LINE}\ntext1` });
@@ -174,7 +172,7 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test.fixme("行末で → の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+  test("行末で → の先が画像のみの行なら選択状態になる", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
@@ -189,7 +187,7 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test.fixme("行頭で ← の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+  test("行頭で ← の先が画像のみの行なら選択状態になる", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
@@ -204,7 +202,42 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test.fixme("画像選択状態から ← / → で隣の行へ抜けられる", async ({ browser }) => {
+  test("マーカー付き行の可視行頭（raw col > 0）で ← の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `${IMAGE_LINE}\n- item` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 1, "- ".length); // "item" の可視行頭（raw col はマーカー長ぶん > 0）
+    await page.locator("#markdown-view").press("ArrowLeft");
+
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await ctx.close();
+  });
+
+  test("折り返しのある行では、最後の視覚行に居るときだけ ↓ が次の画像行への変換を試す", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    const longLine = "a".repeat(80); // 300px 幅で複数の視覚行に折り返す長さ
+    await injectNoteMock(page, { content: `${longLine}\n${IMAGE_LINE}` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 0, 0); // 折り返しの最初の視覚行
+    await page.locator("#markdown-view").press("ArrowDown");
+    // 折り返し内の次の視覚行へ移るだけで、画像行への変換はまだ起きない
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+
+    await placeCaret(page, 0, null); // 折り返しの最後の視覚行（行末）
+    await page.locator("#markdown-view").press("ArrowDown");
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await ctx.close();
+  });
+
+  test("画像選択状態から ← / → で隣の行へ抜けられる", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
@@ -428,11 +461,13 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test("未終端フェンスの最終行が画像のみの行に見えても選択にならず、キャレットが置かれる（退行防止）", async ({ browser }) => {
+  test("フェンス内の最終行が画像のみの行に見えても選択にならず、キャレットが置かれる（退行防止）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    // 閉じフェンスが無いため、フェンス開始行〜最終行がまとめて 1 つの <pre> ブロックになる
-    const content = "```\ntext\n" + IMAGE_LINE;
+    // 閉じフェンスがあるため、フェンス開始行〜閉じ行がまとめて 1 つの <pre> ブロックになる
+    // （閉じフェンスの無い未終端フェンスは、下に非空行があるとリテラルのテキスト行になり、
+    // 画像行はもう <pre> の中に無い別のテスト観点になる）
+    const content = "```\ntext\n" + IMAGE_LINE + "\n```";
     await injectNoteMock(page, { content });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");

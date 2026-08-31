@@ -2,7 +2,7 @@ const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
 
 global.escapeHtml = require("../../src/utils.js").escapeHtml;
-const { renderMarkdown } = require("../../src/markdown.js");
+const { renderMarkdown, scanFenceRanges } = require("../../src/markdown.js");
 
 describe("renderMarkdown — fenced code block", () => {
   test("basic code block", () => {
@@ -15,6 +15,23 @@ describe("renderMarkdown — fenced code block", () => {
     const html = renderMarkdown("```js\nlet y = 2;\n```");
     assert.match(html, /<pre class="md-codeblock"/);
     assert.match(html, /<code>let y = 2;<\/code><\/pre>/);
+  });
+
+  test("末尾の内容行が空のときは <br> フィラーで行ボックスを確保する", () => {
+    // <pre> のテキストが "\n" で終わっても末尾の改行は行ボックスを作らず、
+    // 空行が描画されずキャレットも置けないため
+    const html = renderMarkdown("```\ncode\n\n```");
+    assert.match(html, /<code>code\n<br><\/code><\/pre>/);
+  });
+
+  test("内容が空行 1 つだけのコードブロックも <br> フィラーを持つ", () => {
+    const html = renderMarkdown("```\n\n```");
+    assert.match(html, /<code><br><\/code><\/pre>/);
+  });
+
+  test("末尾の内容行が空でなければ <br> フィラーは入らない", () => {
+    const html = renderMarkdown("```\ncode\n```");
+    assert.match(html, /<code>code<\/code><\/pre>/);
   });
 
   test("fence spans the source lines from opening to closing backticks", () => {
@@ -44,10 +61,19 @@ describe("renderMarkdown — fenced code block", () => {
     assert.match(html, /md-line/);
   });
 
-  test("unclosed code block still renders", () => {
+  test("unclosed fence with content below renders as literal text, not a code block", () => {
     const html = renderMarkdown("```\nunclosed code");
-    assert.match(html, /<pre class="md-codeblock"/);
-    assert.match(html, /<code>unclosed code<\/code><\/pre>/);
+    assert.doesNotMatch(html, /md-codeblock/);
+    assert.match(html, /<div class="md-line" data-line="0">```<\/div>/);
+    assert.match(html, /<div class="md-line" data-line="1">unclosed code<\/div>/);
+  });
+
+  test("unclosed fence with no content below renders as literal text, not a code block", () => {
+    const html = renderMarkdown("```\nunclosed code\n```\nmore\n```");
+    // 最後の ``` は閉じ相手が無いので、下が空でもコードブロック化せずリテラル行のまま
+    const matches = html.match(/md-codeblock/g);
+    assert.equal(matches.length, 1);
+    assert.match(html, /<div class="md-line" data-line="4">```<\/div>/);
   });
 
   test("empty code block", () => {
@@ -66,5 +92,35 @@ describe("renderMarkdown — fenced code block", () => {
     assert.match(html, /md-h1/);
     assert.match(html, /md-codeblock/);
     assert.match(html, /md-bullet/);
+  });
+});
+
+describe("scanFenceRanges", () => {
+  test("closed fence: range keyed by opening line, closed true", () => {
+    const ranges = scanFenceRanges(["```", "code", "```"]);
+    assert.deepEqual(ranges.get(0), { end: 2, closed: true });
+    assert.equal(ranges.size, 1);
+  });
+
+  test("unclosed with non-empty content below: no range (literal)", () => {
+    const ranges = scanFenceRanges(["```", "code"]);
+    assert.equal(ranges.size, 0);
+  });
+
+  test("unclosed with only empty lines below: no range (literal)", () => {
+    const ranges = scanFenceRanges(["```", "", ""]);
+    assert.equal(ranges.size, 0);
+  });
+
+  test("unclosed with nothing below (last line): no range (literal)", () => {
+    const ranges = scanFenceRanges(["```"]);
+    assert.equal(ranges.size, 0);
+  });
+
+  test("multiple independent fences", () => {
+    const ranges = scanFenceRanges(["```", "a", "```", "text", "```", "b", "```"]);
+    assert.deepEqual(ranges.get(0), { end: 2, closed: true });
+    assert.deepEqual(ranges.get(4), { end: 6, closed: true });
+    assert.equal(ranges.size, 2);
   });
 });

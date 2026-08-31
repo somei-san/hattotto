@@ -191,9 +191,9 @@ describe("renderMarkdown — edge cases", () => {
     assert.match(html, /\*\*not bold\*\*/);
   });
 
-  test("unclosed code block renders gracefully", () => {
+  test("unclosed fence with content below renders as literal text", () => {
     const html = renderMarkdown("```\nsome code");
-    assert.match(html, /class="md-codeblock"/);
+    assert.doesNotMatch(html, /class="md-codeblock"/);
     assert.match(html, /some code/);
   });
 

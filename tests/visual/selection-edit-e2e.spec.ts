@@ -124,6 +124,26 @@ test.describe("行またぎ選択の Backspace / Delete 削除", () => {
   });
 });
 
+test.describe("行またぎ選択中の Enter / Shift+Enter", () => {
+  test("Enter → 選択範囲を削除したうえで行を分割する", async ({ openNote }) => {
+    const page = await openNote({ content: "abc\ndef" });
+
+    await selectMarkdownRange(page, 0, 1, 1, 2);
+    await page.keyboard.press("Enter");
+
+    expect(await getContent(page)).toBe("a\nf");
+  });
+
+  test("Shift+Enter → 選択範囲を削除したうえで素の改行だけ入る", async ({ openNote }) => {
+    const page = await openNote({ content: "abc\ndef" });
+
+    await selectMarkdownRange(page, 0, 0, 1, "def".length);
+    await page.keyboard.press("Shift+Enter");
+
+    expect(await getContent(page)).toBe("\n");
+  });
+});
+
 test.describe("行またぎ選択の ⌘X", () => {
   test("copy と同じ payload がクリップボードへ載り、選択範囲が削除される", async ({ openNote }) => {
     const page = await openNote({ content: "**bold** line\nsecond line" });
@@ -188,20 +208,8 @@ test.describe("行またぎ選択の無修飾矢印キー", () => {
   });
 });
 
-test.describe("行またぎ選択中は引き続きブロックされる操作（ガード残置）", () => {
-  // タイピング・ペーストによる置換は selection-replace-e2e.spec.ts を参照。ここは
-  // 組み立てられない破壊的操作（Dead key 相当・Shift/⌥ 付きの編集キー等）だけを扱う。
-
-  // 生エディタに触れない純粋な mdView 選択でも、Shift/⌥ 付きの破壊的キーはブロックされる
-  // ことを確認する（生エディタに触れる選択のケースは別 describe ブロックで確認済み）。
-  test("Shift+Enter はブロックされ、内容が変わらない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-
-    await selectMarkdownRange(page, 0, 0, 1, "def".length);
-    await page.keyboard.press("Shift+Enter");
-
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
+test.describe("行またぎ選択中の ⌥Backspace", () => {
+  // タイピング・ペーストによる置換は selection-replace-e2e.spec.ts を参照。
 
   // 選択がある状態の Alt+Backspace は、ブラウザが単語削除ではなく通常の
   // deleteContentBackward（選択の削除）として beforeinput を発火させる。これは他の

@@ -1039,7 +1039,11 @@ test.describe("右クリックメニューの「Markdown をコピー」", () =>
     await ctx.close();
   });
 
-  test("選択なしで右クリック → hasSelection: false", async ({ browser }) => {
+  test("選択なしで右クリック → hasSelection: false", async ({ browser, browserName }) => {
+    // WebKit は素の contenteditable（本アプリの splice パイプラインとは無関係）でも右クリックで
+    // クリック位置の単語を自動選択する。hasSelection はその時点の実際の選択状態を見ているだけで
+    // 正しく動いており、この差は engine のネイティブなコンテキストメニュー挙動そのもの
+    test.fixme(browserName === "webkit", "WebKit は右クリックでクリック位置の単語を自動選択するため、選択なしを再現できない");
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: "line0" }, {}, { captureInvokes: true });
@@ -1059,7 +1063,10 @@ test.describe("右クリックメニューの「Markdown をコピー」", () =>
   // 空行だけを選択すると resolveSelectionRange は raw の内容どおり空文字を返す（これ自体は
   // 正しい）。空文字のまま hasSelection: true にすると、copy_markdown へ空文字が渡り
   // クリップボードが空になってしまうため、空文字なら選択なし扱いにする
-  test("空行だけを選択して右クリック → resolveSelectionRange が空文字を返すため hasSelection: false", async ({ browser }) => {
+  test("空行だけを選択して右クリック → resolveSelectionRange が空文字を返すため hasSelection: false", async ({ browser, browserName }) => {
+    // 上の「選択なしで右クリック」と同じ理由（WebKit のネイティブな右クリック単語自動選択）で、
+    // 空行への右クリックが空行の外の単語を選択してしまい、空選択を再現できない
+    test.fixme(browserName === "webkit", "WebKit は右クリックでクリック位置の単語を自動選択するため、空選択を再現できない");
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: "line0\n\nline2" }, {}, { captureInvokes: true });
@@ -1084,8 +1091,8 @@ test.describe("右クリックメニューの「Markdown をコピー」", () =>
     await ctx.close();
   });
 
-  // 未クローズのコードフェンス（EOF まで ``` が閉じない）は data-line-end が「閉じフェンス行」
-  // ではなく「最後の内容行自身」を指すため、選択範囲の写像が特殊なケースになる。
+  // 内容行が無い未クローズフェンス（```だけ）はリテラルのテキスト行として描画される。
+  // resolveSelectionRange が例外を投げず、右クリックメニューが開くことを確認する。
   test("内容行が無い未クローズフェンス（```だけ）を選択して右クリックしても例外にならずメニューが開く", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
@@ -1107,30 +1114,6 @@ test.describe("右クリックメニューの「Markdown をコピー」", () =>
     await page.locator("#markdown-view").click({ button: "right" });
 
     await expect.poll(async () => (await capturedCalls(page, "show_context_menu")).length).toBe(1);
-
-    await ctx.close();
-  });
-});
-
-test.describe("未クローズのコードフェンス内の選択（resolveSelectionRange の行写像）", () => {
-  test("閉じフェンスが無くても最後の内容行末まで正しく写像される（末尾行が欠落しない）", async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
-    const page = await ctx.newPage();
-    // 閉じフェンス無し（EOF まで ``` のまま）。内容行は "foo" "bar" の 2 行
-    await injectNoteMock(page, { content: "```\nfoo\nbar" }, {}, {});
-    await page.goto("/note.html?id=test-note-id");
-    await page.waitForLoadState("networkidle");
-
-    const markdown = await page.evaluate(() => {
-      const codeEl = document.querySelector("#markdown-view pre.md-codeblock code")!;
-      const range = document.createRange();
-      range.selectNodeContents(codeEl); // フェンス内側の可視テキスト全体（"foo\nbar"）を選択
-      return (window as unknown as { resolveSelectionRange(r: Range): string | null })
-        .resolveSelectionRange(range);
-    });
-
-    // 末尾行（"bar"）が行写像のループ範囲から外れて欠落しないことを確認する
-    expect(markdown).toBe("foo\nbar");
 
     await ctx.close();
   });

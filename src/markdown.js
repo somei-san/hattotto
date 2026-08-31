@@ -398,6 +398,35 @@ function inlineSegments(raw) {
   return segments;
 }
 
+/**
+ * 行配列を先頭から走査し、コードブロックとして描画するフェンスの範囲を
+ * Map<開始行, { end, closed }> で返す（開始行は開きフェンス自身）。renderMarkdown（フェンスの
+ * 描画判定）と note.js の末尾空行正規化（閉じフェンスが最終行になったら空行を1行足す）が
+ * 同じ判定を共有するための土台。
+ *
+ * end は閉じフェンス自身の行（内容は [開始行+1, end) ）。closed は常に true（範囲に含める
+ * フェンスは開き・閉じが揃っているものだけのため）。
+ *
+ * 対応する閉じフェンスの無い開きフェンスはコードブロック化せず、常にリテラルのテキスト行として
+ * 扱う（範囲に含めない）。
+ */
+function scanFenceRanges(lines) {
+  const ranges = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^```\S*\s*$/.test(lines[i])) continue;
+    let closeIdx = -1;
+    for (let k = i + 1; k < lines.length; k++) {
+      if (/^```\s*$/.test(lines[k])) { closeIdx = k; break; }
+    }
+    if (closeIdx !== -1) {
+      ranges.set(i, { end: closeIdx, closed: true });
+      i = closeIdx;
+    }
+    // else: 閉じフェンスが無い → リテラル行として扱う（範囲に含めず素通り）
+  }
+  return ranges;
+}
+
 function renderMarkdown(text) {
   if (!text) {
     // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト・node 環境等）でも壊れないようフォールバックする
@@ -410,27 +439,20 @@ function renderMarkdown(text) {
   // Normalize non-breaking spaces (contenteditable often inserts \u00A0)
   const lines = text.replace(/\u00A0/g, ' ').split('\n');
   const result = [];
-  let inCodeBlock = false;
-  let codeLines = [];
-  let codeStart = 0;
+  const fenceRanges = scanFenceRanges(lines);
   const orderedCounters = {}; // track counters per indent level
   let lastOrderedLevel = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (!inCodeBlock && /^```\S*\s*$/.test(line)) {
-      inCodeBlock = true;
-      codeLines = [];
-      codeStart = i;
-      continue;
-    }
-    if (inCodeBlock && /^```\s*$/.test(line)) {
-      result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${i}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
-      inCodeBlock = false;
-      codeLines = [];
-      continue;
-    }
-    if (inCodeBlock) {
-      codeLines.push(line);
+    if (fenceRanges.has(i)) {
+      const { end, closed } = fenceRanges.get(i);
+      const codeLines = lines.slice(i + 1, closed ? end : end + 1);
+      // 末尾の内容行が空のとき、<pre> のテキストは "\n" で終わるが末尾の改行は行ボックスを
+      // 作らないため、その空行が描画されずキャレットも置けない。<br> フィラーで行ボックスを
+      // 確保する（テキストノードの後ろに足すのでソース位置とのオフセット対応は変わらない）
+      const filler = codeLines.length && codeLines[codeLines.length - 1] === '' ? '<br>' : '';
+      result.push(`<pre class="md-codeblock" data-line="${i}" data-line-end="${end}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + filler + '</code></pre>');
+      i = end;
       continue;
     }
     // Measure and strip indent for nested lists
@@ -495,7 +517,11 @@ function renderMarkdown(text) {
       }
       lastOrderedLevel = level;
       const displayNum = orderedCounters[level];
-      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+      // 内容が空だと通常の半角スペースは contenteditable 上で潰れてしまい（他に文字が無い
+      // ノードの末尾空白は折りたたまれる）、キャレットの着地点が無くなって beforeinput が
+      // 発火しない。潰れない区切り文字として &nbsp;（U+00A0）を使う
+      const sep = m[2] === '' ? ' ' : ' ';
+      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${inlineMarkdown(escapeHtml(m[2]))}</div>`);
       continue;
     }
     if (line === '') {
@@ -504,14 +530,10 @@ function renderMarkdown(text) {
     }
     result.push(`<div class="md-line${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
   }
-  // Handle unclosed code block
-  if (inCodeBlock) {
-    result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${lines.length - 1}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
-  }
   return result.join('');
 }
 
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt };
+  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges };
 }

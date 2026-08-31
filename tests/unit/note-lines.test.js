@@ -13,6 +13,7 @@ const {
   isEmptyListItem,
   CHECKBOX_RE,
   isImageOnlyLine,
+  isCheckboxLine,
   visibleOffsetToRawOffset,
   visibleOffsetFromRawOffset,
 } = require("../../src/note-lines.js");
@@ -571,5 +572,36 @@ describe("visibleOffsetFromRawOffset", () => {
       const visible = visibleOffsetFromRawOffset(raw, i);
       assert.equal(visibleOffsetToRawOffset(raw, visible, false), i);
     }
+  });
+});
+
+describe("isCheckboxLine", () => {
+  test("未チェック → true", () => {
+    assert.equal(isCheckboxLine("- [ ] task"), true);
+  });
+
+  test("チェック済み（大文字小文字とも） → true", () => {
+    assert.equal(isCheckboxLine("- [x] task"), true);
+    assert.equal(isCheckboxLine("- [X] task"), true);
+  });
+
+  test("* マーカーでも true", () => {
+    assert.equal(isCheckboxLine("* [ ] task"), true);
+  });
+
+  test("インデント付きでも true", () => {
+    assert.equal(isCheckboxLine("  - [ ] task"), true);
+  });
+
+  test("内容が空でも true（マーカーだけの行）", () => {
+    assert.equal(isCheckboxLine("- [ ] "), true);
+  });
+
+  test("通常のリスト項目 → false", () => {
+    assert.equal(isCheckboxLine("- item"), false);
+  });
+
+  test("通常のテキスト → false", () => {
+    assert.equal(isCheckboxLine("[ ] task"), false);
   });
 });

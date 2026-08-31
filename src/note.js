@@ -38,6 +38,9 @@ let composing = false;
 // IME 変換開始時点のキャレット/選択位置（{start, end} の raw bounds）。compositionend で
 // この位置へ確定文字列を splice する（詳細は compositionend リスナー参照）
 let compositionBounds = null;
+// compositionend 直後の 1 マイクロタスクぶんだけ true になる（詳細は compositionend
+// リスナー付近の markPostCompositionSuppression 参照）
+let suppressPostCompositionInput = false;
 
 // ⌘Z/⌘⇧Z の undo/redo 履歴。loadNote() が最初の content で初期化する
 let editHistory = null;
@@ -338,8 +341,23 @@ function setCaretAtRaw(line, col) {
   sel.addRange(range);
 }
 
+/** 閉じフェンスのコードブロックが編集の結果そのまま最終行になったら、その下に入力する場所が
+ * 無くなる（コードブロックの中に入るしかない）ため、空行を1行追加して確保する。lines を
+ * 直接書き換える。applyLines から呼ぶことで、追加した空行も元の編集と同じ splice に
+ * 含まれ、undo 単位が増えない。 */
+function ensureTrailingLineAfterClosedFence(lines) {
+  const lastLine = lines.length - 1;
+  for (const { end, closed } of scanFenceRanges(lines).values()) {
+    if (closed && end === lastLine) {
+      lines.push('');
+      return;
+    }
+  }
+}
+
 /** 行構成そのものが変わる編集（splice 系）の共通後処理。 */
 function applyLines(lines, caretLine, caretCol) {
+  ensureTrailingLineAfterClosedFence(lines);
   rawContent = lines.join('\n');
   renderAll();
   placeCaretAtRaw(caretLine, caretCol);
@@ -967,9 +985,9 @@ document.addEventListener('beforeinput', (e) => {
 
 // ── beforeinput ディスパッチャ ──────────────────────
 // #markdown-view への編集はすべて beforeinput で受け、実装済みの inputType（insertText /
-// deleteContentBackward / deleteContentForward）だけをブラウザの既定編集をやめて
-// splice → 再描画へ差し替える。それ以外（insertParagraph・insertLineBreak・
-// insertReplacementText・insertFromPaste 等）は fail-closed で無視する。
+// deleteContentBackward / deleteContentForward / insertParagraph / insertLineBreak）だけを
+// ブラウザの既定編集をやめて splice → 再描画へ差し替える。それ以外（insertReplacementText・
+// insertFromPaste 等）は fail-closed で無視する。
 // composition 中（cancelable でない beforeinput）は介入せず、compositionend でまとめて反映する。
 
 /** 現在の DOM 選択の Range（無ければ null）。 */
@@ -981,6 +999,12 @@ function currentSelectionRange() {
 
 mdView.addEventListener('beforeinput', (e) => {
   if (composing) return;
+  if (suppressPostCompositionInput && (e.inputType === 'insertText' || e.inputType === 'insertParagraph')) {
+    // 確定 Enter 二重処理ガード（markPostCompositionSuppression 参照）。compositionend が
+    // 既に確定文字列を splice 済みなので、ここでの適用は捨てる
+    if (e.cancelable) e.preventDefault();
+    return;
+  }
   if (!e.cancelable) {
     // composition 外の非 cancelable な beforeinput（一部の IME・自動置換等）は preventDefault
     // できず、ネイティブ編集がそのまま DOM に適用されてしまう。rawContent は変えないまま、
@@ -994,38 +1018,71 @@ mdView.addEventListener('beforeinput', (e) => {
     return;
   }
   const inputType = e.inputType;
-  if (inputType !== 'insertText' && inputType !== 'deleteContentBackward' && inputType !== 'deleteContentForward') {
+  const known = inputType === 'insertText' || inputType === 'deleteContentBackward'
+    || inputType === 'deleteContentForward' || inputType === 'deleteContent'
+    || inputType === 'insertParagraph' || inputType === 'insertLineBreak';
+  if (!known) {
     e.preventDefault(); // 未実装の inputType は fail-closed で無視する
     return;
   }
   e.preventDefault();
   try {
-    if (inputType === 'insertText') {
-      onInsertText(e.data ?? '');
-    } else {
-      onDeleteContent(inputType === 'deleteContentBackward' ? 'backward' : 'forward');
-    }
+    if (inputType === 'insertText') onInsertText(e.data ?? '');
+    else if (inputType === 'insertParagraph') onInsertParagraph();
+    else if (inputType === 'insertLineBreak') onInsertLineBreak();
+    // deleteContent は方向指定なしの削除（WebKit が選択のある ⌥Backspace 等で発火する）。
+    // 選択がある間は onDeleteContent の direction 引数はどのみち使われない（選択削除のみ）ため
+    // 'backward' で揃える
+    else onDeleteContent(inputType === 'deleteContentForward' ? 'forward' : 'backward');
   } catch (err) {
     console.error('beforeinput handling failed:', err);
   }
 });
 
-function onInsertText(data) {
+/** node/offset より前に、mdView 内に可視文字が 1 つも無いかどうか。Range.collapsed は
+ * 境界点の同一性判定（(parent, 0) と (firstChild, 0) は指す位置が同じでも境界点としては
+ * 等しくない）のため使えない。範囲の文字列化が空文字列かどうかで判定する。 */
+function isAtEditableStart(node, offset) {
+  const r = document.createRange();
+  r.setStart(mdView, 0);
+  r.setEnd(node, offset);
+  return r.toString() === '';
+}
+
+// WebKit は編集領域の絶対先頭での Backspace に対して beforeinput を発火しない（直前に
+// 削除対象が無いとネイティブ側で処理を打ち切るため）。見出し・引用の行頭マーカーは DOM 上に
+// 文字として存在せず、先頭行ならマーカー直後がそのまま編集領域の絶対先頭になるため、
+// beforeinput 抜きではマーカー解除が一切効かなくなる。keydown で同じ条件を検出し、
+// beforeinput を経由せず直接 onDeleteContent を呼んで揃える。keydown を preventDefault する
+// ので、beforeinput が発火する側（Chromium 等）で二重処理になることもない。
+mdView.addEventListener('keydown', (e) => {
+  if (composing || suppressPostCompositionInput) return;
+  if (e.key !== 'Backspace' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
   const range = currentSelectionRange();
-  if (!range) return;
-  if (range.collapsed) {
-    const bounds = collapsedBounds(range);
-    if (!bounds) return;
-    commitSelectionReplacement(bounds, data);
-    return;
-  }
+  if (!range || !range.collapsed) return;
+  if (!isAtEditableStart(range.startContainer, range.startOffset)) return;
+  e.preventDefault();
+  onDeleteContent('backward');
+});
+
+/** 現在の選択から、挿入・置換の対象にする raw bounds を求める（判定フェーズ）。collapsed なら
+ * collapsedBounds、非 collapsed なら resolveSelectionBounds。画像選択（selectImageRange が張った
+ * Range）は img 自体が可視幅 0 のため、非 collapsed な選択でも raw bounds が同じ点に潰れて退化する。
+ * ここで無視しないと、画像を消さずにその raw 位置へ文字だけ挿入してしまう（画像は残ったまま隣に
+ * 文字が入る）。画像の置換は Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側の
+ * ファイル削除込み）に委ねる。 */
+function resolveEditableBounds() {
+  const range = currentSelectionRange();
+  if (!range) return null;
+  if (range.collapsed) return collapsedBounds(range);
   const bounds = resolveSelectionBounds(range);
+  if (!bounds || boundsAreDegenerate(bounds)) return null;
+  return bounds;
+}
+
+function onInsertText(data) {
+  const bounds = resolveEditableBounds();
   if (!bounds) return;
-  // 画像選択（selectImageRange が張った Range）は img 自体が可視幅 0 のため、非 collapsed な
-  // 選択でも raw bounds が同じ点に潰れて退化する。ここで無視しないと、画像を消さずにその
-  // raw 位置へ文字だけ挿入してしまう（画像は残ったまま隣に文字が入る）。画像の置換は
-  // Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側のファイル削除込み）に委ねる
-  if (boundsAreDegenerate(bounds)) return;
   commitSelectionReplacement(bounds, data);
 }
 
@@ -1037,6 +1094,74 @@ function collapsedBounds(range) {
   const point = resolveSelectionPoint(range.startContainer, range.startOffset, false);
   if (!point) return null;
   return { start: point, end: { ...point } };
+}
+
+// ── Enter（insertParagraph・insertLineBreak）────────────────
+// フェンス内判定は findBlock の data-line-end 有無（block.start !== block.end）で行う。
+// collapsed キャレットは装飾記法・行頭マーカーの内部を指せない（visibleOffsetFromRawOffset の
+// 境界規約）ため、col は常にマーカー長以上になる。非 collapsed（選択）経路はこの限りでない：
+// resolveSelectionBounds が「開始点の可視オフセットが 0（マーカー直後）」の選択を
+// マーカー込みの raw col 0 へ正規化するため、可視行頭を含む選択からの Enter では
+// start.col がマーカー長を割り込み、splitLineAt の before にマーカーが残らない。
+//
+// 対応する閉じフェンスの無い ``` 行は常にリテラルのテキスト行として描画される
+// （scanFenceRanges）ため、そのままではコードブロックを作る手段が無い。この行での Enter
+// （insertParagraph、autoContinue）をコードブロック生成のトリガーとして扱う。キャレットの
+// 列は問わない: 矢印キーでこの行に入るとキャレットは行頭に落ちることが多く（WebKit は移動元の
+// 列を引き継ぐ）、行末限定にすると「Enter しても何も起きない」ように見えるため。
+
+/** キャレットが、リテラルの ``` 単独行（```js のような言語指定つきも含む）を指しているか。
+ * isFenceEnterTarget が真の行だけ splitLineAt がコードブロック自動生成に分岐する。 */
+function isFenceEnterTarget(lines, start, end) {
+  if (start.line !== end.line || start.col !== end.col) return false;
+  return /^```\S*\s*$/.test(lines[start.line]);
+}
+
+/** bounds（resolveEditableBounds の結果）の位置で行を分割する。autoContinue が真なら
+ * getAutoPrefix でリスト・引用のマーカーを次行へ引き継ぐ（フェンス内は対象外）。 */
+function splitLineAt(bounds, autoContinue) {
+  const { start, end } = bounds;
+  const lines = getLines();
+
+  const block = findBlock(start.line);
+  const inFence = !!block && block.start !== block.end;
+
+  if (autoContinue && !inFence && isFenceEnterTarget(lines, start, end)) {
+    // 空の内容行 + 閉じフェンス行を生成し、キャレットを内容行に置く。1 回の splice に収めて
+    // undo を 1 手にする。閉じフェンスが結果的に最終行になれば applyLines が末尾に空行を確保する
+    lines.splice(start.line, 1, lines[start.line], '', '```');
+    applyLines(lines, start.line + 1, 0);
+    return;
+  }
+
+  const before = lines[start.line].slice(0, start.col);
+  const after = lines[end.line].slice(end.col);
+  const merged = before + after;
+
+  const prefix = (autoContinue && !inFence) ? getAutoPrefix(merged) : null;
+
+  if (prefix !== null && isEmptyListItem(merged)) {
+    // 中身のないリスト項目 → プレフィックスを消して継続を打ち切る
+    lines.splice(start.line, end.line - start.line + 1, '');
+    applyLines(lines, start.line, 0);
+    return;
+  }
+
+  const nextLineText = prefix === null ? after : prefix + after.replace(/^ /, '');
+  lines.splice(start.line, end.line - start.line + 1, before, nextLineText);
+  applyLines(lines, start.line + 1, prefix === null ? 0 : prefix.length);
+}
+
+function onInsertParagraph() {
+  const bounds = resolveEditableBounds();
+  if (!bounds) return;
+  splitLineAt(bounds, true);
+}
+
+function onInsertLineBreak() {
+  const bounds = resolveEditableBounds();
+  if (!bounds) return;
+  splitLineAt(bounds, false);
 }
 
 function onDeleteContent(direction) {
@@ -1052,16 +1177,101 @@ function onDeleteContent(direction) {
   deleteAdjacentVisibleChar(point.line, point.col, direction);
 }
 
+/** 行 line の「可視行頭」に対応する raw 列。フェンス内容行は raw が可視テキストそのまま
+ * （マーカーという概念が無い）なので 0、それ以外はマーカー長（見出し・リスト・引用の記号込み）。
+ * 行頭 Backspace の段階解除・行末 Delete がどこを「境界」とみなすかの判定に使う。 */
+function lineStartColumn(line) {
+  const block = findBlock(line);
+  if (block && block.start !== block.end) return 0;
+  return markerLength(getLines()[line] ?? '');
+}
+
+/**
+ * 可視行頭（raw col === lineStartColumn(line)）での Backspace。段階的に解除する:
+ * 1) マーカーあり（マーカー長 > インデント）→ マーカーだけ除去（インデント維持）
+ * 2) マーカーなしでインデントあり → インデント全除去
+ * 3) どちらも無し → 前行と結合し、前行末尾へキャレット
+ * フェンス内容行は 1)/2) の対象外（インデントは実コードの一部で、剥がすと内容が変わるため）で、
+ * 最初の内容行の行頭ならコードブロック解除（フェンス 2 行を取り除き内容をプレーンテキストへ。
+ * 見出し等の「1 回目 = 装飾解除」と対称）。
+ * 前行がフェンス区切り（```）・画像のみの行は、結合すると記法が壊れるため no-op にする。
+ */
+function backspaceAtLineStart(line) {
+  const lines = getLines();
+  const lineText = lines[line];
+  const block = findBlock(line);
+  const inFence = !!block && block.start !== block.end;
+
+  if (!inFence) {
+    const indent = lineText.match(/^ */)[0].length;
+    const markerLen = markerLength(lineText);
+    if (markerLen > indent) {
+      lines[line] = lineText.slice(0, indent) + lineText.slice(markerLen);
+      applyLines(lines, line, indent);
+      return;
+    }
+    if (indent > 0) {
+      lines[line] = lineText.slice(indent);
+      applyLines(lines, line, 0);
+      return;
+    }
+  }
+
+  if (inFence && line === block.start + 1) {
+    // 最初の内容行の行頭 → コードブロック解除。閉じ → 開きの順に取り除く（先に開きを
+    // 取ると閉じフェンスの行番号がずれる）。キャレットは同じ内容行の行頭に残る
+    lines.splice(block.end, 1);
+    lines.splice(block.start, 1);
+    applyLines(lines, block.start, 0);
+    return;
+  }
+
+  if (line === 0) return; // 先頭行はこれ以上結合できない
+  const prevLine = lines[line - 1];
+  // 開き/閉じの区別なく「```」で始まる行は全て弾く（言語指定つきの開きフェンス
+  // 「```js」も含む）。どちらへ結合しても記法が壊れる点は同じで、区別する意味が無い
+  if (/^```/.test(prevLine) || isImageOnlyLine(prevLine)) return;
+  const mergeCol = prevLine.length;
+  lines[line - 1] = prevLine + lineText;
+  lines.splice(line, 1);
+  applyLines(lines, line - 1, mergeCol);
+}
+
+/**
+ * 行末（raw col === 行の長さ）での Delete。次行のマーカーを剥がして現在行へ連結する（1 段のみ）。
+ * 次行がフェンス区切り（```）・画像のみの行は、結合すると記法が壊れるため no-op にする。
+ */
+function deleteAtLineEnd(line) {
+  const lines = getLines();
+  if (line >= lines.length - 1) return; // 最終行
+  const nextLine = lines[line + 1];
+  // 開き/閉じの区別なく「```」始まりを弾く（どちらへ連結しても記法が壊れるため）
+  if (/^```/.test(nextLine) || isImageOnlyLine(nextLine)) return;
+  const nextBlock = findBlock(line + 1);
+  const nextInFence = !!nextBlock && nextBlock.start !== nextBlock.end;
+  const markerLen = nextInFence ? 0 : markerLength(nextLine);
+  const caretCol = lines[line].length;
+  lines[line] = lines[line] + nextLine.slice(markerLen);
+  lines.splice(line + 1, 1);
+  applyLines(lines, line, caretCol);
+}
+
 /**
  * collapsed キャレット（行 line、raw 列 col）から direction 側に隣接する可視 1 文字ぶんの
- * raw 範囲を削除する。行頭 Backspace（マーカー解除・前行との結合）・行末 Delete（次行との結合）
- * は未実装のため、preventDefault 済みの no-op に留める。
+ * raw 範囲を削除する。可視行頭での Backspace・行末での Delete は行構成そのものが変わるため、
+ * それぞれ段階解除・次行連結（backspaceAtLineStart / deleteAtLineEnd）に委ねる。
  */
 function deleteAdjacentVisibleChar(line, col, direction) {
   const lineText = getLines()[line] ?? '';
-  const markerLen = markerLength(lineText);
-  if (direction === 'backward' && col <= markerLen) return; // 行頭 Backspace は未実装
-  if (direction === 'forward' && col >= lineText.length) return; // 行末 Delete は未実装
+  if (direction === 'backward' && col <= lineStartColumn(line)) {
+    backspaceAtLineStart(line);
+    return;
+  }
+  if (direction === 'forward' && col >= lineText.length) {
+    deleteAtLineEnd(line);
+    return;
+  }
+  const markerLen = lineStartColumn(line);
   const range = adjacentVisibleCharRawRange(line, col, direction);
   if (!range) return;
   const bounds = {
@@ -1105,7 +1315,7 @@ function graphemesOf(s) {
  */
 function adjacentVisibleCharRawRange(line, col, direction) {
   const lineText = getLines()[line] ?? '';
-  const markerLen = markerLength(lineText);
+  const markerLen = lineStartColumn(line);
   const inlineRaw = lineText.slice(markerLen);
   const contentVisible = visibleOffsetFromRawOffset(inlineRaw, Math.max(0, col - markerLen));
   const segments = inlineSegments(inlineRaw);
@@ -1150,14 +1360,15 @@ function adjacentVisibleCharRawRange(line, col, direction) {
   return null;
 }
 
-// ── IME（暫定実装） ─────────────────────────────────
-// composition 中は WebKit がネイティブに DOM を書き換える（rawContent は真実のまま放置）。
+// ── IME ───────────────────────────────────────────
+// composition 中は WebKit がネイティブに DOM を書き換える（rawContent は真実のまま放置。
+// beforeinput 側は composing フラグで全面的に不介入、keydown フォールバックも同様）。
 // compositionend で、変換開始時点に退避した位置（compositionBounds）へ確定文字列を splice し、
 // 再描画でネイティブの書き換えを丸ごと作り直す（巻き戻し兼用）。取消（e.data が空）は
-// 再描画のみ。確定 Enter の二重処理ガードは未実装。
+// 再描画のみで、退避位置へキャレットを戻す。
 
 /** IME 変換開始時点のキャレット/選択位置を bounds（{start,end}）として解決する。
- * 解決できなければ null（compositionend は再描画のみになる）。 */
+ * 解決できなければ null（compositionend は現在の選択からの復元にフォールバックする）。 */
 function resolveCompositionBounds() {
   const range = currentSelectionRange();
   if (!range) return null;
@@ -1169,21 +1380,62 @@ function resolveCompositionBounds() {
   }
 }
 
+/** compositionend 直後の 1 マイクロタスクぶんだけ suppressPostCompositionInput を立てる。
+ * WebKit は IME を Enter で確定すると、compositionend の直後・同一イベントループ内に確定内容と
+ * 同じ挿入を beforeinput（insertText または insertParagraph）としてもう一度発火することがある
+ * （composing は既に false のため、素通しすると二重挿入・意図しない改行になる）。マイクロタスクの
+ * 区切りは実際のユーザー入力（別イベントループで届く）より確実に早く解除されるため、後続のタイピングを
+ * 巻き込むことはない。 */
+function markPostCompositionSuppression() {
+  suppressPostCompositionInput = true;
+  queueMicrotask(() => { suppressPostCompositionInput = false; });
+}
+
+/** IME 確定時の splice。commitSelectionReplacement 相当だが、window.getSelection().removeAllRanges()
+ * を明示的には呼ばない。compositionend 直後はフォーカス済みの contenteditable で composition の
+ * 装飾が畳まれている最中で、ここで選択を空にすると編集領域先頭へキャレットが合成された状態が
+ * 一瞬でき、直後の renderAll・placeCaretAtRaw までの間にそれが可視化されるとキャレットが行頭へ
+ * 飛んで見える。選択は renderAll の innerHTML 差し替えでどのみち無効化されるため、明示的な
+ * removeAllRanges は不要。 */
+function commitCompositionReplacement(bounds, insertedText) {
+  clearImageSelection();
+  spliceSelectionRange(bounds, insertedText);
+}
+
 mdView.addEventListener('compositionstart', () => {
   composing = true;
+  suppressPostCompositionInput = false;
   compositionBounds = resolveCompositionBounds();
 });
 
 mdView.addEventListener('compositionend', (e) => {
   composing = false;
+  markPostCompositionSuppression();
   const bounds = compositionBounds;
   compositionBounds = null;
-  if (!bounds || !e.data) { renderAll(); return; }
+
+  if (!bounds) {
+    // 退避に失敗している（想定外）。現在の選択から可能な範囲でキャレット位置を読み取ってから
+    // 巻き戻す
+    const range = currentSelectionRange();
+    const point = range ? resolveSelectionPoint(range.startContainer, range.startOffset, false) : null;
+    renderAll();
+    if (point) placeCaretAtRaw(point.line, point.col);
+    return;
+  }
+  if (!e.data) {
+    // 変換取消。rawContent は変わらないので、WebKit が composition 中に書き込んだ DOM を
+    // 巻き戻し、キャレットを退避位置へ戻す
+    renderAll();
+    placeCaretAtRaw(bounds.start.line, bounds.start.col);
+    return;
+  }
   try {
-    commitSelectionReplacement(bounds, e.data);
+    commitCompositionReplacement(bounds, e.data);
   } catch (err) {
     console.error('composition commit failed:', err);
     renderAll();
+    placeCaretAtRaw(bounds.start.line, bounds.start.col);
   }
 });
 
@@ -2061,6 +2313,107 @@ function selectionStillCoversSelectedImage() {
   if (!img) return false;
   return sel.getRangeAt(0).intersectsNode(img);
 }
+
+/** 行 lineIdx が「画像のみの行」として選択状態になる対象かどうか（placeCaretAtRaw の
+ * isStandalone 判定と同じ。フェンス内は画像として描画されないため対象外）。 */
+function isStandaloneImageLine(lineIdx) {
+  const block = findBlock(lineIdx);
+  const isStandalone = !block || block.start === block.end;
+  return isStandalone && isImageOnlyLine(getLines()[lineIdx] ?? '');
+}
+
+/** collapsed range のキャレット位置が、要素 el の折り返し込みの視覚行として先頭側
+ * （edge === 'top'）/末尾側（edge === 'bottom'）に居るか。折り返しの無い行は常に true。
+ * el 自身の getBoundingClientRect() は min-height 等の余白を含み実際のテキスト行と高さが
+ * 一致しないため、el のテキスト全体を覆う Range の getClientRects()（折り返し 1 行につき 1
+ * 矩形を返す）を基準にする。 */
+function isCaretAtVisualEdge(range, el, edge) {
+  const blockRange = document.createRange();
+  blockRange.selectNodeContents(el);
+  const lineRects = blockRange.getClientRects();
+  if (lineRects.length <= 1) return true; // 折り返し無し（空行含む）
+  const target = edge === 'top' ? lineRects[0] : lineRects[lineRects.length - 1];
+  const caretRects = range.getClientRects();
+  const caretRect = (edge === 'top' ? caretRects[0] : caretRects[caretRects.length - 1])
+    || range.getBoundingClientRect();
+  const mid = (caretRect.top + caretRect.bottom) / 2;
+  return mid >= target.top && mid <= target.bottom;
+}
+
+// テキスト行から矢印キーで画像のみの行へ「入る」変換。img は contenteditable="false" で
+// キャレットの着地点を持たないため、ネイティブな矢印移動は画像のみの行を素通りする
+// （↓ で 1 行下ではなくその次のテキスト行まで飛ぶ等）。隣が画像のみの行のときだけ
+// 選択状態（selectImage）へ変換して着地させる。選択中の画像から抜ける経路は既存の
+// 「画像選択中」ハンドラ（このすぐ下）が対称に扱う。同じ keydown が両方の document
+// リスナーへ届くため、変換したときは stopImmediatePropagation でもう片方の二重発火を防ぐ。
+document.addEventListener('keydown', (e) => {
+  if (composing || selectedImage) return;
+  if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!mdView.contains(range.commonAncestorContainer)) return;
+  const point = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  if (!point) return;
+  const lines = getLines();
+
+  let target = null;
+  if (e.key === 'ArrowDown') {
+    // 折り返しがある行では、最後の視覚行に居るときだけ次の論理行への変換を試す
+    // （途中の視覚行での ↓ はネイティブな折り返し内移動に任せる）
+    const block = findBlock(point.line);
+    if (block && isCaretAtVisualEdge(range, block.el, 'bottom')) target = point.line + 1;
+  } else if (e.key === 'ArrowUp') {
+    const block = findBlock(point.line);
+    if (block && isCaretAtVisualEdge(range, block.el, 'top')) target = point.line - 1;
+  } else if (e.key === 'ArrowRight' && point.col >= (lines[point.line]?.length ?? 0)) target = point.line + 1;
+  else if (e.key === 'ArrowLeft' && point.col <= lineStartColumn(point.line)) target = point.line - 1;
+  if (target == null || target < 0 || target >= lines.length || !isStandaloneImageLine(target)) return;
+
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  selectImage(target, 0, firstImageRelSrc(lines[target]));
+});
+
+// チェックボックス行の内容先頭（マーカー直後）をまたぐ矢印移動。<input type="checkbox"> は
+// contenteditable="false" の空要素で、ネイティブな矢印移動はその前後の要素境界（DIV の子要素
+// インデックス）を無音（キャレットが見た目上動かない）のまま 2 回分経由してから隣の行へ渡る
+// （□ にキャレットが乗ったように見える・移動が数回分「効かない」ように感じる）。素通りさせる。
+// 上下矢印・折り返し内の左右移動には影響しない（境界ちょうどのときだけ発火する）。
+// 「ナビには介入しない」方針の例外だが、同じ形（resolveSelectionPoint → lineStartColumn の
+// 境界判定＋stopImmediatePropagation）を画像のみの行への矢印移動（このすぐ上のリスナー）が
+// 既に持っており、contenteditable="false" なアトミック要素をまたぐ移動という同じ種類の例外として扱う。
+document.addEventListener('keydown', (e) => {
+  if (composing || selectedImage) return;
+  if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!mdView.contains(range.commonAncestorContainer)) return;
+  const point = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  if (!point) return;
+  const lines = getLines();
+
+  if (e.key === 'ArrowLeft') {
+    // チェックボックス行の内容先頭から前の行へ抜ける（現在行のチェックボックスをまたぐ）
+    if (point.line <= 0) return;
+    if (point.col !== lineStartColumn(point.line)) return;
+    if (!isCheckboxLine(lines[point.line] ?? '')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    placeCaretAtRaw(point.line - 1, null);
+    return;
+  }
+  // チェックボックス行へ次の行として入る（次行のチェックボックスをまたぐ）
+  if (point.col < (lines[point.line]?.length ?? 0)) return;
+  const target = point.line + 1;
+  if (target >= lines.length || !isCheckboxLine(lines[target] ?? '')) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  placeCaretAtRaw(target, lineStartColumn(target));
+});
 
 document.addEventListener('keydown', (e) => {
   if (!selectedImage) return;
