@@ -672,7 +672,7 @@ resizeHandle.addEventListener('mousedown', (e) => {
 
 // ── Paste 変換ユーティリティ ──────────────────────
 // リッチテキスト → Markdown 変換そのものは beforeinput の編集経路と独立した純粋関数群。
-// caret へのペースト合流（insertFromPaste）は未実装（下記 paste リスナーは fail-closed）。
+// caret への合流は toMarkdown・下記の document 'paste' リスナーが担う。htmlToMarkdown 単体は
 // window.htmlToMarkdown として引き続きテストから直接呼べる。
 const EMPTY_IMAGE_MAP = new Map();
 
@@ -789,6 +789,22 @@ function htmlToMarkdown(html) {
 }
 
 /**
+ * リッチテキストなら markdown に変換し、そうでなければプレーンテキストを返す。
+ * 変換結果が空／空白のみ（blob: / file: 画像だけで alt も無い等）になった場合は、
+ * 挿入が完全に消えてしまわないよう text にフォールバックする（同期・非同期どちらの経路でも）。
+ */
+function toMarkdown(text, html) {
+  if (!html || !/<(?:a|strong|b|em|i|del|s|code|pre|h[1-3]|blockquote|[uo]l|li|hr|img)\b/i.test(html)) {
+    return text;
+  }
+  const converted = htmlToMarkdown(html);
+  if (converted instanceof Promise) {
+    return converted.then(md => (md.trim() ? md : text));
+  }
+  return converted.trim() ? converted : text;
+}
+
+/**
  * <pre>(内側に <code> があればその中身、無ければ <pre> 自身)のテキストをフェンス（```）で
  * 囲んで返す。renderMarkdown のフェンス記法は行内に他の要素が無い前提の単純な正規表現
  * （note-lines.js 参照）なので、内部の <span> 等の装飾タグは textContent で読み捨てて
@@ -871,20 +887,26 @@ function nodeToMd(node, imageMap, depth = 0) {
   }
 }
 
-/**
- * クリップボード画像・ドロップ画像を保存し、生成された相対パスを Markdown 画像記法として
- * fallbackLine の行末へ追記する。caret 位置への挿入（画像記法の直後で行を割る等）には未対応。
- */
-async function pasteImage(file, fallbackLine) {
-  let relPath;
+/** File を save_pasted_image で保存し、生成された相対パスを返す。失敗時は null
+ * （トースト表示済み）。ドロップ・caret へのペースト両方の画像挿入が共有する。 */
+async function savePastedImage(file) {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    relPath = await invoke('save_pasted_image', bytes);
+    return await invoke('save_pasted_image', bytes);
   } catch (err) {
     console.error('save_pasted_image failed:', err);
     showToast(I18N.t('toastSaveFailed'));
-    return;
+    return null;
   }
+}
+
+/**
+ * ドロップ画像を保存し、生成された相対パスを Markdown 画像記法として fallbackLine の行末へ
+ * 追記する（ドロップ先は座標であって caret ではないため、行末追記が唯一の妥当な挿入位置）。
+ */
+async function pasteImage(file, fallbackLine) {
+  const relPath = await savePastedImage(file);
+  if (!relPath) return;
   const markdown = `![](${relPath})`;
   const lines = getLines();
   const target = Math.min(Math.max(fallbackLine ?? lines.length - 1, 0), lines.length - 1);
@@ -921,14 +943,39 @@ document.addEventListener('drop', async (e) => {
   await pasteImageFiles(imageFiles, fallbackLine);
 });
 
-// テキストのドラッグ&ドロップによる直接挿入は未実装（fail-closed）。ネイティブに任せると
-// contenteditable の DOM だけが書き換わり rawContent との整合が崩れるため、mdView 上の
-// 非ファイルドロップは常に無視する
+/** clientX/Y から mdView 内の DOM 位置（node, offset）を解決する。document.caretRangeFromPoint は
+ * 非標準（Firefox は caretPositionFromPoint を使う）だが、テスト対象の chromium・webkit 両方で
+ * 動く。対応していない・その座標に文字位置が無ければ null。 */
+function domPointFromClientPoint(x, y) {
+  if (typeof document.caretRangeFromPoint !== 'function') return null;
+  const range = document.caretRangeFromPoint(x, y);
+  if (!range) return null;
+  return { node: range.startContainer, offset: range.startOffset };
+}
+
+/** ドロップの挿入対象 bounds（collapsed）。座標（e.clientX/Y）を raw 位置へ解決できればその点、
+ * 解決できなければ末尾にフォールバックする。 */
+function dropInsertionBounds(e) {
+  const domPoint = domPointFromClientPoint(e.clientX, e.clientY);
+  const point = domPoint ? resolveSelectionPoint(domPoint.node, domPoint.offset, false) : null;
+  if (point) return { start: point, end: { ...point } };
+  const lines = getLines();
+  const end = { line: lines.length - 1, col: lines[lines.length - 1].length };
+  return { start: end, end: { ...end } };
+}
+
+// テキストのドラッグ&ドロップはコピー意味論（ドラッグ元のテキストは削除しない）で合流する。
+// ドロップ座標（clientX/Y）を caretRangeFromPoint 経由で raw 位置へ解決し、その位置へ挿入する
+// （解決できなければ末尾へ追記）。ネイティブに任せると contenteditable の DOM だけが書き換わり
+// rawContent との整合が崩れるため、常にブラウザ既定は止める
 document.addEventListener('drop', (e) => {
   if (isFileDrag(e)) return;
   if (!mdView.contains(e.target)) return;
   e.preventDefault();
   e.stopPropagation();
+  const text = e.dataTransfer.getData('text/plain');
+  if (!text) return;
+  commitSelectionReplacement(dropInsertionBounds(e), text);
 }, true);
 
 // ── Auto-Save Content ─────────────────────────────
@@ -1089,6 +1136,43 @@ mdView.addEventListener('keydown', (e) => {
   onDeleteContent('backward');
 });
 
+/** キャレット行、または選択が触れているすべての行の先頭に 2 スペースを足す/削る。リスト
+ * マーカー・フェンス内容行を区別せず、行頭に対して機械的に作用する（リストマーカーは
+ * インデントに押し出されるだけで記法自体は変えない）。bounds が複数行にまたがるときは、
+ * indent 後に同じ行範囲を選択し直す。これをしないと applyLines が選択を collapsed キャレット
+ * （先頭行）へ潰してしまい、Tab を連打しても先頭行しか字下げされ続けない。 */
+function indentLines(bounds, outdent) {
+  const lines = getLines();
+  const { start, end } = bounds;
+  const deltas = [];
+  for (let i = start.line; i <= end.line; i++) {
+    if (outdent) {
+      const removed = Math.min(2, lines[i].match(/^ */)[0].length);
+      lines[i] = lines[i].slice(removed);
+      deltas[i] = -removed;
+    } else {
+      lines[i] = '  ' + lines[i];
+      deltas[i] = 2;
+    }
+  }
+  const caretCol = Math.max(0, start.col + deltas[start.line]);
+  applyLines(lines, start.line, caretCol);
+  if (end.line > start.line) {
+    selectRawRange(start.line, caretCol, end.line, Math.max(0, end.col + deltas[end.line]));
+  }
+}
+
+mdView.addEventListener('keydown', (e) => {
+  if (composing || suppressPostCompositionInput) return;
+  if (e.key !== 'Tab' || e.metaKey || e.ctrlKey || e.altKey) return;
+  const bounds = resolveEditableBounds();
+  // bounds を解決できない（キャレットが無い・画像選択中）ときは既定動作に任せ、
+  // Tab でフォーカスをボタン列へ抜けられる経路を残す
+  if (!bounds) return;
+  e.preventDefault();
+  indentLines(bounds, e.shiftKey);
+});
+
 /** 現在の選択から、挿入・置換の対象にする raw bounds を求める（判定フェーズ）。collapsed なら
  * collapsedBounds、非 collapsed なら resolveSelectionBounds。画像選択（selectImageRange が張った
  * Range）は img 自体が可視幅 0 のため、非 collapsed な選択でも raw bounds が同じ点に潰れて退化する。
@@ -1104,10 +1188,27 @@ function resolveEditableBounds() {
   return bounds;
 }
 
+/** 打ち終えたチェックボックス記法（`- []`・`-[x]` 等）を `- [ ] `/`- [x] ` へ補完する。
+ * line の行頭〜col が丸ごと CHECKBOX_RE に一致するときだけ発火する（マーカーの手前に
+ * 他の文字があれば対象外）。フェンス内容行は splitLineAt 等と同じ findBlock 由来の inFence
+ * 判定で対象外にする（コードとして書いた `- []` を書き換えない）。insertText の splice 直後に
+ * 呼ぶことで、debounce 前の追加 splice として同じ undo 単位にまとまる。 */
+function maybeAutocompleteCheckbox(line, col) {
+  const block = findBlock(line);
+  if (block && block.start !== block.end) return;
+  const lines = getLines();
+  const m = lines[line].slice(0, col).match(CHECKBOX_RE);
+  if (!m) return;
+  const replacement = m[2].toLowerCase() === 'x' ? `${m[1]} [x] ` : `${m[1]} [ ] `;
+  lines[line] = replacement + lines[line].slice(col);
+  applyLines(lines, line, replacement.length);
+}
+
 function onInsertText(data) {
   const bounds = resolveEditableBounds();
   if (!bounds) return;
   commitSelectionReplacement(bounds, data);
+  if (data === ']') maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length);
 }
 
 /** collapsed キャレット位置の bounds（start === end）。resolveSelectionBounds のマーカー境界
@@ -1759,6 +1860,21 @@ function domPointForRawPosition(line, col) {
   return domPointForContentVisible(el, contentVisibleColumn(line, col));
 }
 
+/** raw 位置 (startLine, startCol) 〜 (endLine, endCol) を、描画済み DOM 上の選択として張り直す
+ * （domPointForRawPosition の Range 版）。indentLines が複数行選択への Tab 連打で選択を保ち続ける
+ * のに使う。どちらかの端が解決できなければ何もしない。 */
+function selectRawRange(startLine, startCol, endLine, endCol) {
+  const start = domPointForRawPosition(startLine, startCol);
+  const end = domPointForRawPosition(endLine, endCol);
+  if (!start || !end) return;
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 // ── インライン生表示（reveal） ─────────────────────────
 // キャレット（collapsed）が装飾（太字/斜字/取り消し線/インラインコード/リンク）の中・境界にある
 // あいだ、その要素だけ生マーカー付きで表示する（`**bold**` がそのまま見える）。離れたら隠す。
@@ -2356,9 +2472,81 @@ document.addEventListener('cut', (e) => {
   commitSelectionDeletion(bounds);
 });
 
-// ペーストの caret への合流（insertFromPaste）は未実装。ネイティブ paste に任せると
-// contenteditable の DOM だけが書き換わり rawContent との整合が崩れるため、常に無視する（fail-closed）
-document.addEventListener('paste', (e) => { e.preventDefault(); }, true);
+/** 非同期解決（クリップボード画像の保存・data: 画像を含む html の変換待ち）を挟むペーストの
+ * 結果を反映する。待機の間に別の編集が入って rawContent が snapshot から変わっていた場合、
+ * bounds の raw 位置はもう対応しないため、内容を失わないよう末尾へ追記する。lines 配列へ足して
+ * applyLines へ流すことで、末尾行が閉じフェンス行だった場合の ensureTrailingLineAfterClosedFence
+ * （そのまま連結すると閉じフェンスの記法が壊れる）と、reveal 対象の再計算が働く。 */
+function applyResolvedPaste(bounds, snapshot, text) {
+  if (rawContent === snapshot) {
+    commitSelectionReplacement(bounds, text);
+    return;
+  }
+  const lines = getLines();
+  ensureTrailingLineAfterClosedFence(lines);
+  const lastLine = lines.length - 1;
+  const parts = text.split('\n');
+  parts[0] = lines[lastLine] + parts[0];
+  lines.splice(lastLine, 1, ...parts);
+  applyLines(lines, lastLine + parts.length - 1, parts[parts.length - 1].length);
+}
+
+/** クリップボード画像ファイルを保存し、bounds（ペースト時点の caret/選択）へ画像記法 + 改行を
+ * 挿入する。画像記法の直後で行を割ることで、貼った直後から生の記法ではなく画像として描画される。 */
+async function pasteImageAtCaret(file, bounds) {
+  const snapshot = rawContent;
+  const relPath = await savePastedImage(file);
+  if (!relPath) return;
+  applyResolvedPaste(bounds, snapshot, `![](${relPath})\n`);
+}
+
+/**
+ * paste イベントの内容を bounds（resolveEditableBounds の結果）へ合流させる。優先順位:
+ * 1) 単一行選択 + プレーンテキストが裸 URL → `[選択テキスト](URL)` のリンク化
+ *    （行またぎ選択は改行入りラベルで記法が壊れるため対象外、素の URL 挿入に落ちる。
+ *    ラベルは sanitizeAltText で `]` を除去し、URL に `)` を含む場合はリンクの終端と
+ *    衝突するためリンク化せず素の URL 挿入にフォールバックする）
+ * 2) プレーンテキストが空でクリップボードに画像ファイルがある → save_pasted_image 経由で画像記法
+ * 3) それ以外 → toMarkdown（リッチテキストなら Markdown 変換、そうでなければプレーンテキストのまま）
+ */
+function handlePaste(bounds, clipboardData) {
+  const text = clipboardData.getData('text/plain');
+  const label = bounds.start.line === bounds.end.line
+    ? getLines()[bounds.start.line].slice(bounds.start.col, bounds.end.col)
+    : '';
+  const url = text.trim();
+  if (label && /^https?:\/\/\S+$/.test(url) && !url.includes(')')) {
+    commitSelectionReplacement(bounds, `[${sanitizeAltText(label)}](${url})`);
+    return;
+  }
+  if (!text) {
+    const imageItem = Array.from(clipboardData.items ?? [])
+      .find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (imageItem) {
+      pasteImageAtCaret(imageItem.getAsFile(), bounds);
+      return;
+    }
+  }
+  const converted = toMarkdown(text, clipboardData.getData('text/html'));
+  if (converted instanceof Promise) {
+    const snapshot = rawContent;
+    converted
+      .then(md => applyResolvedPaste(bounds, snapshot, md))
+      .catch(err => {
+        console.error('paste conversion failed:', err);
+        renderAll();
+      });
+    return;
+  }
+  commitSelectionReplacement(bounds, converted);
+}
+
+document.addEventListener('paste', (e) => {
+  const bounds = resolveEditableBounds();
+  if (!bounds) { e.preventDefault(); return; }
+  e.preventDefault();
+  handlePaste(bounds, e.clipboardData);
+}, true);
 
 // ── Image Selection: keyboard ──────────────────────
 // 画像選択中は独立した contenteditable が無い（mdView 自体が contenteditable だが、選択中の

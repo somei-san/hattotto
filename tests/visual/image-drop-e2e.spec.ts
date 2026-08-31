@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, injectNoteMock } from "./fixtures";
+import { test, expect, enterEdit, getContent, injectNoteMock, selectMarkdownRange } from "./fixtures";
 
 test.describe("ドラッグ&ドロップでの画像追加", () => {
   test("画像ドロップ → save_pasted_image 経由でMarkdown画像記法が対象行の末尾へ挿入される", async ({ browser }) => {
@@ -168,22 +168,72 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     await ctx.close();
   });
 
-  // テキストのドラッグ&ドロップによる直接挿入（非ファイルドロップ）は未実装で、
-  // 常に preventDefault される（fail-closed）ため fixme にしている
-  test.fixme("生エディタ内のテキストドラッグ移動は退行しない", async ({ openNote }) => {
-    const page = await openNote({ content: "" });
+  test("テキストのドラッグ&ドロップは caret ではなくドロップ座標が指す位置へ挿入される", async ({ openNote }) => {
+    const page = await openNote({ content: "line0\nline1" });
+    await enterEdit(page, 0); // キャレットは line0 に残したままにする
 
-    await enterEdit(page);
+    const point = await page.evaluate(() => {
+      const el = document.querySelector('[data-line="1"]')!;
+      const r = el.getBoundingClientRect();
+      return { x: r.right - 1, y: r.top + r.height / 2 };
+    });
+
+    await page.evaluate(([x, y]) => {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "DROPPED");
+      const target = document.elementFromPoint(x as number, y as number)!;
+      const dropEvent = new DragEvent("drop", {
+        dataTransfer: dt, bubbles: true, cancelable: true, clientX: x as number, clientY: y as number,
+      });
+      target.dispatchEvent(dropEvent);
+    }, [point.x, point.y]);
+
+    // caret（line0）ではなく座標が指す line1 の末尾へ挿入される
+    expect(await getContent(page)).toBe("line0\nline1DROPPED");
+  });
+
+  test("座標が解決できないドロップ → 末尾へ追記される", async ({ openNote }) => {
+    const page = await openNote({ content: "line0\nline1" });
+    await enterEdit(page, 0);
 
     await page.evaluate(() => {
       const view = document.getElementById("markdown-view")!;
       const dt = new DataTransfer();
-      dt.setData("text/plain", "dragged text");
+      dt.setData("text/plain", "DROPPED");
+      // caretRangeFromPoint を潰し、座標解決が失敗した体でドロップする
+      const original = document.caretRangeFromPoint;
+      (document as any).caretRangeFromPoint = () => null;
       const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
       view.dispatchEvent(dropEvent);
+      document.caretRangeFromPoint = original;
     });
 
-    const content = await getContent(page);
-    expect(content).toBe("dragged text");
+    expect(await getContent(page)).toBe("line0\nline1DROPPED");
+  });
+
+  test("付箋内の選択をドラッグしてもコピー意味論になる（選択の自己置換 no-op にならない）", async ({ openNote }) => {
+    const page = await openNote({ content: "hello world" });
+    // "hello" を選択する（ドラッグ元の選択を模す）
+    await selectMarkdownRange(page, 0, 0, 0, "hello".length);
+
+    const point = await page.evaluate(() => {
+      const el = document.querySelector('[data-line="0"]')!;
+      const r = el.getBoundingClientRect();
+      return { x: r.right - 1, y: r.top + r.height / 2 };
+    });
+
+    await page.evaluate(([x, y]) => {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "hello");
+      const target = document.elementFromPoint(x as number, y as number)!;
+      const dropEvent = new DragEvent("drop", {
+        dataTransfer: dt, bubbles: true, cancelable: true, clientX: x as number, clientY: y as number,
+      });
+      target.dispatchEvent(dropEvent);
+    }, [point.x, point.y]);
+
+    // ドラッグ元の "hello" は残ったまま、ドロップ地点（行末）に "hello" が追加される
+    // （選択をそのまま置き換えるだけの no-op にはならない）
+    expect(await getContent(page)).toBe("hello worldhello");
   });
 });

@@ -58,10 +58,8 @@ test.describe("単一行選択 + タイピングで全置換される", () => {
   });
 });
 
-// caret/選択へのペースト合流（beforeinput の insertFromPaste）は未実装で、document の
-// paste リスナーは常に preventDefault する（fail-closed）ため、以下は全て test.fixme にしている。
 test.describe("行またぎ選択 + ペーストで置換される", () => {
-  test.fixme("プレーンテキストペーストで置換される", async ({ openNote }) => {
+  test("プレーンテキストペーストで置換される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef\nghi" });
 
     await selectMarkdownRange(page, 0, 1, 1, 1); // "a|bc" 〜 "d|ef"（可視オフセット 1）を選択
@@ -70,7 +68,7 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     expect(await getContent(page)).toBe("aXYef\nghi");
   });
 
-  test.fixme("複数行テキストのペーストで置換され、行が展開される", async ({ openNote }) => {
+  test("複数行テキストのペーストで置換され、行が展開される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef\nghi" });
 
     await selectMarkdownRange(page, 0, 1, 1, 1);
@@ -79,7 +77,7 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     expect(await getContent(page)).toBe("aX\nYef\nghi");
   });
 
-  test.fixme("リッチテキスト（HTML 含む）ペーストは nodeToMd 変換を経由して置換される", async ({ openNote }) => {
+  test("リッチテキスト（HTML 含む）ペーストは nodeToMd 変換を経由して置換される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length); // 全体を選択
@@ -88,7 +86,7 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     expect(await getContent(page)).toBe("**bold text**");
   });
 
-  test.fixme("クリップボード画像ペーストは save_pasted_image の非同期解決を待ってから置換される", async ({ openNote }) => {
+  test("クリップボード画像ペーストは save_pasted_image の非同期解決を待ってから置換される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length); // 全体を選択
@@ -137,7 +135,7 @@ test.describe("Shift・⌥ 付き文字入力でも置換される", () => {
 });
 
 test.describe("URL ペーストのリンク化（描画側選択）", () => {
-  test.fixme("選択テキスト + URL ペーストで [選択テキスト](URL) に置換される", async ({ openNote }) => {
+  test("選択テキスト + URL ペーストで [選択テキスト](URL) に置換される", async ({ openNote }) => {
     const page = await openNote({ content: "hello world" });
 
     await selectMarkdownRange(page, 0, 0, 0, "hello".length);
@@ -146,7 +144,7 @@ test.describe("URL ペーストのリンク化（描画側選択）", () => {
     expect(await getContent(page)).toBe("[hello](https://example.com) world");
   });
 
-  test.fixme("行またぎ選択への URL ペーストはリンク化せず素の URL 挿入に落ちる（改行入りラベルで壊れることを防ぐ）", async ({ openNote }) => {
+  test("行またぎ選択への URL ペーストはリンク化せず素の URL 挿入に落ちる（改行入りラベルで壊れることを防ぐ）", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length); // 全体を選択（行またぎ）
@@ -154,10 +152,28 @@ test.describe("URL ペーストのリンク化（描画側選択）", () => {
 
     expect(await getContent(page)).toBe("https://example.com");
   });
+
+  test("URL に `)` を含む場合はリンク化せず素の URL 挿入に落ちる（リンクの終端と衝突するため）", async ({ openNote }) => {
+    const page = await openNote({ content: "hello world" });
+
+    await selectMarkdownRange(page, 0, 0, 0, "hello".length);
+    await dispatchPaste(page, "https://example.com/foo(bar)");
+
+    expect(await getContent(page)).toBe("https://example.com/foo(bar) world");
+  });
+
+  test("選択テキストに `]` を含む場合はラベルから除去したうえでリンク化する", async ({ openNote }) => {
+    const page = await openNote({ content: "he]lo world" });
+
+    await selectMarkdownRange(page, 0, 0, 0, "he]lo".length);
+    await dispatchPaste(page, "https://example.com");
+
+    expect(await getContent(page)).toBe("[helo](https://example.com) world");
+  });
 });
 
 test.describe("画像行フォールバック（削除後キャレット行が画像のみになる）", () => {
-  test.fixme("プレーンテキストが零幅 bounds で再 splice され、削除だけで捨てられない", async ({ openNote }) => {
+  test("プレーンテキストが零幅 bounds で再 splice され、削除だけで捨てられない", async ({ openNote }) => {
     const page = await openNote({ content: `abc\n${IMAGE_LINE}\ndef` });
 
     await selectMarkdownRange(page, 0, 0, 1, 0); // "abc\n" だけを画像行の手前まで選択
@@ -168,7 +184,7 @@ test.describe("画像行フォールバック（削除後キャレット行が�
 });
 
 test.describe("ペーストの undo 手数", () => {
-  test.fixme("プレーンテキストペーストは undo 1 手で選択+ペースト前に戻る", async ({ openNote }) => {
+  test("プレーンテキストペーストは undo 1 手で選択+ペースト前に戻る", async ({ openNote }) => {
     const content = "abc\ndef\nghi";
     const page = await openNote({ content });
 
@@ -184,7 +200,7 @@ test.describe("ペーストの undo 手数", () => {
 
   // save_pasted_image の解決に 400ms かける。削除の scheduleSave（300ms デバウンス）が
   // この待ち時間の途中で先に切れると「削除だけ」を history へ積んでしまい、undo が 2 手に割れる
-  test.fixme("クリップボード画像ペースト（save_pasted_image の解決に 400ms かかる）も undo 1 手で選択+ペースト前に戻る", async ({ browser }) => {
+  test("クリップボード画像ペースト（save_pasted_image の解決に 400ms かかる）も undo 1 手で選択+ペースト前に戻る", async ({ browser }) => {
     const content = "abc\ndef";
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
