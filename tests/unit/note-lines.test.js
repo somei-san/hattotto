@@ -1,10 +1,14 @@
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
 
-// visibleOffsetToRawOffset は inlineSegments をブラウザのグローバルスコープ経由で参照する
-// （note.html の読み込み順で markdown.js → note-lines.js の順に読まれるのを前提にしている）。
-// markdown-codeblock.test.js の escapeHtml と同じ作法で、require 前に global へ生やす
-global.inlineSegments = require("../../src/markdown.js").inlineSegments;
+// visibleOffsetToRawOffset・revealTargetAt は inlineSegments/isRevealableKind をブラウザの
+// グローバルスコープ経由で参照する（note.html の読み込み順で markdown.js → note-lines.js の
+// 順に読まれるのを前提にしている）。markdown-codeblock.test.js の escapeHtml と同じ作法で、
+// require 前に global へ生やす
+global.escapeHtml = require("../../src/utils.js").escapeHtml;
+const markdownModule = require("../../src/markdown.js");
+global.inlineSegments = markdownModule.inlineSegments;
+global.isRevealableKind = markdownModule.isRevealableKind;
 
 const {
   blockOffset,
@@ -16,6 +20,7 @@ const {
   isCheckboxLine,
   visibleOffsetToRawOffset,
   visibleOffsetFromRawOffset,
+  revealTargetAt,
 } = require("../../src/note-lines.js");
 
 describe("getAutoPrefix", () => {
@@ -572,6 +577,78 @@ describe("visibleOffsetFromRawOffset", () => {
       const visible = visibleOffsetFromRawOffset(raw, i);
       assert.equal(visibleOffsetToRawOffset(raw, visible, false), i);
     }
+  });
+});
+
+// ── インライン生表示（reveal） ──────────────────────────────
+// reveal 引数を渡すと、対象セグメントは可視 = raw の 1:1（マーカー込みの生テキストがそのまま
+// 見える）になる。visibleOffsetToRawOffset/visibleOffsetFromRawOffset は inlineSegments(raw, reveal)
+// を経由するだけなので、charMap が識別写像になっていることを確認すれば十分。
+describe("visibleOffsetToRawOffset / visibleOffsetFromRawOffset — reveal 指定あり", () => {
+  test("reveal 範囲内は可視オフセットと raw オフセットが 1:1（マーカー文字も含めて）", () => {
+    const raw = "pre **bold** post";
+    const reveal = { start: 4, end: 12 }; // "**bold**" の全体（マーカー込み）
+    // reveal が無いと可視 5（"pre b" の直後）は raw 6（"bold" の "b" の直後）に丸まるが、
+    // reveal 中は可視 5 がそのまま raw 5（"**bol" の直後）になる
+    assert.equal(visibleOffsetToRawOffset(raw, 5, false, reveal), 5);
+    assert.equal(visibleOffsetFromRawOffset(raw, 5, reveal), 5);
+    for (let i = 0; i <= raw.length; i++) {
+      assert.equal(visibleOffsetFromRawOffset(raw, i, reveal), i);
+    }
+  });
+
+  test("reveal 範囲がどのセグメントにも一致しなければ通常どおり丸められる（編集でマーカーが崩れた後の想定）", () => {
+    const raw = "pre bold post"; // 装飾が崩れてただのプレーンテキストになった後
+    const staleReveal = { start: 4, end: 12 }; // もう存在しない旧セグメントの範囲
+    assert.equal(visibleOffsetToRawOffset(raw, 5, false, staleReveal), 5); // プレーンなので 1:1 のまま変化なし
+  });
+});
+
+describe("revealTargetAt", () => {
+  test("太字の可視内部にキャレットがあれば装飾全体（マーカー込み）の raw 範囲を返す", () => {
+    const raw = "pre **bold** post";
+    assert.deepEqual(revealTargetAt(raw, 8), { start: 4, end: 12 }); // "**bo|ld**"
+  });
+
+  test("装飾の可視先頭（srcStart）は reveal 対象に含まれる", () => {
+    assert.deepEqual(revealTargetAt("**bold**", 0), { start: 0, end: 8 });
+  });
+
+  test("装飾の可視末尾（srcEnd）は reveal 対象に含まれる", () => {
+    assert.deepEqual(revealTargetAt("**bold**", 8), { start: 0, end: 8 });
+  });
+
+  test("装飾の外（前後のプレーン部分）は対象外", () => {
+    const raw = "pre **bold** post";
+    assert.equal(revealTargetAt(raw, 2), null); // "pr|e **bold**"
+    assert.equal(revealTargetAt(raw, 15), null); // "**bold** po|st"
+  });
+
+  test("プレーンテキストのみの行は常に null", () => {
+    assert.equal(revealTargetAt("hello world", 5), null);
+  });
+
+  test("イタリック・取り消し線・インラインコード・リンクも対象になる", () => {
+    assert.deepEqual(revealTargetAt("*italic*", 4), { start: 0, end: 8 });
+    assert.deepEqual(revealTargetAt("~~del~~", 4), { start: 0, end: 7 });
+    assert.deepEqual(revealTargetAt("`code`", 3), { start: 0, end: 6 });
+    const link = "[label](https://example.com)";
+    assert.deepEqual(revealTargetAt(link, 3), { start: 0, end: link.length });
+  });
+
+  test("画像・裸URLは対象外（マーカーを隠す意味が無い）", () => {
+    assert.equal(revealTargetAt("![alt](images/a.png)", 5), null);
+    assert.equal(revealTargetAt("see https://example.com here", 10), null);
+  });
+
+  test("2 つの装飾が隣接する境界では手前（左）のセグメントを優先する", () => {
+    const raw = "**a***b*"; // "**a**" [0,5) の直後に "*b*" [5,8) が続く
+    assert.deepEqual(revealTargetAt(raw, 5), { start: 0, end: 5 });
+  });
+
+  test("ネストした装飾（charMap が無いセグメント）も外側の raw 範囲全体が対象になる", () => {
+    const raw = "**bold `code` here**";
+    assert.deepEqual(revealTargetAt(raw, 10), { start: 0, end: raw.length });
   });
 });
 

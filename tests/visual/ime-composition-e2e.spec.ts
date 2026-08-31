@@ -1,4 +1,4 @@
-import { test, expect, placeCaret, getContent, selectMarkdownRange } from "./fixtures";
+import { test, expect, placeCaret, getContent, selectMarkdownRange, waitForReveal } from "./fixtures";
 
 // IME は compositionstart でキャレット/選択位置を退避し、compositionend で e.data を
 // その位置へ splice して再描画する（WebKit がネイティブに書き込んだ DOM は巻き戻し扱いで
@@ -204,6 +204,24 @@ test.describe("composing 中は編集ハンドラが介入しない", () => {
     expect(await getContent(page)).toBe("# abc");
 
     await compositionEnd(page, ""); // 後片付け（取消として閉じる）
+  });
+
+  test("blur にも介入しない（reveal 中の変換で DOM をそのまま保つ）", async ({ openNote }) => {
+    const page = await openNote({ content: "**abc**" });
+    await placeCaret(page, 0, 4); // "**ab|c**"（装飾内部）で reveal を有効にしておく
+    await waitForReveal(page, { line: 0, start: 0, end: 7 });
+
+    await compositionStart(page);
+    await insertNativeCompositionText(page, "X"); // WebKit が composition 中に DOM へ直接書く動きを模擬
+
+    await page.evaluate(() => document.getElementById("markdown-view")!.dispatchEvent(new FocusEvent("blur")));
+
+    // blur が介入していれば、reveal を持つ blur ハンドラが revealState を null にして renderAll()
+    // し、rawContent（まだ "X" を含まない "**abc**"）から DOM を作り直して模擬した書き込みが消える
+    expect(await page.locator("#markdown-view").textContent()).toContain("X");
+
+    await compositionEnd(page, "X");
+    expect(await getContent(page)).toBe("**abXc**");
   });
 });
 

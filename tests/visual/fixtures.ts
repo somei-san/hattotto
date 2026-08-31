@@ -239,6 +239,35 @@ export function getContent(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { getRawContent(): string }).getRawContent());
 }
 
+type CaretPosition = { line: number; col: number } | null;
+
+/** 現在のキャレット（collapsed のときのみ、非 collapsed や範囲外なら null）の (line, col)。
+ * note.js 本体と同じ resolveSelectionPoint で求めるため、行に装飾（可視 ≠ raw）があっても
+ * 正しい raw 列が取れる（DOM のテキスト長から単純に逆算する自前実装は装飾のある行では壊れる）。 */
+export function getCaretPosition(page: Page): Promise<CaretPosition> {
+  return page.evaluate(() => (window as unknown as { getCaretRawPosition(): CaretPosition }).getCaretRawPosition());
+}
+
+type RevealState = { line: number; start: number; end: number } | null;
+
+/** インライン生表示（reveal）の状態を返す（{line, start, end} | null）。 */
+export function getRevealState(page: Page): Promise<RevealState> {
+  return page.evaluate(() => (window as unknown as { getRevealState(): RevealState }).getRevealState());
+}
+
+/** reveal の状態が expected になるまで待つ。selectionchange 駆動で非同期に確定するため、
+ * 見た目（.md-reveal の有無）をアサートする前にこれで確定を待つとちらつきに引っかからない。 */
+export async function waitForReveal(page: Page, expected: RevealState) {
+  await page.waitForFunction(
+    (exp) => {
+      const state = (window as unknown as { getRevealState(): RevealState }).getRevealState();
+      if (exp === null) return state === null;
+      return !!state && state.line === exp.line && state.start === exp.start && state.end === exp.end;
+    },
+    expected,
+  );
+}
+
 /** markdown-view の (行, 可視オフセット) の 2 点を DOM 選択（Range）として張る。note.js の
  * nodeAt と同じアルゴリズムをページ内で組み立てる（行末を超えるオフセットは行末にクランプ）。 */
 export function selectMarkdownRange(
@@ -274,6 +303,32 @@ export function selectMarkdownRange(
       sel.addRange(range);
     },
     [startLine, startOffset, endLine, endOffset] as const,
+  );
+}
+
+/** 現在の選択の焦点（focus）だけを (line, 可視オフセット) の位置まで Selection.extend() で
+ * 伸ばす。ドラッグ選択（mousedown で anchor を置き、mousemove/mouseup で伸びる）の「伸びる」側を
+ * 模す。事前に placeCaret 等で anchor（collapsed キャレット）を置いてから呼ぶ。 */
+export function extendSelectionTo(page: Page, line: number, visibleOffset: number) {
+  return page.evaluate(
+    ([l, o]) => {
+      const walker = document.createTreeWalker(
+        document.querySelector(`#markdown-view [data-line="${l}"]`)!,
+        NodeFilter.SHOW_TEXT,
+      );
+      let remaining = o as number;
+      let node: Text | null;
+      let last: Text | null = null;
+      while ((node = walker.nextNode() as Text | null)) {
+        last = node;
+        if (remaining <= node.textContent!.length) break;
+        remaining -= node.textContent!.length;
+      }
+      const target = node ?? last;
+      if (!target) return;
+      window.getSelection()!.extend(target, node ? remaining : target.textContent!.length);
+    },
+    [line, visibleOffset] as const,
   );
 }
 

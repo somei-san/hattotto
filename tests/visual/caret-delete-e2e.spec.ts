@@ -1,4 +1,4 @@
-import { test, expect, placeCaret, getContent, selectMarkdownRange } from "./fixtures";
+import { test, expect, placeCaret, getContent, selectMarkdownRange, waitForReveal } from "./fixtures";
 
 // collapsed キャレット（選択ではなく一点）での Backspace/Delete。deleteAdjacentVisibleChar
 // （adjacentVisibleCharRawRange 経由）が「direction 側に隣接する可視 1 書記素ぶんの raw 範囲」を
@@ -58,14 +58,20 @@ test.describe("collapsed キャレットの Backspace/Delete", () => {
     expect(await getContent(page)).toBe("a");
   });
 
-  test("太字装飾内部の可視文字直後で Backspace → 装飾内の raw 1 文字だけが消える（空マーカー正規化は未実装）", async ({ openNote }) => {
+  test("太字装飾の可視末尾で Backspace → インライン生表示（reveal）で境界がマーカー込みの raw 1 文字削除になる", async ({ openNote }) => {
     const page = await openNote({ content: "a**b**c" });
 
-    // 可視 "abc" のうち "b" の直後（装飾の可視末尾直前）へキャレットを置く
+    // 可視 "abc" のうち "b" の直後（装飾の可視末尾）へキャレットを置く。この位置は reveal の
+    // 境界規約（可視末尾を含む）に触れるため、装飾全体が生 raw（"**b**"）表示になり、
+    // Backspace は可視 = raw が 1:1 の状態で直前の raw 1 文字（閉じマーカーの 1 文字目）を消す。
+    // 同じ可視末尾への「入力」はマーカーの外（装飾の後続プレーン部分）に入るのに対し Backspace は
+    // マーカー自体を 1 文字削除するが、これは reveal 中はマーカーが見える raw を直接編集する仕様
+    // として非対称のまま意図的に許容している
     await selectMarkdownRange(page, 0, 2, 0, 2);
+    await waitForReveal(page, { line: 0, start: 1, end: 6 });
     await page.keyboard.press("Backspace");
 
-    expect(await getContent(page)).toBe("a****c");
+    expect(await getContent(page)).toBe("a**b*c");
   });
 
   test("ZWJ 絵文字（結合書記素）の直後で Backspace → 書記素 1 つ全体が消える", async ({ openNote }) => {

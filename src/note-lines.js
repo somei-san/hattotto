@@ -101,10 +101,12 @@ function isImageOnlyLine(lineText) {
  * @param {string} inlineRaw マーカーを除いた raw 行の残り
  * @param {number} visibleOffset インライン部の可視文字数オフセット
  * @param {boolean} isEnd 選択の終了端かどうか（charMap を持たないセグメント内部への丸め方向に使う）
+ * @param {{start: number, end: number} | null} [reveal] インライン生表示で該当セグメントを生 raw
+ *   表示しているときの範囲（inlineSegments の reveal 引数と同じ）。可視 = raw の 1:1 になる
  * @returns {number} inlineRaw 上のオフセット
  */
-function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
-  const segments = inlineSegments(inlineRaw);
+function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd, reveal) {
+  const segments = inlineSegments(inlineRaw, reveal);
   let consumed = 0;
   for (const seg of segments) {
     const segLen = seg.visibleText.length;
@@ -143,10 +145,11 @@ function visibleOffsetToRawOffset(inlineRaw, visibleOffset, isEnd) {
  *
  * @param {string} inlineRaw マーカーを除いた raw 行の残り
  * @param {number} rawOffset inlineRaw 上の raw オフセット
+ * @param {{start: number, end: number} | null} [reveal] visibleOffsetToRawOffset と同じ
  * @returns {number} インライン部の可視文字オフセット
  */
-function visibleOffsetFromRawOffset(inlineRaw, rawOffset) {
-  const segments = inlineSegments(inlineRaw);
+function visibleOffsetFromRawOffset(inlineRaw, rawOffset, reveal) {
+  const segments = inlineSegments(inlineRaw, reveal);
   let consumed = 0; // ここまでの可視文字数の累計
   for (const seg of segments) {
     const segLen = seg.visibleText.length;
@@ -173,10 +176,32 @@ function visibleOffsetFromRawOffset(inlineRaw, rawOffset) {
   return consumed;
 }
 
+/**
+ * インライン部の raw オフセット col が、インライン装飾（code/bold/italic/del/link）の可視先頭〜
+ * 可視末尾（境界含む）に触れているとき、reveal 対象のセグメント raw 範囲 { start, end } を返す
+ * （note.js の selectionchange ハンドラが、キャレット位置からインライン生表示の対象を決めるのに使う）。
+ * プレーンテキスト・画像・裸URLの上、あるいはどの装飾にも触れていなければ null。
+ * 境界で 2 つのセグメントが接する場合は raw 上で手前（左）のセグメントを優先する
+ * （装飾の可視末尾ちょうどと次のセグメントの可視先頭ちょうどが同じ raw オフセットを指すため）。
+ *
+ * @param {string} inlineRaw マーカーを除いた raw 行の残り
+ * @param {number} col inlineRaw 上の raw オフセット
+ * @returns {{start: number, end: number} | null}
+ */
+function revealTargetAt(inlineRaw, col) {
+  const segments = inlineSegments(inlineRaw);
+  for (const seg of segments) {
+    if (col < seg.srcStart || col > seg.srcEnd) continue;
+    if (!isRevealableKind(seg.kind)) continue;
+    return { start: seg.srcStart, end: seg.srcEnd };
+  }
+  return null;
+}
+
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
   module.exports = {
     blockOffset, markerLength, getAutoPrefix, isEmptyListItem, CHECKBOX_RE, isImageOnlyLine,
-    isCheckboxLine, visibleOffsetToRawOffset, visibleOffsetFromRawOffset,
+    isCheckboxLine, visibleOffsetToRawOffset, visibleOffsetFromRawOffset, revealTargetAt,
   };
 }

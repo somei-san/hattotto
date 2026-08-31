@@ -13,6 +13,7 @@ const markdown = {
   inlineSegments: "readonly",
   parseImageAlt: "readonly",
   scanFenceRanges: "readonly",
+  isRevealableKind: "readonly",
 };
 const noteLines = {
   blockOffset: "readonly",
@@ -26,6 +27,7 @@ const noteLines = {
   isCheckboxLine: "readonly",
   visibleOffsetToRawOffset: "readonly",
   visibleOffsetFromRawOffset: "readonly",
+  revealTargetAt: "readonly",
 };
 const history = {
   createHistory: "readonly",

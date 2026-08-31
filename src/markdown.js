@@ -160,7 +160,21 @@ function computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches) {
   return { srcStart: srcIdx[r.start], len: srcIdx[r.end - 1] - srcIdx[r.start] + 1 };
 }
 
-function applyInlineStep(state, regex, buildHtml, contentRange) {
+/**
+ * comp が属するステップの種類（'code'|'bold'|'italic'|'del'|'image'|'link'|'bareurl'）を求める。
+ * インライン生表示（reveal）が「どの装飾か」を判定するのに使う（content と違い常に comp 全体に対して
+ * 定まる。合併した comp は最後に被せたステップ、すなわち一番外側の装飾を指す）。
+ * kind === 'inherit'（コード復元ステップ）は、comp がプレースホルダ全体＝直前ステップの単一 group と
+ * ちょうど一致する前提で、その group の kind をそのまま引き継ぐ。
+ */
+function computeKind(comp, kind, grp, groupSpans) {
+  if (kind !== 'inherit') return kind;
+  const g0 = grp[comp.start];
+  if (g0 === -1 || grp[comp.end - 1] !== g0) return null;
+  return groupSpans[g0] ? groupSpans[g0].kind : null;
+}
+
+function applyInlineStep(state, regex, buildHtml, contentRange, kind) {
   const { text, grp, srcIdx, groupSpans } = state;
   // ゼロ幅マッチは除去する。残すと [start, start) の空区間を持つ comp ができ、
   // フェーズ A/B の区間分割（区間は必ず非空という前提）が壊れる
@@ -258,7 +272,12 @@ function applyInlineStep(state, regex, buildHtml, contentRange) {
       if (span.srcEnd > srcEnd) srcEnd = span.srcEnd;
     }
     const gid = state.nextGroupId++;
-    groupSpans[gid] = { srcStart, srcEnd, content: computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches) };
+    groupSpans[gid] = {
+      srcStart,
+      srcEnd,
+      content: computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches),
+      kind: computeKind(comp, kind, grp, groupSpans),
+    };
 
     const pieces = comp.pieces.slice().sort((a, b) => matches[a].index - matches[b].index);
     let pos = comp.start;
@@ -342,9 +361,17 @@ function stripTagsQuoteAware(html) {
   return out;
 }
 
+// インライン生表示（reveal）で「マーカーごと生 raw を見せてよい」装飾の種類。画像は raw が
+// alt/src の属性にしか現れず見せても意味がなく、裸URLはそもそも raw === 可視テキストで
+// 隠れているマーカーが無いため対象外にする。
+const REVEALABLE_KINDS = new Set(['code', 'bold', 'italic', 'del', 'link']);
+function isRevealableKind(kind) {
+  return REVEALABLE_KINDS.has(kind);
+}
+
 /**
  * raw（escapeHtml 前）の行テキストからインライン装飾を解決し、セグメント列を返す。
- * 各セグメントは { srcStart, srcEnd, html, visibleText, charMap }。
+ * 各セグメントは { srcStart, srcEnd, html, visibleText, charMap, kind }。
  *   - srcStart/srcEnd は raw 文字列上のオフセット（[srcStart, srcEnd) の半開区間）。
  *     全セグメントの srcStart/srcEnd は [0, raw.length) を隙間なく覆う
  *   - html は全セグメント連結すると inlineMarkdown(escapeHtml(raw)) と完全一致する
@@ -353,9 +380,17 @@ function stripTagsQuoteAware(html) {
  *     raw オフセット charMap.srcStart + i に厳密対応する（対称マーカーの装飾・リンクラベル・
  *     裸URLで、ネストした装飾を含まない場合のみ）。null は画像・ネスト装飾など、
  *     可視文字と raw 位置が 1:1 対応しない（呼び出し側は srcStart/srcEnd への丸めに頼る）
+ *   - kind は 'code'|'bold'|'italic'|'del'|'image'|'link'|'bareurl'|null（プレーンテキスト）。
+ *     isRevealableKind(kind) が true のセグメントだけが reveal 対象になりうる
  * srcStart/srcEnd は「トップレベルの構成要素」単位（ネストした装飾は外側 1 セグメントの html に含まれる）。
+ *
+ * @param {string} raw
+ * @param {{start: number, end: number} | null} [reveal] 指定すると、raw 上で
+ *   [reveal.start, reveal.end) にちょうど一致する reveal 対象セグメント（isRevealableKind）を、
+ *   装飾変換を通さない生テキストの html（charMap は raw への恒等写像）に差し替える。一致する
+ *   セグメントが無ければ何もしない（インライン生表示の描画・写像が reveal 状態を考慮するのに使う）
  */
-function inlineSegments(raw) {
+function inlineSegments(raw, reveal) {
   const { text: initialText, srcIdx: initialSrcIdx } = escapeAndTrackOffsets(raw);
   const state = {
     text: initialText,
@@ -369,14 +404,14 @@ function inlineSegments(raw) {
   applyInlineStep(state, CODE_RE, (m) => {
     codeBlocks.push(m[1]);
     return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
-  }, codeContentRange);
-  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]), boldContentRange);
-  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]), italicContentRange);
-  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]), delContentRange);
-  applyInlineStep(state, IMAGE_RE, (m) => buildImageHtml(m[1], m[2]));
-  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]), linkContentRange);
-  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]), bareUrlContentRange);
-  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>', 'inherit');
+  }, codeContentRange, 'code');
+  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]), boldContentRange, 'bold');
+  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]), italicContentRange, 'italic');
+  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]), delContentRange, 'del');
+  applyInlineStep(state, IMAGE_RE, (m) => buildImageHtml(m[1], m[2]), null, 'image');
+  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]), linkContentRange, 'link');
+  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]), bareUrlContentRange, 'bareurl');
+  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>', 'inherit', 'inherit');
 
   const segments = [];
   let i = 0;
@@ -385,14 +420,26 @@ function inlineSegments(raw) {
     let j = i + 1;
     while (j < state.text.length && state.grp[j] === g) j++;
     const html = state.text.slice(i, j);
-    const { srcStart, srcEnd, content } =
+    const { srcStart, srcEnd, content, kind } =
       g === -1
-        ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1, content: null }
+        ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1, content: null, kind: null }
         : state.groupSpans[g];
     const visibleText = decodeEntities(stripTagsQuoteAware(html));
     // content.len は可視文字数のはずだが、想定外の不一致があれば安全側（丸めへのフォールバック）に倒す
     const charMap = content && content.len === visibleText.length ? content : null;
-    segments.push({ srcStart, srcEnd, html, visibleText, charMap });
+    if (reveal && srcStart === reveal.start && srcEnd === reveal.end && isRevealableKind(kind)) {
+      const literalRaw = raw.slice(srcStart, srcEnd);
+      segments.push({
+        srcStart,
+        srcEnd,
+        html: `<span class="md-reveal">${escapeHtml(literalRaw)}</span>`,
+        visibleText: literalRaw,
+        charMap: { srcStart, len: literalRaw.length },
+        kind,
+      });
+    } else {
+      segments.push({ srcStart, srcEnd, html, visibleText, charMap, kind });
+    }
     i = j;
   }
   return segments;
@@ -427,7 +474,21 @@ function scanFenceRanges(lines) {
   return ranges;
 }
 
-function renderMarkdown(text) {
+/** 行内容（マーカーを除いた raw）を装飾込みの html にする。revealRange（{start, end}、
+ * text 上のローカルな raw オフセット）を渡すと、それに一致する装飾セグメントだけ生 raw で
+ * 表示する（inlineSegments 経由）。無指定時は通常の逐次置換チェーン（inlineMarkdown）を使う。 */
+function renderInline(text, revealRange) {
+  if (!revealRange) return inlineMarkdown(escapeHtml(text));
+  return inlineSegments(text, revealRange).map((s) => s.html).join('');
+}
+
+/**
+ * @param {string} text
+ * @param {{line: number, start: number, end: number} | null} [reveal] インライン生表示の
+ *   対象行・範囲（start/end はその行のマーカーを除いた内容上の raw オフセット）。指定した行の
+ *   一致する装飾セグメントだけ生 raw で表示する（renderInline 参照）。
+ */
+function renderMarkdown(text, reveal) {
   if (!text) {
     // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト・node 環境等）でも壊れないようフォールバックする
     const placeholder = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('notePlaceholder') : 'メモを入力…';
@@ -463,6 +524,7 @@ function renderMarkdown(text) {
     const level = Math.floor(spaces / 2);
     const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
     const indentClass = level > 0 ? ` md-indent-${Math.min(level, 5)}` : '';
+    const revealHere = reveal && reveal.line === i ? { start: reveal.start, end: reveal.end } : null;
 
     // Reset ordered list counters when line is not a numbered list
     if (!/^\d+\. /.test(trimmedLine)) {
@@ -471,23 +533,23 @@ function renderMarkdown(text) {
     }
 
     if (/^[-*] \[x\] /i.test(trimmedLine)) {
-      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${renderInline(trimmedLine.slice(6), revealHere)}</span></div>`);
       continue;
     }
     if (/^[-*] \[ \] /.test(trimmedLine)) {
-      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${renderInline(trimmedLine.slice(6), revealHere)}</span></div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('### ')) {
-      result.push(`<div class="md-h3" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(4)))}</div>`);
+      result.push(`<div class="md-h3" data-line="${i}">${renderInline(trimmedLine.slice(4), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('## ')) {
-      result.push(`<div class="md-h2" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(3)))}</div>`);
+      result.push(`<div class="md-h2" data-line="${i}">${renderInline(trimmedLine.slice(3), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('# ')) {
-      result.push(`<div class="md-h1" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-h1" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) {
@@ -495,11 +557,11 @@ function renderMarkdown(text) {
       continue;
     }
     if (/^[-*] /.test(trimmedLine)) {
-      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (/^> /.test(trimmedLine)) {
-      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (/^\d+\. /.test(trimmedLine)) {
@@ -521,19 +583,19 @@ function renderMarkdown(text) {
       // ノードの末尾空白は折りたたまれる）、キャレットの着地点が無くなって beforeinput が
       // 発火しない。潰れない区切り文字として &nbsp;（U+00A0）を使う
       const sep = m[2] === '' ? ' ' : ' ';
-      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${renderInline(m[2], revealHere)}</div>`);
       continue;
     }
     if (line === '') {
       result.push(`<div class="md-empty" data-line="${i}"></div>`);
       continue;
     }
-    result.push(`<div class="md-line${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
+    result.push(`<div class="md-line${indentClass}" data-line="${i}">${renderInline(trimmedLine, revealHere)}</div>`);
   }
   return result.join('');
 }
 
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges };
+  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges, isRevealableKind };
 }

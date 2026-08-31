@@ -42,6 +42,12 @@ let compositionBounds = null;
 // リスナー付近の markPostCompositionSuppression 参照）
 let suppressPostCompositionInput = false;
 
+// インライン生表示（reveal）。キャレットが装飾（太字/斜字/取り消し線/インラインコード/リンク）の
+// 中・境界にあるあいだ、その要素だけ生マーカー付きで表示する状態。表示だけの状態で
+// rawContent・undo には影響しない（詳細は selectionchange リスナー付近参照）。
+// { line, start, end } | null。start/end は line のマーカーを除いた内容上の raw オフセット
+let revealState = null;
+
 // ⌘Z/⌘⇧Z の undo/redo 履歴。loadNote() が最初の content で初期化する
 let editHistory = null;
 
@@ -163,7 +169,7 @@ function renderAll() {
   // 描画済み DOM を丸ごと差し替えるため、直前まで指していた画像の参照ごとハンドルを消す
   // （放置すると detached な img へ書き込む・別画像の上にハンドルが残る事故になる）
   hideHandle();
-  mdView.innerHTML = renderMarkdown(rawContent);
+  mdView.innerHTML = renderMarkdown(rawContent, revealState);
   markNonEditableElements();
   applySelectionHighlight();
 }
@@ -359,6 +365,11 @@ function ensureTrailingLineAfterClosedFence(lines) {
 function applyLines(lines, caretLine, caretCol) {
   ensureTrailingLineAfterClosedFence(lines);
   rawContent = lines.join('\n');
+  // reveal 対象を再描画の前に確定させる（renderAll → placeCaretAtRaw を、まだ古い revealState の
+  // ままの 1 回で済ませる）。selectionchange の再判定だけに任せると、reveal 境界が動き続ける位置
+  // （例: リンクの URL 内で打鍵し続ける）で「一旦ずれた状態を描画 → 非同期に selectionchange で
+  // 補正」という 2 段構えになり、次の打鍵がその補正と競合しうる（詳細は computeRevealTarget 参照）
+  revealState = computeRevealTarget(caretLine, caretCol);
   renderAll();
   placeCaretAtRaw(caretLine, caretCol);
   scheduleSave();
@@ -406,6 +417,19 @@ mdView.addEventListener('mouseup', (e) => {
   }
   // 通常のテキスト行はネイティブのクリック→キャレット配置に任せる。以前の画像選択だけ解く
   clearImageSelection();
+});
+
+// リンクのクリックはネイティブ既定のキャレット配置を起こさない。mousedown で先に止めておかないと
+// click 到達までの間にキャレットがリンクの中へ入り、インライン生表示（reveal）が発火して
+// リンクが生 raw 表示に切り替わる（WebKit では click 到達前に selectionchange の再描画が間に合ってしまい、
+// 再描画後の座標に click が飛んで shell.open が呼ばれない実害が出る）。抑止するのは主ボタンの単クリック
+// （button===0・修飾キーなし・detail===1）だけに絞り、ダブルクリックの語選択・右クリックメニュー・
+// 修飾キー付きクリック（新規タブで開く等）はブラウザ既定に任せる。ドラッグ選択の開始点がリンク上に
+// あるケースは、mousedown 時点では単クリックとの区別が付かないため単クリック側を優先し、対応していない
+// （リンク上から選択を始めたいドラッグは未対応のまま残る）
+mdView.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || e.detail !== 1 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  if (e.target.closest('a[data-url]')) e.preventDefault();
 });
 
 mdView.addEventListener('click', (e) => {
@@ -1317,8 +1341,9 @@ function adjacentVisibleCharRawRange(line, col, direction) {
   const lineText = getLines()[line] ?? '';
   const markerLen = lineStartColumn(line);
   const inlineRaw = lineText.slice(markerLen);
-  const contentVisible = visibleOffsetFromRawOffset(inlineRaw, Math.max(0, col - markerLen));
-  const segments = inlineSegments(inlineRaw);
+  const reveal = revealRangeForLine(line);
+  const contentVisible = visibleOffsetFromRawOffset(inlineRaw, Math.max(0, col - markerLen), reveal);
+  const segments = inlineSegments(inlineRaw, reveal);
 
   let consumed = 0;
   const positioned = segments.map((seg) => {
@@ -1553,7 +1578,7 @@ function resolveSelectionPoint(node, offset, isEnd) {
   const inlineRaw = lineText.slice(markerLen);
   const prefixLen = orderedDisplayPrefixLength(block);
   const contentVisible = Math.max(0, visible - prefixLen);
-  const rawOffset = markerLen + visibleOffsetToRawOffset(inlineRaw, contentVisible, isEnd);
+  const rawOffset = markerLen + visibleOffsetToRawOffset(inlineRaw, contentVisible, isEnd, revealRangeForLine(line));
   return { line, col: rawOffset };
 }
 
@@ -1683,13 +1708,14 @@ function resolveSelectionBounds(range) {
 // ── Raw → DOM 位置の写像（resolveSelectionPoint の逆） ────
 
 /** 行 line の raw 列 col を、行頭マーカーを除いた「内容可視列」（inlineSegments 基準の
- * 可視文字オフセット）へ変換する。visibleOffsetFromRawOffset（note-lines.js）の DOM 版。 */
+ * 可視文字オフセット）へ変換する。visibleOffsetFromRawOffset（note-lines.js）の DOM 版。
+ * line がインライン生表示中（revealState）なら、その分も考慮して現在の DOM と対応させる。 */
 function contentVisibleColumn(line, col) {
   const lineText = getLines()[line] ?? '';
   const markerLen = markerLength(lineText);
   const inlineRaw = lineText.slice(markerLen);
   const rawInInline = Math.max(0, Math.min(col, lineText.length) - markerLen);
-  return visibleOffsetFromRawOffset(inlineRaw, rawInInline);
+  return visibleOffsetFromRawOffset(inlineRaw, rawInInline, revealRangeForLine(line));
 }
 
 /** 描画済みブロック blockEl 上で、「内容可視列」contentVisible に対応する DOM 位置
@@ -1732,6 +1758,123 @@ function domPointForRawPosition(line, col) {
   }
   return domPointForContentVisible(el, contentVisibleColumn(line, col));
 }
+
+// ── インライン生表示（reveal） ─────────────────────────
+// キャレット（collapsed）が装飾（太字/斜字/取り消し線/インラインコード/リンク）の中・境界にある
+// あいだ、その要素だけ生マーカー付きで表示する（`**bold**` がそのまま見える）。離れたら隠す。
+// 表示だけの状態で rawContent・undo・保存には一切影響しない。selectionchange を駆動源にし、
+// キャレット位置から reveal 対象を毎回再計算する。前回と同じなら再描画しない（ちらつき防止）。
+//
+// 不変条件: 選択（Selection）が非 collapsed の間、revealState は必ず null。装飾をまたぐ選択の
+// 可視テキストは常に装飾適用後の表示（inlineVisibleSlice・buildPlainFromSelection が前提にする
+// 表現）と一致させる必要があり、生 raw 表示（reveal）と非 collapsed 選択を同時に成立させない。
+
+/** line 行に適用中の reveal 範囲（マーカーを除いた内容上の raw オフセット）。無ければ null。 */
+function revealRangeForLine(line) {
+  return revealState && revealState.line === line ? { start: revealState.start, end: revealState.end } : null;
+}
+
+function sameReveal(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.line === b.line && a.start === b.start && a.end === b.end;
+}
+
+/** line がコードブロックのフェンス行・内容行のどれかに含まれるか。findBlock（描画済み DOM 基準）
+ * とは違い lines 配列だけから求める（scanFenceRanges は renderMarkdown 自身が使う判定とも共有）。
+ * applyLines がまだ renderAll する前に reveal 対象を決めたいときに使う（DOM 依存だと直前の
+ * 描画＝編集前の内容を見てしまう）。 */
+function isFenceLine(lines, line) {
+  for (const [open, { end }] of scanFenceRanges(lines)) {
+    if (line >= open && line <= end) return true;
+  }
+  return false;
+}
+
+/** キャレット位置（line, raw 列 col）から reveal 対象を決める。ブロックマーカーの内部・
+ * コードブロック・画像のみの行（キャレットを持たない）は対象外。lines 配列と markerLength だけから
+ * 求まる（DOM に依存しない）ため、renderAll 前でも呼べる。 */
+function computeRevealTarget(line, col) {
+  const lines = getLines();
+  const lineText = lines[line] ?? '';
+  const markerLen = markerLength(lineText);
+  if (col < markerLen) return null;
+  if (isFenceLine(lines, line)) return null; // コードブロックは対象外
+  if (isImageOnlyLine(lineText)) return null;
+  const inlineRaw = lineText.slice(markerLen);
+  const target = revealTargetAt(inlineRaw, col - markerLen);
+  return target ? { line, start: target.start, end: target.end } : null;
+}
+
+/**
+ * 選択が collapsed から非 collapsed に変わった瞬間（reveal 中の Shift+矢印での選択開始・
+ * ドラッグ選択・⌘A 等）に、revealState を解除しつつ renderAll() で失われる DOM 選択を張り直す。
+ * anchor/focus（後方への選択も含む向き）を resolveSelectionPoint で raw 位置へ解決してから
+ * revealState を null にして再描画し、domPointForRawPosition で新しい（reveal を含まない）DOM 上の
+ * 対応点へ選択を戻す。端点が装飾マーカーの内部（reveal 中しか到達できない raw 位置）に落ちていても、
+ * domPointForRawPosition 自身の丸め規則（可視境界へのスナップ）でそのまま解決できる。端点を
+ * 解決できない選択（mdView 外を含む Range 等）は復元を諦める。
+ */
+function restoreNonCollapsedSelectionAfterRevealClear(sel) {
+  const range = sel.getRangeAt(0);
+  const backward = sel.anchorNode !== range.startContainer || sel.anchorOffset !== range.startOffset;
+  const startPoint = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  const endPoint = resolveSelectionPoint(range.endContainer, range.endOffset, true);
+  revealState = null;
+  renderAll();
+  if (!startPoint || !endPoint) return;
+  const startDom = domPointForRawPosition(startPoint.line, startPoint.col);
+  const endDom = domPointForRawPosition(endPoint.line, endPoint.col);
+  if (!startDom || !endDom) return;
+  const anchorDom = backward ? endDom : startDom;
+  const focusDom = backward ? startDom : endDom;
+  sel.setBaseAndExtent(anchorDom.node, anchorDom.offset, focusDom.node, focusDom.offset);
+}
+
+// mdView への collapsed キャレット移動はすべてネイティブ（クリック・矢印キー等）に任せているため、
+// selectionchange だけが「キャレットが今どこにあるか」を検知できる唯一の経路になる。IME 変換中
+// （composing）は切り替えない。
+document.addEventListener('selectionchange', () => {
+  if (composing) return;
+  const sel = window.getSelection();
+  const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+  const inMdView = !!range && mdView.contains(range.commonAncestorContainer);
+
+  if (inMdView && !sel.isCollapsed) {
+    // 選択が mdView 内で非 collapsed になった瞬間。revealState は必ず null にする（不変条件）が、
+    // 選択そのものは restoreNonCollapsedSelectionAfterRevealClear が raw 位置経由で張り直す
+    if (revealState) restoreNonCollapsedSelectionAfterRevealClear(sel);
+    return;
+  }
+  if (!inMdView) {
+    // 選択が mdView の外にある（mdView 外の選択変化で誤って reveal を組み立てないためのガードも兼ねる）
+    if (revealState) {
+      revealState = null;
+      renderAll();
+    }
+    return;
+  }
+
+  // 現在の DOM（＝現在の revealState）を基準にキャレットの raw 位置を求めてから、
+  // その raw 位置に対する新しい reveal 対象を決める
+  const point = resolveSelectionPoint(range.startContainer, range.startOffset, false);
+  const next = point ? computeRevealTarget(point.line, point.col) : null;
+  if (sameReveal(next, revealState)) return;
+  revealState = next;
+  renderAll();
+  // 再描画で失われたキャレットを、可視幅が変わった後の DOM でも同じソース位置へ復元する
+  if (point) placeCaretAtRaw(point.line, point.col);
+});
+
+// mdView がフォーカスを失うとキャレットは表示されなくなるため、reveal も表示する意味が無い。
+// IME 変換中（composing）の blur は、renderAll() が変換中の WebKit ネイティブ書き込み DOM ごと
+// 差し替えてしまうため介入しない（compositionend が来るまで待つ）
+mdView.addEventListener('blur', () => {
+  if (composing) return;
+  if (!revealState) return;
+  revealState = null;
+  renderAll();
+});
 
 /**
  * DOM Range（markdown-view 内の選択）から、対応する生 Markdown 文字列を組み立てる。
@@ -2676,6 +2819,18 @@ window.performUndo = performUndo;
 window.performRedo = performRedo;
 window.resolveSelectionRange = resolveSelectionRange;
 window.selectAllNote = selectAllNote;
+// インライン生表示（reveal）の現在の状態。selectionchange 駆動で非同期に確定するため、
+// テストは DOM の見た目だけでなくこの値で「reveal が確定したか」を待てる
+window.getRevealState = () => revealState;
+// 現在のキャレット（collapsed のときのみ）の (line, col) を、アプリ本体と同じ resolveSelectionPoint
+// で求めて返す。行に装飾（可視 ≠ raw）があると DOM のテキスト長からの単純な逆算では raw 列を
+// 正しく復元できないため、テストはこちらを使う
+window.getCaretRawPosition = () => {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  return resolveSelectionPoint(range.startContainer, range.startOffset, false);
+};
 
 
 // ── Keyboard: color dots (Enter/Space/Arrow) ───────
