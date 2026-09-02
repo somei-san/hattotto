@@ -173,6 +173,10 @@
     user-select: text;
     -webkit-user-select: text;
     outline: none;
+    /* 既定の white-space: normal は行頭・行末・連続スペースを畳んで幅 0 にする。
+       rawContent が唯一の真実である以上、raw にある空白は表示・キャレット位置の両方で
+       そのまま反映する必要がある */
+    white-space: pre-wrap;
   }
 
   /* 空ブロック自身は無地のまま（キャレットの着地点）にし、文言は ::before だけに表示する

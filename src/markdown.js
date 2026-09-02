@@ -536,12 +536,18 @@ function renderMarkdown(text, reveal) {
       Object.keys(orderedCounters).forEach(k => delete orderedCounters[k]);
     }
 
+    // 内容が空だと <span></span> にテキストノードが 1 つも無くなり、raw 位置から DOM 位置への
+    // 解決（note.js の domPointForContentVisible）がテキストノードを見つけられず、ブロック
+    // 直下（<input> の直前 = 見た目上チェックボックスの位置）へフォールバックしてしまう。
+    // 潰れない文字（&nbsp;）を 1 つ挟んでテキストノードを確保する
     if (/^[-*] \[x\] /i.test(trimmedLine)) {
-      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${renderInline(trimmedLine.slice(6), revealHere)}</span></div>`);
+      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
     if (/^[-*] \[ \] /.test(trimmedLine)) {
-      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${renderInline(trimmedLine.slice(6), revealHere)}</span></div>`);
+      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('### ')) {

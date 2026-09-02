@@ -381,6 +381,24 @@ describe("renderMarkdown — NBSP (U+00A0) normalization", () => {
   });
 });
 
+describe("renderMarkdown — 空チェックボックス項目のキャレット着地点", () => {
+  test("内容が空の未完了チェックボックス行は span に nbsp を持つ", () => {
+    const html = renderMarkdown("- [ ] ");
+    assert.match(html, /<span>&nbsp;<\/span>/);
+  });
+
+  test("内容が空の完了チェックボックス行も同様に nbsp を持つ", () => {
+    const html = renderMarkdown("- [x] ");
+    assert.match(html, /<span>&nbsp;<\/span>/);
+  });
+
+  test("内容があるチェックボックス行には nbsp を挿入しない", () => {
+    const html = renderMarkdown("- [ ] task");
+    assert.doesNotMatch(html, /<span>&nbsp;<\/span>/);
+    assert.match(html, /<span>task<\/span>/);
+  });
+});
+
 describe("renderMarkdown — インライン生表示（reveal）", () => {
   test("reveal 対象行の装飾は生 raw（マーカー込み）で表示される", () => {
     const html = renderMarkdown("pre **bold** post", { line: 0, start: 4, end: 12 });
