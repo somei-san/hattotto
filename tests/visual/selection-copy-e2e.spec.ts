@@ -567,7 +567,7 @@ test.describe("通常コピー: text/plain（行構造は raw のまま、イン
   test("複数行あるブロックの内容行 1 行だけを選択（先頭〜末尾）しても、フェンスは付かない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    const content = ["```js", "line1", "line2", "```"].join("\n");
+    const content = ["```", "line1", "line2", "```"].join("\n");
     await injectNoteMock(page, { content }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
@@ -965,7 +965,7 @@ test.describe("resolveSelectionRange（Markdown をコピーが使う生 Markdow
   test("複数行あるブロックの内容行 1 行だけを選択（先頭〜末尾）しても、フェンスは付かない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    await injectNoteMock(page, { content: "```js\nline1\nline2\n```" }, {}, {});
+    await injectNoteMock(page, { content: "```\nline1\nline2\n```" }, {}, {});
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 

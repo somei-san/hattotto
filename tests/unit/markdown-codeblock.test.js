@@ -11,10 +11,13 @@ describe("renderMarkdown — fenced code block", () => {
     assert.match(html, /<code>const x = 1;<\/code><\/pre>/);
   });
 
-  test("code block with language specifier", () => {
+  test("code block with language specifier renders as literal text, not a code block", () => {
     const html = renderMarkdown("```js\nlet y = 2;\n```");
-    assert.match(html, /<pre class="md-codeblock"/);
-    assert.match(html, /<code>let y = 2;<\/code><\/pre>/);
+    assert.doesNotMatch(html, /md-codeblock/);
+    assert.match(html, /<div class="md-line" data-line="0">```js<\/div>/);
+    assert.match(html, /<div class="md-line" data-line="1">let y = 2;<\/div>/);
+    // 2 行目の ``` は下に何も無いので未クローズの開きフェンス候補としてリテラル
+    assert.match(html, /<div class="md-line" data-line="2">```<\/div>/);
   });
 
   test("末尾の内容行が空のときは <br> フィラーで行ボックスを確保する", () => {
@@ -122,5 +125,23 @@ describe("scanFenceRanges", () => {
     assert.deepEqual(ranges.get(0), { end: 2, closed: true });
     assert.deepEqual(ranges.get(4), { end: 6, closed: true });
     assert.equal(ranges.size, 2);
+  });
+
+  test("language specifier line is never an opening fence, even when a closer follows", () => {
+    const ranges = scanFenceRanges(["```aaa", "bbb", "```"]);
+    assert.equal(ranges.size, 0);
+  });
+
+  test("language specifier line with content below but no closer: no range (literal)", () => {
+    const ranges = scanFenceRanges(["```aaa", "bbb", "```", "ccc"]);
+    assert.equal(ranges.size, 0);
+  });
+
+  test("bare closer after a language specifier line becomes an opening fence if closed further down", () => {
+    // 1 行目 "```aaa" は言語指定つきなので開きフェンス候補にならずリテラル。3 行目の素の
+    // "```" が新たな開きフェンス候補となり、5 行目の "```" で閉じてブロックが成立する
+    const ranges = scanFenceRanges(["```aaa", "bbb", "```", "ccc", "```"]);
+    assert.deepEqual(ranges.get(2), { end: 4, closed: true });
+    assert.equal(ranges.size, 1);
   });
 });

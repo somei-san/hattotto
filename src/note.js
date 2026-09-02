@@ -1371,7 +1371,7 @@ function collapsedBounds(range) {
  * splitLineAt がコードブロック自動生成に分岐する。```js のような言語指定つきは対象外:
  * シンタックスハイライトが無い本アプリでは言語指定が機能を持たず、``` に続けて打った
  * 文字列が Enter で不可視の開きフェンス行に取り込まれると「消えた」ように見えるため
- * （閉じまで揃った言語指定つきフェンスの描画は互換のため受け付ける）。 */
+ * （言語指定つきフェンスは描画側も閉じの有無を問わず常にリテラル行として扱う）。 */
 function isFenceEnterTarget(lines, start, end) {
   if (start.line !== end.line || start.col !== end.col) return false;
   return /^```\s*$/.test(lines[start.line]);
@@ -1488,9 +1488,9 @@ function backspaceAtLineStart(line) {
 
   if (line === 0) return; // 先頭行はこれ以上結合できない
   const prevLine = lines[line - 1];
-  // 開き/閉じの区別なく「```」で始まる行は全て弾く（言語指定つきの開きフェンス
-  // 「```js」も含む）。どちらへ結合しても記法が壊れる点は同じで、区別する意味が無い
-  if (/^```/.test(prevLine) || isImageOnlyLine(prevLine)) return;
+  // 素の ```（開き/閉じの区別なくフェンス構造に関与しうる行）だけ弾く。```js のような
+  // 言語指定つきは常にリテラル行なので、結合しても記法は壊れず通常のテキスト行として許可する
+  if (/^```\s*$/.test(prevLine) || isImageOnlyLine(prevLine)) return;
   const mergeCol = prevLine.length;
   lines[line - 1] = prevLine + lineText;
   lines.splice(line, 1);
@@ -1505,8 +1505,9 @@ function deleteAtLineEnd(line) {
   const lines = getLines();
   if (line >= lines.length - 1) return; // 最終行
   const nextLine = lines[line + 1];
-  // 開き/閉じの区別なく「```」始まりを弾く（どちらへ連結しても記法が壊れるため）
-  if (/^```/.test(nextLine) || isImageOnlyLine(nextLine)) return;
+  // 素の ```（開き/閉じの区別なくフェンス構造に関与しうる行）だけ弾く。```js のような
+  // 言語指定つきは常にリテラル行なので、連結しても記法は壊れず通常のテキスト行として許可する
+  if (/^```\s*$/.test(nextLine) || isImageOnlyLine(nextLine)) return;
   const nextBlock = findBlock(line + 1);
   const nextInFence = !!nextBlock && nextBlock.start !== nextBlock.end;
   const markerLen = nextInFence ? 0 : markerLength(nextLine);
@@ -1861,7 +1862,7 @@ function expandCodeBlockFences(start, end, lines, codeBlockRanges) {
     if (!info.closed || info.firstContentLine > info.lastContentLine) continue;
     // 開始・終了それぞれが「そのブロックを覆っているか」を独立に見るだけでは、内容行の
     // 一部（例: 複数行あるうちの 1 行だけ）を先頭〜末尾で選択したときに、片方の条件だけが
-    // 偶然成立してフェンスが片側にだけ付いてしまう（例: "```js\nline1" のような未クローズの
+    // 偶然成立してフェンスが片側にだけ付いてしまう（例: "```\nline1" のような未クローズの
     // 断片ができ、貼り戻すと以降の行までコードブロック化する）。両端が揃ってブロック全体を
     // 覆っているときだけ拡張する
     const startCovers = start.line < info.openLine

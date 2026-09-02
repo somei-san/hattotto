@@ -464,7 +464,7 @@ function inlineSegments(raw, reveal) {
 function scanFenceRanges(lines) {
   const ranges = new Map();
   for (let i = 0; i < lines.length; i++) {
-    if (!/^```\S*\s*$/.test(lines[i])) continue;
+    if (!/^```\s*$/.test(lines[i])) continue;
     let closeIdx = -1;
     for (let k = i + 1; k < lines.length; k++) {
       if (/^```\s*$/.test(lines[k])) { closeIdx = k; break; }

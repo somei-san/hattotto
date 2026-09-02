@@ -128,10 +128,20 @@ test.describe("リテラルの ``` 行での Enter によるコードブロッ�
     expect(isCodeBlock).toBe(false);
   });
 
-  test("閉じまで揃った言語指定つきフェンス（```js 〜 ```）はコードブロックとして描画される", async ({ openNote }) => {
+  test("閉じまで揃った言語指定つきフェンス（```js 〜 ```）もリテラルのテキスト行として描画される", async ({ openNote }) => {
     const page = await openNote({ content: "```js\nlet x = 1;\n```" });
     const isCodeBlock = await page.evaluate(() => document.querySelector("#markdown-view pre.md-codeblock") != null);
+    expect(isCodeBlock).toBe(false);
+    const lineTexts = await page.evaluate(() => Array.from(document.querySelectorAll("#markdown-view [data-line]")).map((el) => el.textContent));
+    expect(lineTexts).toEqual(["```js", "let x = 1;", "```"]);
+  });
+
+  test("言語指定つきフェンスの下に、さらに素のフェンスペアがあればそこからコードブロックになる（連鎖）", async ({ openNote }) => {
+    const page = await openNote({ content: "```aaa\nbbb\n```\nccc\n```" });
+    const isCodeBlock = await page.evaluate(() => document.querySelector("#markdown-view pre.md-codeblock") != null);
     expect(isCodeBlock).toBe(true);
+    const lineTexts = await page.evaluate(() => Array.from(document.querySelectorAll("#markdown-view [data-line]")).map((el) => el.textContent));
+    expect(lineTexts).toEqual(["```aaa", "bbb", "ccc"]);
   });
 
   test("undo は1手でリテラルの ``` 行に戻る", async ({ openNote }) => {
