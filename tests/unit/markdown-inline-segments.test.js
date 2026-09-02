@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const { escapeHtml } = require("../../src/utils.js");
 global.escapeHtml = escapeHtml;
-const { inlineMarkdown, inlineSegments } = require("../../src/markdown.js");
+const { inlineMarkdown, inlineSegments, isRevealableKind } = require("../../src/markdown.js");
 
 // inlineMarkdown はインライン記法(bold/italic/del/code/image/link/裸URL)の変換本体。
 // ここでは escapeHtml 済みの文字列を直接渡し、素の逐次置換チェーンの出力をゴールデンマスターとして固定する。
@@ -254,6 +254,106 @@ describe("inlineSegments — 不変条件", () => {
   });
 });
 
+// charMap（可視文字ごとの raw オフセット写像）の検証。note-lines.js の
+// visibleOffsetToRawOffset / visibleOffsetFromRawOffset が消費する契約そのものなので、
+// 「raw.slice(charMap.srcStart, charMap.srcStart + charMap.len) が visibleText と一致する」
+// という不変条件を直接検証する（内容が raw のどの範囲のコピーかという charMap の定義に対応）
+describe("inlineSegments — charMap", () => {
+  test("太字・イタリック・取り消し線・コードスパンは charMap を持つ", () => {
+    for (const raw of ["**bold**", "*italic*", "~~del~~", "`code`"]) {
+      const [seg] = inlineSegments(raw);
+      assert.ok(seg.charMap, raw);
+      assert.equal(raw.slice(seg.charMap.srcStart, seg.charMap.srcStart + seg.charMap.len), seg.visibleText, raw);
+    }
+  });
+
+  test("リンクラベルは charMap を持つ（URL 部分は対象外）", () => {
+    const raw = "[label](https://example.com)";
+    const [seg] = inlineSegments(raw);
+    assert.ok(seg.charMap);
+    assert.equal(seg.charMap.srcStart, 1); // '[' の直後
+    assert.equal(seg.charMap.len, "label".length);
+  });
+
+  test("裸URLは charMap を持つ（pre 文字を含む全体が対象）", () => {
+    const raw = "see https://example.com here";
+    const segments = inlineSegments(raw);
+    const urlSeg = segments.find((s) => s.visibleText.includes("https://"));
+    assert.ok(urlSeg.charMap);
+    assert.equal(raw.slice(urlSeg.charMap.srcStart, urlSeg.charMap.srcStart + urlSeg.charMap.len), urlSeg.visibleText);
+  });
+
+  test("画像は charMap を持たない（alt/src は属性のみで可視文字を持たない）", () => {
+    const [seg] = inlineSegments("![alt](images/a.png)");
+    assert.equal(seg.charMap, null);
+  });
+
+  test("ネストした装飾（bold の中に code）は外側セグメントの charMap を持たない", () => {
+    const [seg] = inlineSegments("**bold `code` here**");
+    assert.equal(seg.charMap, null);
+  });
+
+  test("コード復元後も元の code ステップで求めた charMap を引き継ぐ", () => {
+    const [seg] = inlineSegments("`foo`");
+    assert.ok(seg.charMap);
+    assert.equal(seg.charMap.srcStart, 1); // '`' の直後
+    assert.equal(seg.charMap.len, "foo".length);
+  });
+
+  test("エンティティを含む中身でも charMap の長さは可視文字数（raw 文字数）で数える", () => {
+    // "&" は raw 1 文字だが html は "&amp;"（5 文字）になる。charMap.len は可視文字数の 3（"a&b"）
+    const [seg] = inlineSegments("**a&b**");
+    assert.ok(seg.charMap);
+    assert.equal(seg.charMap.len, 3);
+    assert.equal("a&b".length, seg.visibleText.length);
+  });
+
+  // ── charMap を持つ全セグメントに共通する不変条件（コーパス全件 + fuzz） ─────
+  function assertCharMapInvariant(raw, name) {
+    for (const seg of inlineSegments(raw)) {
+      if (!seg.charMap) continue;
+      const covered = raw.slice(seg.charMap.srcStart, seg.charMap.srcStart + seg.charMap.len);
+      assert.equal(covered, seg.visibleText, `charMap の範囲は visibleText と一致する: ${name}`);
+      assert.ok(seg.charMap.srcStart >= seg.srcStart && seg.charMap.srcStart + seg.charMap.len <= seg.srcEnd,
+        `charMap の範囲はセグメントの src 範囲に収まる: ${name}`);
+    }
+  }
+
+  for (const { name, raw } of corpus) {
+    test(`corpus: ${name}`, () => assertCharMapInvariant(raw, name));
+  }
+
+  test("kind: 装飾の種類がセグメントに付く（reveal 対象判定に使う）", () => {
+    assert.equal(inlineSegments("**bold**")[0].kind, "bold");
+    assert.equal(inlineSegments("*italic*")[0].kind, "italic");
+    assert.equal(inlineSegments("~~del~~")[0].kind, "del");
+    assert.equal(inlineSegments("`code`")[0].kind, "code");
+    assert.equal(inlineSegments("[label](https://e.com)")[0].kind, "link");
+    assert.equal(inlineSegments("![alt](images/a.png)")[0].kind, "image");
+    assert.equal(inlineSegments("see https://e.com here")[1].kind, "bareurl");
+    assert.equal(inlineSegments("plain text")[0].kind, null);
+  });
+
+  test("fuzz: シード 1 で 4000 件のランダム入力を検証", () => {
+    let s = 1;
+    const rng = () => {
+      s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
+      return s / 0x100000000;
+    };
+    const TOKENS = [
+      "*", "**", "***", "~~", "`", "!", "[", "]", "(", ")",
+      "https://", "example.com", "u", "https://u`x`", "https://u**x**",
+      "&", "<", ">", '"', "=", " ", "a", "b", "1", "\n", "あいう", "😀",
+    ];
+    for (let n = 0; n < 4000; n++) {
+      const len = Math.floor(rng() * 14);
+      let raw = "";
+      for (let i = 0; i < len; i++) raw += TOKENS[Math.floor(rng() * TOKENS.length)];
+      assertCharMapInvariant(raw, JSON.stringify(raw));
+    }
+  });
+});
+
 // ── inlineMarkdown / inlineSegments 二経路の出力一致 (property test) ──────────────
 // inlineMarkdown（素の逐次置換チェーン）と inlineSegments（オフセット追跡付きの別経路）は
 // 同じ置換チェーンを共有しているはずだが、経路が分かれている以上、固定コーパスだけでは
@@ -328,4 +428,53 @@ describe("inlineMarkdown / inlineSegments — 二経路の出力一致 (fuzz)", 
       }
     });
   }
+});
+
+// ── インライン生表示（reveal） ──────────────────────────────
+// inlineSegments の第2引数。指定した raw 範囲にちょうど一致する reveal 対象セグメントを、
+// 装飾変換を通さない生 raw の html（charMap は raw への恒等写像）に差し替える。
+describe("inlineSegments — reveal", () => {
+  test("isRevealableKind: 太字・斜字・取り消し線・コード・リンクは true、画像・裸URL・null は false", () => {
+    assert.equal(isRevealableKind("bold"), true);
+    assert.equal(isRevealableKind("italic"), true);
+    assert.equal(isRevealableKind("del"), true);
+    assert.equal(isRevealableKind("code"), true);
+    assert.equal(isRevealableKind("link"), true);
+    assert.equal(isRevealableKind("image"), false);
+    assert.equal(isRevealableKind("bareurl"), false);
+    assert.equal(isRevealableKind(null), false);
+  });
+
+  test("一致する装飾セグメントは生 raw の html に差し替わる（マーカー込みで 1 バイトも変換しない）", () => {
+    const raw = "pre **bold** post";
+    const [pre, bold, post] = inlineSegments(raw, { start: 4, end: 12 });
+    assert.equal(pre.html, "pre ");
+    assert.equal(bold.html, '<span class="md-reveal">**bold**</span>');
+    assert.equal(bold.visibleText, "**bold**");
+    assert.deepEqual(bold.charMap, { srcStart: 4, len: 8 });
+    assert.equal(post.html, " post");
+    // srcStart/srcEnd はセグメント境界そのものなので reveal の有無で変わらない
+    assert.equal(bold.srcStart, 4);
+    assert.equal(bold.srcEnd, 12);
+  });
+
+  test("reveal 中も html 連結は raw をそのままエスケープしたものになる（装飾変換を経由しない）", () => {
+    const raw = "a **b&c** d";
+    const segments = inlineSegments(raw, { start: 2, end: 9 });
+    const joinedHtml = segments.map((s) => s.html).join("");
+    assert.equal(joinedHtml, 'a <span class="md-reveal">**b&amp;c**</span> d');
+  });
+
+  test("範囲が一致しても非対象の kind（画像）には適用しない", () => {
+    const raw = "![alt](images/a.png)";
+    const [seg] = inlineSegments(raw, { start: 0, end: raw.length });
+    assert.equal(seg.html, inlineSegments(raw)[0].html); // reveal 無指定と同じ（変化なし）
+  });
+
+  test("一致するセグメントが無ければ何も変わらない（reveal 無指定と同じ出力）", () => {
+    const raw = "**bold** text";
+    const withStaleReveal = inlineSegments(raw, { start: 0, end: 4 }); // どのセグメントとも一致しない範囲
+    const withoutReveal = inlineSegments(raw);
+    assert.deepEqual(withStaleReveal.map((s) => s.html), withoutReveal.map((s) => s.html));
+  });
 });

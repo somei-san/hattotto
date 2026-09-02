@@ -40,7 +40,11 @@ const BOLD_RE = /\*\*(.+?)\*\*/g;
 const ITALIC_RE = /\*([^*]+)\*/g;
 const DEL_RE = /~~([^~]+)~~/g;
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+// ラベルは IMAGE_RE と同じく空を許す（`[^\]]*`）。空マーカー正規化（note-lines.js の
+// widenRangeForEmptiedDecorations）はリンクのラベルが空になっても URL が実体として残るため
+// マーカーごと消さない仕様（`[](url)` のまま）で、ラベル必須（`+`）のままだとこの raw が
+// リンクとして解決できず、代わりに BAREURL_RE が URL 側の `)` まで巻き込んでリンク化してしまう
+const LINK_RE = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
 const BAREURL_RE = /((?:^|[^"=]))((https?:\/\/)[^\s<]+)/g;
 // eslint-disable-next-line no-control-regex -- \x00 is the placeholder marker
 const CODE_RESTORE_RE = /\x00CODE(\d+)\x00/g;
@@ -73,6 +77,18 @@ function buildEmHtml(inner) {
 function buildDelHtml(inner) {
   return `<del>${inner}</del>`;
 }
+
+// ── inlineSegments 用の content range（applyInlineStep の contentRange 引数） ──────
+// 対称マーカーの装飾・リンクラベル・裸URLは、出力の可視部分がマッチの部分文字列そのままの
+// コピーなので、その範囲（現在の state.text 上の [start, end)）を返す。画像のように
+// alt/src が属性にしか現れない記法は contentRange を渡さない（常に非トラッキング）
+function codeContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+function boldContentRange(m) { return { start: m.index + 2, end: m.index + 2 + m[1].length }; }
+function italicContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+function delContentRange(m) { return { start: m.index + 2, end: m.index + 2 + m[1].length }; }
+function linkContentRange(m) { return { start: m.index + 1, end: m.index + 1 + m[1].length }; }
+// 裸URLは pre + url がそのまま出力の可視部分になる（マーカーで包まれない）ので範囲はマッチ全体
+function bareUrlContentRange(m) { return { start: m.index, end: m.index + m[0].length }; }
 
 /**
  * escapeHtml 済みの文字列からインライン装飾を解決する。note.js の描画パス本体で、
@@ -114,6 +130,10 @@ function inlineMarkdown(escaped) {
 // 不変条件: 1 つの group の文字が 2 つ以上のセグメントに分かれることは絶対にない
 // （崩れると閉じタグが割れて本文が二重出力される。例: `**https://u**https://u` で
 // 裸URLステップが bold group の途中に部分的に触れるケース）。
+// groupSpans[gid].content は、可視文字ごとの raw オフセット写像（segment.charMap）の元になる
+// 情報 { srcStart, len }（raw 上での内容の開始位置と可視文字数）。1 マッチ 1 ピースの comp のみ、
+// contentRange（またはコード復元ステップの 'inherit'）から埋める。複数マッチが合併した comp や
+// ネストした装飾を含む内容は content を null のままにし、note-lines.js 側の丸めにフォールバックする
 // これを守るため、1 回のステップ内の処理は 2 フェーズに分ける:
 //   フェーズ A: そのステップの全マッチと、マッチが触れる既存 group ブロックを
 //     安定するまで合併し、出力の区間分割を先に確定する
@@ -123,7 +143,42 @@ function inlineMarkdown(escaped) {
 // 割り当てる（既存 id の使い回しは、その group をさらに別の合併が巻き込むケースで
 // 区間分割の再計算を招くため）
 
-function applyInlineStep(state, regex, buildHtml) {
+/**
+ * comp の content（{ srcStart, len } | null）を求める。1 マッチ 1 ピースの comp だけが対象で、
+ * 複数マッチが合併した comp は常に null（挙動不変の丸めへフォールバック）。
+ * contentRange === 'inherit'（コード復元ステップ）は、comp がプレースホルダ全体＝直前ステップの
+ * 単一 group とちょうど一致する前提で、その group の content をそのまま引き継ぐ。
+ */
+function computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches) {
+  if (comp.pieces.length !== 1 || !contentRange) return null;
+  if (contentRange === 'inherit') {
+    const g0 = grp[comp.start];
+    if (g0 === -1 || grp[comp.end - 1] !== g0) return null;
+    return groupSpans[g0] ? groupSpans[g0].content : null;
+  }
+  const r = contentRange(matches[comp.pieces[0]]);
+  if (!r || r.end <= r.start) return null;
+  for (let i = r.start; i < r.end; i++) {
+    if (grp[i] !== -1) return null; // ネストした装飾は char 単位で追跡しない
+  }
+  return { srcStart: srcIdx[r.start], len: srcIdx[r.end - 1] - srcIdx[r.start] + 1 };
+}
+
+/**
+ * comp が属するステップの種類（'code'|'bold'|'italic'|'del'|'image'|'link'|'bareurl'）を求める。
+ * インライン生表示（reveal）が「どの装飾か」を判定するのに使う（content と違い常に comp 全体に対して
+ * 定まる。合併した comp は最後に被せたステップ、すなわち一番外側の装飾を指す）。
+ * kind === 'inherit'（コード復元ステップ）は、comp がプレースホルダ全体＝直前ステップの単一 group と
+ * ちょうど一致する前提で、その group の kind をそのまま引き継ぐ。
+ */
+function computeKind(comp, kind, grp, groupSpans) {
+  if (kind !== 'inherit') return kind;
+  const g0 = grp[comp.start];
+  if (g0 === -1 || grp[comp.end - 1] !== g0) return null;
+  return groupSpans[g0] ? groupSpans[g0].kind : null;
+}
+
+function applyInlineStep(state, regex, buildHtml, contentRange, kind) {
   const { text, grp, srcIdx, groupSpans } = state;
   // ゼロ幅マッチは除去する。残すと [start, start) の空区間を持つ comp ができ、
   // フェーズ A/B の区間分割（区間は必ず非空という前提）が壊れる
@@ -221,7 +276,12 @@ function applyInlineStep(state, regex, buildHtml) {
       if (span.srcEnd > srcEnd) srcEnd = span.srcEnd;
     }
     const gid = state.nextGroupId++;
-    groupSpans[gid] = { srcStart, srcEnd };
+    groupSpans[gid] = {
+      srcStart,
+      srcEnd,
+      content: computeContent(comp, contentRange, grp, srcIdx, groupSpans, matches),
+      kind: computeKind(comp, kind, grp, groupSpans),
+    };
 
     const pieces = comp.pieces.slice().sort((a, b) => matches[a].index - matches[b].index);
     let pos = comp.start;
@@ -305,16 +365,36 @@ function stripTagsQuoteAware(html) {
   return out;
 }
 
+// インライン生表示（reveal）で「マーカーごと生 raw を見せてよい」装飾の種類。画像は raw が
+// alt/src の属性にしか現れず見せても意味がなく、裸URLはそもそも raw === 可視テキストで
+// 隠れているマーカーが無いため対象外にする。
+const REVEALABLE_KINDS = new Set(['code', 'bold', 'italic', 'del', 'link']);
+function isRevealableKind(kind) {
+  return REVEALABLE_KINDS.has(kind);
+}
+
 /**
  * raw（escapeHtml 前）の行テキストからインライン装飾を解決し、セグメント列を返す。
- * 各セグメントは { srcStart, srcEnd, html, visibleText }。
+ * 各セグメントは { srcStart, srcEnd, html, visibleText, charMap, kind }。
  *   - srcStart/srcEnd は raw 文字列上のオフセット（[srcStart, srcEnd) の半開区間）。
  *     全セグメントの srcStart/srcEnd は [0, raw.length) を隙間なく覆う
  *   - html は全セグメント連結すると inlineMarkdown(escapeHtml(raw)) と完全一致する
  *   - visibleText は DOM の textContent 相当（タグを除去しエンティティをデコードした可視文字）
+ *   - charMap は { srcStart, len } | null。非 null なら可視文字 i（0 <= i < len）が
+ *     raw オフセット charMap.srcStart + i に厳密対応する（対称マーカーの装飾・リンクラベル・
+ *     裸URLで、ネストした装飾を含まない場合のみ）。null は画像・ネスト装飾など、
+ *     可視文字と raw 位置が 1:1 対応しない（呼び出し側は srcStart/srcEnd への丸めに頼る）
+ *   - kind は 'code'|'bold'|'italic'|'del'|'image'|'link'|'bareurl'|null（プレーンテキスト）。
+ *     isRevealableKind(kind) が true のセグメントだけが reveal 対象になりうる
  * srcStart/srcEnd は「トップレベルの構成要素」単位（ネストした装飾は外側 1 セグメントの html に含まれる）。
+ *
+ * @param {string} raw
+ * @param {{start: number, end: number} | null} [reveal] 指定すると、raw 上で
+ *   [reveal.start, reveal.end) にちょうど一致する reveal 対象セグメント（isRevealableKind）を、
+ *   装飾変換を通さない生テキストの html（charMap は raw への恒等写像）に差し替える。一致する
+ *   セグメントが無ければ何もしない（インライン生表示の描画・写像が reveal 状態を考慮するのに使う）
  */
-function inlineSegments(raw) {
+function inlineSegments(raw, reveal) {
   const { text: initialText, srcIdx: initialSrcIdx } = escapeAndTrackOffsets(raw);
   const state = {
     text: initialText,
@@ -328,14 +408,14 @@ function inlineSegments(raw) {
   applyInlineStep(state, CODE_RE, (m) => {
     codeBlocks.push(m[1]);
     return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
-  });
-  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]));
-  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]));
-  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]));
-  applyInlineStep(state, IMAGE_RE, (m) => buildImageHtml(m[1], m[2]));
-  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]));
-  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]));
-  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>');
+  }, codeContentRange, 'code');
+  applyInlineStep(state, BOLD_RE, (m) => buildStrongHtml(m[1]), boldContentRange, 'bold');
+  applyInlineStep(state, ITALIC_RE, (m) => buildEmHtml(m[1]), italicContentRange, 'italic');
+  applyInlineStep(state, DEL_RE, (m) => buildDelHtml(m[1]), delContentRange, 'del');
+  applyInlineStep(state, IMAGE_RE, (m) => buildImageHtml(m[1], m[2]), null, 'image');
+  applyInlineStep(state, LINK_RE, (m) => buildLinkHtml(m[1], m[2]), linkContentRange, 'link');
+  applyInlineStep(state, BAREURL_RE, (m) => buildBareUrlHtml(m[1], m[2]), bareUrlContentRange, 'bareurl');
+  applyInlineStep(state, CODE_RESTORE_RE, (m) => '<code>' + codeBlocks[m[1]] + '</code>', 'inherit', 'inherit');
 
   const segments = [];
   let i = 0;
@@ -344,44 +424,100 @@ function inlineSegments(raw) {
     let j = i + 1;
     while (j < state.text.length && state.grp[j] === g) j++;
     const html = state.text.slice(i, j);
-    const { srcStart, srcEnd } =
-      g === -1 ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1 } : state.groupSpans[g];
-    segments.push({ srcStart, srcEnd, html, visibleText: decodeEntities(stripTagsQuoteAware(html)) });
+    const { srcStart, srcEnd, content, kind } =
+      g === -1
+        ? { srcStart: state.srcIdx[i], srcEnd: state.srcIdx[j - 1] + 1, content: null, kind: null }
+        : state.groupSpans[g];
+    const visibleText = decodeEntities(stripTagsQuoteAware(html));
+    // content.len は可視文字数のはずだが、想定外の不一致があれば安全側（丸めへのフォールバック）に倒す
+    const charMap = content && content.len === visibleText.length ? content : null;
+    if (reveal && srcStart === reveal.start && srcEnd === reveal.end && isRevealableKind(kind)) {
+      const literalRaw = raw.slice(srcStart, srcEnd);
+      segments.push({
+        srcStart,
+        srcEnd,
+        html: `<span class="md-reveal">${escapeHtml(literalRaw)}</span>`,
+        visibleText: literalRaw,
+        charMap: { srcStart, len: literalRaw.length },
+        kind,
+      });
+    } else {
+      segments.push({ srcStart, srcEnd, html, visibleText, charMap, kind });
+    }
     i = j;
   }
   return segments;
 }
 
-function renderMarkdown(text) {
+/**
+ * 行配列を先頭から走査し、コードブロックとして描画するフェンスの範囲を
+ * Map<開始行, { end, closed }> で返す（開始行は開きフェンス自身）。renderMarkdown（フェンスの
+ * 描画判定）と note.js の末尾空行正規化（閉じフェンスが最終行になったら空行を1行足す）が
+ * 同じ判定を共有するための土台。
+ *
+ * end は閉じフェンス自身の行（内容は [開始行+1, end) ）。closed は常に true（範囲に含める
+ * フェンスは開き・閉じが揃っているものだけのため）。
+ *
+ * 対応する閉じフェンスの無い開きフェンスはコードブロック化せず、常にリテラルのテキスト行として
+ * 扱う（範囲に含めない）。
+ */
+function scanFenceRanges(lines) {
+  const ranges = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^```\s*$/.test(lines[i])) continue;
+    let closeIdx = -1;
+    for (let k = i + 1; k < lines.length; k++) {
+      if (/^```\s*$/.test(lines[k])) { closeIdx = k; break; }
+    }
+    if (closeIdx !== -1) {
+      ranges.set(i, { end: closeIdx, closed: true });
+      i = closeIdx;
+    }
+    // else: 閉じフェンスが無い → リテラル行として扱う（範囲に含めず素通り）
+  }
+  return ranges;
+}
+
+/** 行内容（マーカーを除いた raw）を装飾込みの html にする。revealRange（{start, end}、
+ * text 上のローカルな raw オフセット）を渡すと、それに一致する装飾セグメントだけ生 raw で
+ * 表示する（inlineSegments 経由）。無指定時は通常の逐次置換チェーン（inlineMarkdown）を使う。 */
+function renderInline(text, revealRange) {
+  if (!revealRange) return inlineMarkdown(escapeHtml(text));
+  return inlineSegments(text, revealRange).map((s) => s.html).join('');
+}
+
+/**
+ * @param {string} text
+ * @param {{line: number, start: number, end: number} | null} [reveal] インライン生表示の
+ *   対象行・範囲（start/end はその行のマーカーを除いた内容上の raw オフセット）。指定した行の
+ *   一致する装飾セグメントだけ生 raw で表示する（renderInline 参照）。
+ */
+function renderMarkdown(text, reveal) {
   if (!text) {
     // window.I18N を読み込まずに renderMarkdown 単体を呼ぶ場面（テスト・node 環境等）でも壊れないようフォールバックする
     const placeholder = (typeof window !== 'undefined' && window.I18N) ? window.I18N.t('notePlaceholder') : 'メモを入力…';
-    return `<div class="md-placeholder">${placeholder}</div>`;
+    // data-line 付きの空ブロックにし、プレースホルダ文言は ::before の CSS content（data-placeholder
+    // 属性）で表示だけする。文言をテキストノードとして直接持たせると、それ自体がキャレットの
+    // 着地点・編集対象になってしまい、空の付箋へキャレットを置けなくなる
+    return `<div class="md-empty md-placeholder" data-line="0" data-placeholder="${escapeAttr(placeholder)}"></div>`;
   }
   // Normalize non-breaking spaces (contenteditable often inserts \u00A0)
   const lines = text.replace(/\u00A0/g, ' ').split('\n');
   const result = [];
-  let inCodeBlock = false;
-  let codeLines = [];
-  let codeStart = 0;
+  const fenceRanges = scanFenceRanges(lines);
   const orderedCounters = {}; // track counters per indent level
   let lastOrderedLevel = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (!inCodeBlock && /^```\S*\s*$/.test(line)) {
-      inCodeBlock = true;
-      codeLines = [];
-      codeStart = i;
-      continue;
-    }
-    if (inCodeBlock && /^```\s*$/.test(line)) {
-      result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${i}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
-      inCodeBlock = false;
-      codeLines = [];
-      continue;
-    }
-    if (inCodeBlock) {
-      codeLines.push(line);
+    if (fenceRanges.has(i)) {
+      const { end, closed } = fenceRanges.get(i);
+      const codeLines = lines.slice(i + 1, closed ? end : end + 1);
+      // 末尾の内容行が空のとき、<pre> のテキストは "\n" で終わるが末尾の改行は行ボックスを
+      // 作らないため、その空行が描画されずキャレットも置けない。<br> フィラーで行ボックスを
+      // 確保する（テキストノードの後ろに足すのでソース位置とのオフセット対応は変わらない）
+      const filler = codeLines.length && codeLines[codeLines.length - 1] === '' ? '<br>' : '';
+      result.push(`<pre class="md-codeblock" data-line="${i}" data-line-end="${end}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + filler + '</code></pre>');
+      i = end;
       continue;
     }
     // Measure and strip indent for nested lists
@@ -392,6 +528,7 @@ function renderMarkdown(text) {
     const level = Math.floor(spaces / 2);
     const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
     const indentClass = level > 0 ? ` md-indent-${Math.min(level, 5)}` : '';
+    const revealHere = reveal && reveal.line === i ? { start: reveal.start, end: reveal.end } : null;
 
     // Reset ordered list counters when line is not a numbered list
     if (!/^\d+\. /.test(trimmedLine)) {
@@ -399,24 +536,30 @@ function renderMarkdown(text) {
       Object.keys(orderedCounters).forEach(k => delete orderedCounters[k]);
     }
 
+    // 内容が空だと <span></span> にテキストノードが 1 つも無くなり、raw 位置から DOM 位置への
+    // 解決（note.js の domPointForContentVisible）がテキストノードを見つけられず、ブロック
+    // 直下（<input> の直前 = 見た目上チェックボックスの位置）へフォールバックしてしまう。
+    // 潰れない文字（&nbsp;）を 1 つ挟んでテキストノードを確保する
     if (/^[-*] \[x\] /i.test(trimmedLine)) {
-      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+      result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
     if (/^[-*] \[ \] /.test(trimmedLine)) {
-      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inlineMarkdown(escapeHtml(trimmedLine.slice(6)))}</span></div>`);
+      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+      result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('### ')) {
-      result.push(`<div class="md-h3" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(4)))}</div>`);
+      result.push(`<div class="md-h3" data-line="${i}">${renderInline(trimmedLine.slice(4), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('## ')) {
-      result.push(`<div class="md-h2" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(3)))}</div>`);
+      result.push(`<div class="md-h2" data-line="${i}">${renderInline(trimmedLine.slice(3), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && trimmedLine.startsWith('# ')) {
-      result.push(`<div class="md-h1" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-h1" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) {
@@ -424,11 +567,11 @@ function renderMarkdown(text) {
       continue;
     }
     if (/^[-*] /.test(trimmedLine)) {
-      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (/^> /.test(trimmedLine)) {
-      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine.slice(2)))}</div>`);
+      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
       continue;
     }
     if (/^\d+\. /.test(trimmedLine)) {
@@ -446,23 +589,23 @@ function renderMarkdown(text) {
       }
       lastOrderedLevel = level;
       const displayNum = orderedCounters[level];
-      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span> ${inlineMarkdown(escapeHtml(m[2]))}</div>`);
+      // 内容が空だと通常の半角スペースは contenteditable 上で潰れてしまい（他に文字が無い
+      // ノードの末尾空白は折りたたまれる）、キャレットの着地点が無くなって beforeinput が
+      // 発火しない。潰れない区切り文字として &nbsp;（U+00A0）を使う
+      const sep = m[2] === '' ? ' ' : ' ';
+      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${renderInline(m[2], revealHere)}</div>`);
       continue;
     }
     if (line === '') {
       result.push(`<div class="md-empty" data-line="${i}"></div>`);
       continue;
     }
-    result.push(`<div class="md-line${indentClass}" data-line="${i}">${inlineMarkdown(escapeHtml(trimmedLine))}</div>`);
-  }
-  // Handle unclosed code block
-  if (inCodeBlock) {
-    result.push(`<pre class="md-codeblock" data-line="${codeStart}" data-line-end="${lines.length - 1}"><code>` + codeLines.map(l => escapeHtml(l)).join('\n') + '</code></pre>');
+    result.push(`<div class="md-line${indentClass}" data-line="${i}">${renderInline(trimmedLine, revealHere)}</div>`);
   }
   return result.join('');
 }
 
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt };
+  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges, isRevealableKind };
 }

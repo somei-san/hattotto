@@ -13,7 +13,7 @@ function dispatchOnImage(type: string, options: MouseEventInit = {}) {
 }
 
 test.describe("画像のダブルクリック・右クリックメニュー", () => {
-  test("画像のシングルクリック → 生表示に入らない", async ({ browser }) => {
+  test("画像のシングルクリック → 選択状態になりキャレットは置かれない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: CONTENT }, {}, { captureInvokes: true });
@@ -22,7 +22,7 @@ test.describe("画像のダブルクリック・右クリックメニュー", ()
 
     await page.evaluate(dispatchOnImage, "mouseup");
 
-    await expect(page.locator("#editor")).toHaveCount(0);
+    await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await ctx.close();
   });
@@ -96,18 +96,22 @@ test.describe("画像のダブルクリック・右クリックメニュー", ()
     await ctx.close();
   });
 
-  test("画像行を含む付箋の余白クリック → 画像以外の行が生表示になる（画像行が編集不能になる退行の固定）", async ({ browser }) => {
+  test("画像行を含む付箋の余白クリック → 画像以外の行にキャレットが置かれる（画像行が編集不能になる退行の固定）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `${CONTENT}\nテキスト行` }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 余白クリック（enterEdit の line 省略）は最終行の生表示に入る
+    // 余白クリック（enterEdit の line 省略）は最終行へキャレットを置く
     await enterEdit(page);
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("テキスト行");
+    const line = await page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode ?? null;
+      return (node instanceof Element ? node : node?.parentElement)?.closest("[data-line]")?.textContent;
+    });
+    expect(line).toBe("テキスト行");
+    await expect(page.locator(".img-selected")).toHaveCount(0);
 
     await ctx.close();
   });

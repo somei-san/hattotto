@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, injectNoteMock, selectMarkdownRange } from "./fixtures";
+import { test, expect, getContent, injectNoteMock, selectMarkdownRange, commitHistory } from "./fixtures";
 
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
@@ -6,8 +6,6 @@ const IMAGE_LINE = `![](${IMAGE_PATH})`;
 // 行またぎ選択（および描画上の単一行選択。削除系と同じ resolveDeletableBounds の対象）がある
 // 状態でのタイピング・ペーストによる置換系の操作。削除 splice と挿入テキストを 1 回の
 // applyLines にまとめる（commitSelectionReplacement）ため、undo は 1 手で「選択+入力前」に戻る。
-// 画像保存等の非同期処理を挟むペーストは holdSave が debounce の起動を保留し、一連の操作が
-// 終わってからまとめて 1 回だけ発火させることで undo 1 手を保つ。
 // 削除だけ（挿入テキストなし）の経路は selection-edit-e2e.spec.ts を参照。
 
 function dispatchPaste(page: import("@playwright/test").Page, plain: string, html?: string) {
@@ -18,23 +16,6 @@ function dispatchPaste(page: import("@playwright/test").Page, plain: string, htm
     const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
     document.dispatchEvent(ev);
   }, [plain, html] as const);
-}
-
-/** 生エディタ内の起点から、別の描画済み行（mdView 側）まで伸びる DOM 選択を張る。
- * 生エディタが focus を持ったまま、選択（Range）だけが行をまたぐ状態を再現する
- * （selectionSpansLines は true だが、選択は生エディタに触れている）。
- * selection-edit-e2e.spec.ts の同名ヘルパーと同じ構成（cut のフェイルクローズテストに倣う）。 */
-async function selectFromEditorIntoRenderedLine(page: import("@playwright/test").Page, renderedLine: number) {
-  await page.evaluate((l) => {
-    const ed = document.getElementById("editor")!;
-    const other = document.querySelector(`#markdown-view [data-line="${l}"]`)!;
-    const range = document.createRange();
-    range.setStart(ed.firstChild ?? ed, 0);
-    range.setEnd(other.firstChild ?? other, 0);
-    const sel = window.getSelection()!;
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }, renderedLine);
 }
 
 test.describe("行またぎ選択 + タイピングで置換される", () => {
@@ -48,8 +29,8 @@ test.describe("行またぎ選択 + タイピングで置換される", () => {
 
     expect(await getContent(page)).toBe("# Heading\nxtwo\ntail");
 
-    // scheduleSave() の 300ms デバウンスが確定し、history.commit が積まれるのを待つ
-    await page.waitForTimeout(400);
+    // 保存を確定させ、history.commit を積ませる
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);
@@ -60,9 +41,8 @@ test.describe("行またぎ選択 + タイピングで置換される", () => {
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length);
     await page.keyboard.press("x");
-    await page.keyboard.press("y"); // 続けての入力はそのまま生エディタが拾う
+    await page.keyboard.press("y"); // 続けての入力はそのままキャレット位置へ入る
 
-    await expect(page.locator("#editor")).toBeVisible();
     expect(await getContent(page)).toBe("xy");
   });
 });
@@ -88,6 +68,16 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     expect(await getContent(page)).toBe("aXYef\nghi");
   });
 
+  test("開始行が可視行頭から始まる選択へのペースト → 開始行のマーカーごと置き換わる", async ({ openNote }) => {
+    const page = await openNote({ content: "- item\nxyz" });
+
+    // "- |item" の可視行頭（マーカー直後）〜 "xy|z"（可視オフセット 2）
+    await selectMarkdownRange(page, 0, 0, 1, 2);
+    await dispatchPaste(page, "NEW");
+
+    expect(await getContent(page)).toBe("NEWz");
+  });
+
   test("複数行テキストのペーストで置換され、行が展開される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef\nghi" });
 
@@ -95,7 +85,6 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     await dispatchPaste(page, "X\nY");
 
     expect(await getContent(page)).toBe("aX\nYef\nghi");
-    await expect(page.locator("#editor")).toBeVisible();
   });
 
   test("リッチテキスト（HTML 含む）ペーストは nodeToMd 変換を経由して置換される", async ({ openNote }) => {
@@ -125,27 +114,6 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
   });
 });
 
-test.describe("生エディタに触れる選択への paste はフェイルクローズする", () => {
-  // 実アプリではネイティブ Edit メニューの Paste が ⌘V を先取りし、keydown ガードを通らずに
-  // paste イベントが直接届く。その経路（paste イベントの直接 dispatch で再現）でも
-  // ブロックされること（selection-edit-e2e.spec.ts の cut の同型テストに倣う）
-  test("paste イベント直接（ネイティブメニュー経由相当）もブロックされ、何も変更しない", async ({ openNote }) => {
-    const page = await openNote({ content: "abc\ndef" });
-    await enterEdit(page, 0);
-    await selectFromEditorIntoRenderedLine(page, 1);
-
-    const notCanceled = await page.evaluate(() => {
-      const dt = new DataTransfer();
-      dt.setData("text/plain", "XY");
-      const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt });
-      return document.dispatchEvent(ev);
-    });
-
-    expect(notCanceled).toBe(false); // preventDefault されている（既定の paste に落ちない）
-    expect(await getContent(page)).toBe("abc\ndef");
-  });
-});
-
 test.describe("Shift・⌥ 付き文字入力でも置換される", () => {
   test("Shift 付き文字（大文字）で置換される", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
@@ -160,11 +128,16 @@ test.describe("Shift・⌥ 付き文字入力でも置換される", () => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length);
-    // ⌥8 の実キー入力は OS のキーボードレイアウトに依存するため、変換済みの e.key を
-    // 合成 keydown で再現する
+    // ⌥8 の実キー入力は OS のキーボードレイアウトに依存し、かつ置換はブラウザが発火する
+    // 実際の（isTrusted な）beforeinput 経由でのみ起きるため、合成 keydown では再現できない。
+    // 変換済みの文字が挿入される beforeinput(insertText) を直接 dispatch して、
+    // ディスパッチャがその inputType をどう扱うかを検証する
     await page.evaluate(() => {
-      const ev = new KeyboardEvent("keydown", { key: "•", altKey: true, bubbles: true, cancelable: true });
-      document.dispatchEvent(ev);
+      const view = document.getElementById("markdown-view")!;
+      const ev = new InputEvent("beforeinput", {
+        inputType: "insertText", data: "•", bubbles: true, cancelable: true,
+      });
+      view.dispatchEvent(ev);
     });
 
     expect(await getContent(page)).toBe("•");
@@ -189,6 +162,24 @@ test.describe("URL ペーストのリンク化（描画側選択）", () => {
 
     expect(await getContent(page)).toBe("https://example.com");
   });
+
+  test("URL に `)` を含む場合はリンク化せず素の URL 挿入に落ちる（リンクの終端と衝突するため）", async ({ openNote }) => {
+    const page = await openNote({ content: "hello world" });
+
+    await selectMarkdownRange(page, 0, 0, 0, "hello".length);
+    await dispatchPaste(page, "https://example.com/foo(bar)");
+
+    expect(await getContent(page)).toBe("https://example.com/foo(bar) world");
+  });
+
+  test("選択テキストに `]` を含む場合はラベルから除去したうえでリンク化する", async ({ openNote }) => {
+    const page = await openNote({ content: "he]lo world" });
+
+    await selectMarkdownRange(page, 0, 0, 0, "he]lo".length);
+    await dispatchPaste(page, "https://example.com");
+
+    expect(await getContent(page)).toBe("[helo](https://example.com) world");
+  });
 });
 
 test.describe("画像行フォールバック（削除後キャレット行が画像のみになる）", () => {
@@ -211,15 +202,14 @@ test.describe("ペーストの undo 手数", () => {
     await dispatchPaste(page, "XY");
     expect(await getContent(page)).toBe("aXYef\nghi");
 
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);
   });
 
   // save_pasted_image の解決に 400ms かける。削除の scheduleSave（300ms デバウンス）が
-  // holdSave で保留されていなければ、この待ち時間の途中でデバウンスが先に切れて「削除だけ」を
-  // history へ積んでしまい、undo が 2 手に割れる
+  // この待ち時間の途中で先に切れると「削除だけ」を history へ積んでしまい、undo が 2 手に割れる
   test("クリップボード画像ペースト（save_pasted_image の解決に 400ms かかる）も undo 1 手で選択+ペースト前に戻る", async ({ browser }) => {
     const content = "abc\ndef";
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
@@ -241,7 +231,7 @@ test.describe("ペーストの undo 手数", () => {
       "![](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
 
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);
@@ -295,12 +285,12 @@ test.describe("IME での置換は非対応（何も起きない・選択が壊�
     expect(await page.evaluate(() => window.getSelection()!.toString())).toBe("abc\ndef");
   });
 
-  test("生エディタにフォーカスが無いため document.activeElement は編集不可のまま", async ({ openNote }) => {
+  test("mdView 内に選択を張ると、ブラウザが mdView へフォーカスを移す（contenteditable の既定動作）", async ({ openNote }) => {
     const page = await openNote({ content: "abc\ndef" });
 
     await selectMarkdownRange(page, 0, 0, 1, "def".length);
 
     const isEditable = await page.evaluate(() => (document.activeElement as HTMLElement)?.isContentEditable ?? false);
-    expect(isEditable).toBe(false);
+    expect(isEditable).toBe(true);
   });
 });

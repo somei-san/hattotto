@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock, enterEdit, getContent } from "./fixtures";
+import { test, expect, injectNoteMock, getContent } from "./fixtures";
 
 // 選択中の画像は ⌘C でコピー（選択は維持）、⌘X でコピーしたうえで確認ダイアログ無しに
 // 削除できる。⌘C/⌘X はネイティブ Edit メニューがショートカットを先取りするため keydown
@@ -12,7 +12,7 @@ const IMAGE_LINE = `![](${IMAGE_PATH})`;
 
 function selectImageAtLine(page: import("@playwright/test").Page, line: number) {
   return page.evaluate(
-    (l) => (window as unknown as { enterLine(l: number, c: number | null): void }).enterLine(l, null),
+    (l) => (window as unknown as { placeCaretAtRaw(l: number, c: number | null): void }).placeCaretAtRaw(l, null),
     line,
   );
 }
@@ -109,7 +109,6 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
 
     // コピーは選択を解除しない
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -157,9 +156,12 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
     // 確認ダイアログ相当の待ち合わせ無しに、1 回の invoke で即座に消える
     await expect.poll(() => getContent(page)).toBe("text0\ntext2");
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    // Backspace と同じキャレット配置（前の行）
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text0");
+    // Backspace と同じキャレット配置（前の行）にキャレットがあること
+    const line = await page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode ?? null;
+      return (node instanceof Element ? node : node?.parentElement)?.closest("[data-line]")?.getAttribute("data-line");
+    });
+    expect(line).toBe("0");
 
     await ctx.close();
   });
@@ -175,8 +177,7 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
     await selectImageAtLine(page, 0);
     await dispatchClipboardEvent(page, "cut");
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text1");
+    await expect.poll(() => getContent(page)).toBe("text1\ntext2");
 
     await ctx.close();
   });
@@ -206,48 +207,45 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
     await ctx.close();
   });
 
-  test("生エディタ内の copy では copy_image が割り込まず、内容も変わらない", async ({ browser }) => {
+  test("非画像のテキスト選択の copy では copy_image が割り込まず、内容も変わらない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}` }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 画像は選択せず、通常のテキスト行を生表示にする。⌘A は付箋全体を選択する
-    // （selectAllNote）ため、生エディタ内だけを選択するにはここでは Range を直接張る
-    await enterEdit(page, 0);
+    // 画像は選択せず、通常のテキスト行（text0）を選択する
     await page.evaluate(() => {
-      const ed = document.getElementById("editor")!;
+      const line = document.querySelector('[data-line="0"]')!;
       const range = document.createRange();
-      range.selectNodeContents(ed);
+      range.selectNodeContents(line);
       const sel = window.getSelection()!;
       sel.removeAllRanges();
       sel.addRange(range);
     });
 
-    // 実際のキー操作（selectedImage が無いのでブラウザ既定のコピーに任される経路）
+    // 実際のキー操作（selectedImage が無いので画像用ハンドラは介入しない）
     await page.keyboard.press("ControlOrMeta+c");
 
     const copyCalls = await capturedCalls(page, "copy_image");
     expect(copyCalls.length).toBe(0);
     // コピーはテキストを変えない
-    expect(await page.locator("#editor").textContent()).toBe("text0");
+    expect(await getContent(page)).toBe(`text0\n${IMAGE_LINE}`);
 
     await ctx.close();
   });
 
-  test("生エディタ内の cut では cut_image が割り込まず、ネイティブのカットでテキストが切り取られる", async ({ browser }) => {
+  test("非画像のテキスト選択の cut では cut_image が割り込まず、選択したテキストが切り取られる", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}` }, {}, { captureInvokes: true });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    await enterEdit(page, 0);
     await page.evaluate(() => {
-      const ed = document.getElementById("editor")!;
+      const line = document.querySelector('[data-line="0"]')!;
       const range = document.createRange();
-      range.selectNodeContents(ed);
+      range.selectNodeContents(line);
       const sel = window.getSelection()!;
       sel.removeAllRanges();
       sel.addRange(range);
@@ -257,8 +255,8 @@ test.describe("選択中の画像を ⌘C / ⌘X でコピー・カットする�
 
     const cutCalls = await capturedCalls(page, "cut_image");
     expect(cutCalls.length).toBe(0);
-    // 割り込まれていなければブラウザ既定のカットが働き、選択していたテキストが切り取られる
-    expect(await page.locator("#editor").textContent()).toBe("");
+    // 割り込まれていなければ選択していたテキストが切り取られる
+    await expect.poll(() => getContent(page)).toBe(`\n${IMAGE_LINE}`);
 
     await ctx.close();
   });

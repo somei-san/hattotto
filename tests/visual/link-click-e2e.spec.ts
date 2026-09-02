@@ -94,8 +94,42 @@ test.describe("リンククリック", () => {
     // リンクをクリック
     await link.click();
 
-    // 描画されたままであることを確認
+    // 描画されたままであることを確認（クリックでキャレットが割り込まない）
     await expect(link).toBeVisible();
-    await expect(page.locator("#editor")).toHaveCount(0);
+  });
+});
+
+test.describe("リンク上の mousedown は主ボタンの単クリックだけ抑止する", () => {
+  /** リンク要素へ mousedown を dispatch し、note.js のハンドラが preventDefault したかを返す。 */
+  function dispatchLinkMousedown(
+    page: import("@playwright/test").Page,
+    init: Partial<MouseEventInit>,
+  ) {
+    return page.evaluate((opts) => {
+      const link = document.querySelector("a[data-url]")!;
+      const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, ...opts });
+      link.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    }, init);
+  }
+
+  test("主ボタンの単クリックは抑止される（既定のキャレット配置・reveal 発火を防ぐ）", async ({ openNote }) => {
+    const page = await openNote({ content: "[Example](https://example.com)" });
+    expect(await dispatchLinkMousedown(page, { button: 0, detail: 1 })).toBe(true);
+  });
+
+  test("ダブルクリックの2打目（語選択）は抑止されない", async ({ openNote }) => {
+    const page = await openNote({ content: "[Example](https://example.com)" });
+    expect(await dispatchLinkMousedown(page, { button: 0, detail: 2 })).toBe(false);
+  });
+
+  test("右クリック（コンテキストメニュー）は抑止されない", async ({ openNote }) => {
+    const page = await openNote({ content: "[Example](https://example.com)" });
+    expect(await dispatchLinkMousedown(page, { button: 2, detail: 1 })).toBe(false);
+  });
+
+  test("修飾キー付きクリック（新規タブで開く等）は抑止されない", async ({ openNote }) => {
+    const page = await openNote({ content: "[Example](https://example.com)" });
+    expect(await dispatchLinkMousedown(page, { button: 0, detail: 1, metaKey: true })).toBe(false);
   });
 });

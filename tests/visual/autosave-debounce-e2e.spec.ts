@@ -14,7 +14,7 @@ test.describe("自動保存デバウンス", () => {
     await page.evaluate(() => { (window as any).__captured_invokes.length = 0; });
 
     // 高速で5文字連続入力（各入力間にデバウンスリセットが起こる）
-    await page.locator("#editor").pressSequentially("abcde", { delay: 50 });
+    await page.locator("#markdown-view").pressSequentially("abcde", { delay: 50 });
 
     // 入力直後（50ms * 5 = 250ms程度）はまだデバウンス中
     const callsImmediate = await page.evaluate(() =>
@@ -52,13 +52,13 @@ test.describe("自動保存デバウンス", () => {
     await page.evaluate(() => { (window as any).__captured_invokes.length = 0; });
 
     // 1文字入力
-    await page.locator("#editor").press("x");
+    await page.locator("#markdown-view").press("x");
 
     // 200ms待機（300msデバウンス内）
     await page.waitForTimeout(200);
 
     // デバウンスタイマー内にもう1文字入力 → タイマーリセット
-    await page.locator("#editor").press("y");
+    await page.locator("#markdown-view").press("y");
 
     // この時点ではまだinvokeされていない
     const callsMid = await page.evaluate(() =>

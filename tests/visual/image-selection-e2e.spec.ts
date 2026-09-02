@@ -1,8 +1,13 @@
 import { test, expect, injectNoteMock, enterEdit, placeCaret, getContent } from "./fixtures";
 
-// 画像のみの行（前後空白のみの `![alt|width](images/...)`）は、クリック・↑↓ の
-// どちらからも生表示に入らず、代わりに「選択状態」になる。削除は選択中の
-// Backspace / Delete で行う（image-delete-e2e.spec.ts）。
+// 画像のみの行（前後空白のみの `![alt|width](images/...)`）は、クリックからは
+// #markdown-view のキャレット配置に入らず、代わりに「選択状態」になる（placeCaretAtRaw の
+// 関所）。削除は選択中の Backspace / Delete で行う（image-delete-e2e.spec.ts）。
+//
+// img は contenteditable="false" で DOM 上にキャレットの着地点を持たないため、ネイティブな
+// 矢印移動は画像のみの行を素通りする。テキスト行から矢印キーで画像のみの行へ「入る」ナビゲーションは
+// document レベルの keydown ハンドラが検出して選択状態（selectImage）へ変換する。選択中の画像から
+// 抜ける経路（隣の行への移動）は別の document レベルの keydown ハンドラが対称に扱う。
 
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
@@ -21,7 +26,6 @@ test.describe("画像の選択状態", () => {
     });
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -38,7 +42,6 @@ test.describe("画像の選択状態", () => {
     await page.locator('[data-line="0"]').click({ force: true });
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -50,12 +53,9 @@ test.describe("画像の選択状態", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 余白クリック（画像のみの行が最終行）は選択状態になり #editor は開かないので、
-    // #editor の出現を待つ enterEdit は使わず直接クリックする
     await page.click("#markdown-view");
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -74,7 +74,7 @@ test.describe("画像の選択状態", () => {
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    await page.click("#markdown-view"); // 画像のみの行 1 本 → 選択状態（#editor は開かない）
+    await page.click("#markdown-view"); // 画像のみの行 1 本 → 選択状態
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await page.keyboard.press("Delete");
@@ -82,61 +82,59 @@ test.describe("画像の選択状態", () => {
 
     // 画像が消えた後は通常どおりクリックで入力できる
     await enterEdit(page);
-    await expect(page.locator("#editor")).toBeVisible();
-    await page.locator("#editor").pressSequentially("hello");
+    await page.locator("#markdown-view").pressSequentially("hello");
     expect(await getContent(page)).toBe("hello");
 
     await ctx.close();
   });
 
-  test("↓ でテキスト行 → 画像のみの行（選択）→ テキスト行と遷移する", async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
-    const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
-    await page.goto("/note.html?id=test-note-id");
-    await page.waitForLoadState("networkidle");
+  test(
+    "↓ でテキスト行 → 画像のみの行（選択）→ テキスト行と遷移する",
+    async ({ browser }) => {
+      const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+      const page = await ctx.newPage();
+      await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\ntext2` });
+      await page.goto("/note.html?id=test-note-id");
+      await page.waitForLoadState("networkidle");
 
-    await placeCaret(page, 0, 0);
-    await page.locator("#editor").press("ArrowDown");
+      await placeCaret(page, 0, 0);
+      await page.locator("#markdown-view").press("ArrowDown");
 
-    await expect(page.locator("#editor")).toHaveCount(0);
-    await expect(page.locator(".img-selected")).toHaveCount(1);
+      await expect(page.locator(".img-selected")).toHaveCount(1);
 
-    await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
 
-    await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text2");
+      await expect(page.locator(".img-selected")).toHaveCount(0);
 
-    await ctx.close();
-  });
+      await ctx.close();
+    },
+  );
 
-  test("↑ で連続する画像のみの行を経ても、1 行ずつ選択状態が続く（飛び越えない）", async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
-    const page = await ctx.newPage();
-    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\n${IMAGE_LINE}\ntext3` });
-    await page.goto("/note.html?id=test-note-id");
-    await page.waitForLoadState("networkidle");
+  test(
+    "↑ で連続する画像のみの行を経ても、1 行ずつ選択状態が続く（飛び越えない）",
+    async ({ browser }) => {
+      const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+      const page = await ctx.newPage();
+      await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}\n${IMAGE_LINE}\ntext3` });
+      await page.goto("/note.html?id=test-note-id");
+      await page.waitForLoadState("networkidle");
 
-    await placeCaret(page, 3, 0);
-    await page.locator("#editor").press("ArrowUp"); // text3 → line2（画像のみ、選択）
+      await placeCaret(page, 3, 0);
+      await page.locator("#markdown-view").press("ArrowUp");
 
-    await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
+      await expect(page.locator(".img-selected")).toHaveCount(1);
 
-    await page.keyboard.press("ArrowUp"); // line2 → line1（画像のみ、選択のまま）
+      await page.keyboard.press("ArrowUp");
 
-    await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
+      await expect(page.locator(".img-selected")).toHaveCount(1);
 
-    await page.keyboard.press("ArrowUp"); // line1 → line0（text0、生表示）
+      await page.keyboard.press("ArrowUp");
 
-    await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text0");
+      await expect(page.locator(".img-selected")).toHaveCount(0);
 
-    await ctx.close();
-  });
+      await ctx.close();
+    },
+  );
 
   test("↓ の先が無ければ選択を維持する（端）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
@@ -146,13 +144,12 @@ test.describe("画像の選択状態", () => {
     await page.waitForLoadState("networkidle");
 
     await placeCaret(page, 0, 0);
-    await page.locator("#editor").press("ArrowDown");
+    await page.locator("#markdown-view").press("ArrowDown");
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await page.keyboard.press("ArrowDown");
 
     await expect(page.locator(".img-selected")).toHaveCount(1); // 変わらない
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -165,13 +162,12 @@ test.describe("画像の選択状態", () => {
     await page.waitForLoadState("networkidle");
 
     await placeCaret(page, 1, 0);
-    await page.locator("#editor").press("ArrowUp");
+    await page.locator("#markdown-view").press("ArrowUp");
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await page.keyboard.press("ArrowUp");
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -184,10 +180,9 @@ test.describe("画像の選択状態", () => {
     await page.waitForLoadState("networkidle");
 
     await placeCaret(page, 0, null);
-    await page.locator("#editor").press("ArrowRight");
+    await page.locator("#markdown-view").press("ArrowRight");
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -200,10 +195,44 @@ test.describe("画像の選択状態", () => {
     await page.waitForLoadState("networkidle");
 
     await placeCaret(page, 2, 0);
-    await page.locator("#editor").press("ArrowLeft");
+    await page.locator("#markdown-view").press("ArrowLeft");
 
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
+
+    await ctx.close();
+  });
+
+  test("マーカー付き行の可視行頭（raw col > 0）で ← の先が画像のみの行なら選択状態になる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `${IMAGE_LINE}\n- item` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 1, "- ".length); // "item" の可視行頭（raw col はマーカー長ぶん > 0）
+    await page.locator("#markdown-view").press("ArrowLeft");
+
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await ctx.close();
+  });
+
+  test("折り返しのある行では、最後の視覚行に居るときだけ ↓ が次の画像行への変換を試す", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    const longLine = "a".repeat(80); // 300px 幅で複数の視覚行に折り返す長さ
+    await injectNoteMock(page, { content: `${longLine}\n${IMAGE_LINE}` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await placeCaret(page, 0, 0); // 折り返しの最初の視覚行
+    await page.locator("#markdown-view").press("ArrowDown");
+    // 折り返し内の次の視覚行へ移るだけで、画像行への変換はまだ起きない
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+
+    await placeCaret(page, 0, null); // 折り返しの最後の視覚行（行末）
+    await page.locator("#markdown-view").press("ArrowDown");
+    await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await ctx.close();
   });
@@ -216,24 +245,19 @@ test.describe("画像の選択状態", () => {
     await page.waitForLoadState("networkidle");
 
     await placeCaret(page, 0, null);
-    await page.locator("#editor").press("ArrowRight"); // text0 → 画像行（選択状態）
+    await page.locator("#markdown-view").press("ArrowRight"); // text0 → 画像行（選択状態）
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
-    await page.keyboard.press("ArrowRight"); // 画像行 → text2（↑/↓ ではなく → で抜ける）
+    await page.keyboard.press("ArrowRight"); // 画像行 → text2
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text2");
 
     await page.keyboard.press("ArrowLeft"); // text2 → 画像行（選択状態）
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
-    await page.keyboard.press("ArrowLeft"); // 画像行 → text0（← で抜ける）
+    await page.keyboard.press("ArrowLeft"); // 画像行 → text0
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text0");
 
     await ctx.close();
   });
@@ -251,8 +275,6 @@ test.describe("画像の選択状態", () => {
     await page.keyboard.press("Enter");
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("");
     expect(await getContent(page)).toBe(`text0\n${IMAGE_LINE}\n\ntext2`);
 
     await ctx.close();
@@ -271,9 +293,25 @@ test.describe("画像の選択状態", () => {
     await page.keyboard.press("Shift+Enter");
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("");
     expect(await getContent(page)).toBe(`\n${IMAGE_LINE}\ntext1`);
+
+    await ctx.close();
+  });
+
+  test("選択中に印字キー → no-op（画像は残ったまま文字も入らない）", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `text0\n${IMAGE_LINE}` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.locator('[data-line="1"]').click({ force: true });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await page.keyboard.press("x");
+
+    expect(await getContent(page)).toBe(`text0\n${IMAGE_LINE}`);
+    await expect(page.locator(".img-selected")).toHaveCount(1);
 
     await ctx.close();
   });
@@ -291,7 +329,6 @@ test.describe("画像の選択状態", () => {
     await page.keyboard.press("Escape");
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -309,8 +346,6 @@ test.describe("画像の選択状態", () => {
     await page.locator('[data-line="0"]').click();
 
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text0");
 
     await ctx.close();
   });
@@ -426,25 +461,26 @@ test.describe("画像の選択状態", () => {
     await ctx.close();
   });
 
-  test("未終端フェンスの最終行が画像のみの行に見えても選択にならず、生表示に入る（退行防止）", async ({ browser }) => {
+  test("フェンス内の最終行が画像のみの行に見えても選択にならず、キャレットが置かれる（退行防止）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
-    // 閉じフェンスが無いため、フェンス開始行〜最終行がまとめて 1 つの <pre> ブロックになる
-    const content = "```\ntext\n" + IMAGE_LINE;
+    // 閉じフェンスがあるため、フェンス開始行〜閉じ行がまとめて 1 つの <pre> ブロックになる
+    // （閉じフェンスの無い未終端フェンスは、下に非空行があるとリテラルのテキスト行になり、
+    // 画像行はもう <pre> の中に無い別のテスト観点になる）
+    const content = "```\ntext\n" + IMAGE_LINE + "\n```";
     await injectNoteMock(page, { content });
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
     await enterEdit(page); // 余白クリック → 最終行（フェンス内、見た目は画像のみ）
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe(content);
+    expect(await getContent(page)).toBe(content);
     await expect(page.locator(".img-selected")).toHaveCount(0);
 
     await ctx.close();
   });
 
-  test("テキストと画像が混在する行は従来どおり生表示に入る（選択にならない・退行防止）", async ({ browser }) => {
+  test("テキストと画像が混在する行は従来どおりキャレットが置かれる（選択にならない・退行防止）", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
     const page = await ctx.newPage();
     await injectNoteMock(page, { content: `text ${IMAGE_LINE}` });
@@ -453,8 +489,7 @@ test.describe("画像の選択状態", () => {
 
     await enterEdit(page);
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe(`text ${IMAGE_LINE}`);
+    expect(await getContent(page)).toBe(`text ${IMAGE_LINE}`);
     await expect(page.locator(".img-selected")).toHaveCount(0);
 
     await ctx.close();

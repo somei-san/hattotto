@@ -67,6 +67,16 @@ describe("renderMarkdown — inline & block elements", () => {
     assert.match(html, /<a href="https:\/\/example\.com"/);
   });
 
+  test("link with empty label renders as a link with the correct href (not swallowed by bare-URL matching)", () => {
+    // 空マーカー正規化はリンクを対象外にする（ラベルが空でも URL は実体として
+    // 残るため）。ラベル必須の正規表現だとこの raw がリンクとして解決できず、代わりに裸URL側の
+    // 正規表現が閉じ括弧まで url に巻き込んでしまう
+    const html = renderMarkdown("[](https://example.com)");
+    assert.match(html, /<a href="https:\/\/example\.com"/);
+    assert.doesNotMatch(html, /href="https:\/\/example\.com\)"/);
+    assert.match(html, /<a [^>]*><\/a>/); // 可視テキスト（アンカーの中身）が空になっていること
+  });
+
   test("blockquote", () => {
     const html = renderMarkdown("> text");
     assert.match(html, /class="md-blockquote"/);
@@ -191,9 +201,9 @@ describe("renderMarkdown — edge cases", () => {
     assert.match(html, /\*\*not bold\*\*/);
   });
 
-  test("unclosed code block renders gracefully", () => {
+  test("unclosed fence with content below renders as literal text", () => {
     const html = renderMarkdown("```\nsome code");
-    assert.match(html, /class="md-codeblock"/);
+    assert.doesNotMatch(html, /class="md-codeblock"/);
     assert.match(html, /some code/);
   });
 
@@ -368,5 +378,54 @@ describe("renderMarkdown — NBSP (U+00A0) normalization", () => {
     const html = renderMarkdown("- [ ] task");
     assert.match(html, /class="md-check"/);
     assert.match(html, /type="checkbox"/);
+  });
+});
+
+describe("renderMarkdown — 空チェックボックス項目のキャレット着地点", () => {
+  test("内容が空の未完了チェックボックス行は span に nbsp を持つ", () => {
+    const html = renderMarkdown("- [ ] ");
+    assert.match(html, /<span>&nbsp;<\/span>/);
+  });
+
+  test("内容が空の完了チェックボックス行も同様に nbsp を持つ", () => {
+    const html = renderMarkdown("- [x] ");
+    assert.match(html, /<span>&nbsp;<\/span>/);
+  });
+
+  test("内容があるチェックボックス行には nbsp を挿入しない", () => {
+    const html = renderMarkdown("- [ ] task");
+    assert.doesNotMatch(html, /<span>&nbsp;<\/span>/);
+    assert.match(html, /<span>task<\/span>/);
+  });
+});
+
+describe("renderMarkdown — インライン生表示（reveal）", () => {
+  test("reveal 対象行の装飾は生 raw（マーカー込み）で表示される", () => {
+    const html = renderMarkdown("pre **bold** post", { line: 0, start: 4, end: 12 });
+    assert.doesNotMatch(html, /<strong>/);
+    assert.match(html, /class="md-reveal"/);
+    assert.match(html, />pre <span class="md-reveal">\*\*bold\*\*<\/span> post</);
+  });
+
+  test("reveal 対象でない行はそのまま装飾変換される（複数行中 1 行だけ reveal）", () => {
+    const html = renderMarkdown("**a**\n**b**", { line: 1, start: 0, end: 5 });
+    assert.match(html, /<strong>a<\/strong>/); // 0 行目は通常どおり
+    assert.match(html, /class="md-reveal">\*\*b\*\*<\/span>/); // 1 行目だけ reveal
+  });
+
+  test("reveal のリスト行はマーカーを除いた内容側だけが対象になる（行頭記号自体は元々隠さない）", () => {
+    const html = renderMarkdown("- **bold** item", { line: 0, start: 0, end: 8 });
+    assert.match(html, /class="md-bullet"/); // リストマーカー自体の描画は変わらない
+    assert.match(html, /class="md-reveal">\*\*bold\*\*<\/span>/);
+  });
+
+  test("行・範囲が一致しなければ reveal は適用されない（stale な状態からの自然なフォールバック）", () => {
+    const html = renderMarkdown("**bold**", { line: 5, start: 0, end: 8 }); // 存在しない行
+    assert.match(html, /<strong>bold<\/strong>/);
+    assert.doesNotMatch(html, /md-reveal/);
+  });
+
+  test("reveal 未指定時は挙動が変わらない（既存呼び出しとの後方互換）", () => {
+    assert.equal(renderMarkdown("**bold**"), renderMarkdown("**bold**", null));
   });
 });

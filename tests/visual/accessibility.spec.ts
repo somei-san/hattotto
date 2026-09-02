@@ -1,4 +1,4 @@
-import { test, expect, enterEdit } from "./fixtures";
+import { test, expect } from "./fixtures";
 
 // ── note.html accessibility ──────────────────────────────
 
@@ -19,15 +19,12 @@ test.describe("note.html accessibility", () => {
     }
   });
 
-  test("markdown surface has aria-label and role=document", async ({ notePage }) => {
+  test("markdown surface has aria-label, role=textbox with aria-multiline and is contenteditable", async ({ notePage }) => {
     const mdView = notePage.locator("#markdown-view");
-    await expect(mdView).toHaveAttribute("role", "document");
+    await expect(mdView).toHaveAttribute("role", "textbox");
+    await expect(mdView).toHaveAttribute("aria-multiline", "true");
     await expect(mdView).toHaveAttribute("aria-label", "付箋の内容");
-  });
-
-  test("raw line editor has aria-label", async ({ notePage }) => {
-    await enterEdit(notePage);
-    await expect(notePage.locator("#editor")).toHaveAttribute("aria-label", "付箋の内容");
+    await expect(mdView).toHaveAttribute("contenteditable", "true");
   });
 
   test("pin button has aria-pressed", async ({ notePage }) => {

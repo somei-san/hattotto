@@ -36,7 +36,7 @@ jobs:
           path: ~/Library/Caches/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
 
-      - run: npx playwright install chromium
+      - run: npx playwright install chromium webkit
 
       - run: npm test
 

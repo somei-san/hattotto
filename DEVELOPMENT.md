@@ -24,13 +24,17 @@ cargo tauri build
 ```bash
 # 初回セットアップ
 npm install
-npx playwright install chromium
+npx playwright install chromium webkit
 
-# テスト実行（node の単体テスト → Playwright の順）
+# テスト実行（node の単体テスト → Playwright の順、chromium + webkit 両方）
 npm test
 
 # 単体テストだけ（ブラウザを起動しないので速い）
 npm run test:unit
+
+# 特定エンジンだけ（実機は WKWebView なので webkit 差分の切り分けに使う）
+npm run test:chromium
+npm run test:webkit
 
 # スナップショット更新（UI 変更後）
 npm run test:update

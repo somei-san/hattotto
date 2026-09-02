@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock, enterEdit, getContent } from "./fixtures";
+import { test, expect, injectNoteMock, enterEdit, getContent, placeCaret, commitHistory } from "./fixtures";
 
 // ⌘Z/⌘⇧Z はネイティブメニュー（src-tauri/src/menu.rs）が拾い edit-history イベントで
 // フロントへ通知するため、chromium からはキーボードショートカットを再現できない。
@@ -43,10 +43,10 @@ test.describe("Undo/Redo", () => {
     const { ctx, page } = await openCaptured({ content: "" }, browser);
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("abc");
-    // scheduleSave() の 300ms デバウンスが確定し、history.commit("abc") が積まれるのを待つ
+    await page.locator("#markdown-view").pressSequentially("abc");
+    // 保存を確定させ、history.commit("abc") を積ませる
     await expect.poll(() => getContent(page)).toBe("abc");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("");
@@ -61,8 +61,8 @@ test.describe("Undo/Redo", () => {
     const { ctx, page } = await openCaptured({ content: "" }, browser);
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("abc");
+    await commitHistory(page);
 
     await performUndo(page);
     await expect.poll(() => savedContents(page)).toContain("");
@@ -75,16 +75,19 @@ test.describe("Undo/Redo", () => {
   test("undo 後のキャレットが差分行に置かれる（2行目を編集 → undo で1行目に残らない）", async ({ browser }) => {
     const { ctx, page } = await openCaptured({ content: "line0\nline1" }, browser);
 
-    await page.locator('[data-line="1"]').click();
-    await page.waitForSelector("#editor", { state: "visible" });
-    await page.locator("#editor").pressSequentially("X");
-    await page.waitForTimeout(400);
+    await placeCaret(page, 1);
+    await page.locator("#markdown-view").pressSequentially("X");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("line0\nline1X");
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("line0\nline1");
-    // 差分は 2 行目（index 1）なので、そこが生表示になっているはず
-    expect(await page.locator("#editor").textContent()).toBe("line1");
+    // 差分は 2 行目（index 1）なので、そこにキャレットが置かれているはず
+    const line = await page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode ?? null;
+      return (node instanceof Element ? node : node?.parentElement)?.closest("[data-line]")?.getAttribute("data-line");
+    });
+    expect(line).toBe("1");
 
     await ctx.close();
   });
@@ -93,12 +96,12 @@ test.describe("Undo/Redo", () => {
     const { ctx, page } = await openCaptured({ content: "" }, browser);
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("a");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("a");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("a");
 
-    await page.locator("#editor").pressSequentially("b");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("b");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("ab");
 
     await performUndo(page);
@@ -114,16 +117,16 @@ test.describe("Undo/Redo", () => {
     const { ctx, page } = await openCaptured({ content: "" }, browser);
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("abc");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("abc");
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("");
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("xyz");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("xyz");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("xyz");
 
     // "abc" へ戻る redo は消えているはずなので、performRedo は no-op
@@ -149,7 +152,7 @@ test.describe("Undo/Redo", () => {
     await page.reload();
     await page.waitForLoadState("networkidle");
 
-    await page.evaluate(() => (window as any).enterLine(1, null));
+    await page.evaluate(() => (window as any).placeCaretAtRaw(1, null));
     await expect(page.locator(".img-selected")).toHaveCount(1);
     await page.keyboard.press("Backspace");
     await expect.poll(() => getContent(page)).toBe("text0\ntext2");
@@ -161,15 +164,7 @@ test.describe("Undo/Redo", () => {
   });
 
   // 「編集を確定 → undo → 別の変更（画像削除等）→ redo」で、別の変更を経由せず
-  // undo 前の状態へ巻き戻らないことを検証する。
-  //
-  // 巻き戻りが起きうるのは、画像削除後の着地行が画像のみの行になり activeStart が null の
-  // ままになる（＝ selectImage 経路で生表示に入らない）ことが必須。着地行が通常行だと
-  // enterLine が raw editor を開いて activeStart が立ち、performRedo の flushContent が
-  // saveNow → editHistory.commit を通ってしまうため、redo() 自身の commit 有無に関わらず
-  // テストが green になり、この回帰を検出できない。画像のみの行を 2 行連続にして 2 行目を
-  // 削除し、着地先（1 行目）を画像のみの行のまま残すことで、performRedo が
-  // flushContent の早期 return（saveTimer なし・activeStart null）を通る経路を踏ませる
+  // undo 前の状態へ巻き戻らないことを検証する（画像削除で redoStack がクリアされるため）。
   test("undo 後に画像削除を行うと、その後の performRedo は削除前の状態へ巻き戻らない", async ({ browser }) => {
     const before = `text0\n${IMAGE_LINE_A}\n${IMAGE_LINE_B}`;
     const { ctx, page } = await openCaptured({ content: before }, browser);
@@ -188,9 +183,8 @@ test.describe("Undo/Redo", () => {
 
     // 1手目: text0 行を編集して確定する
     await page.locator('[data-line="0"]').click();
-    await page.waitForSelector("#editor", { state: "visible" });
-    await page.locator("#editor").pressSequentially("X");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("X");
+    await commitHistory(page);
     const edited = `text0X\n${IMAGE_LINE_A}\n${IMAGE_LINE_B}`;
     await expect.poll(() => getContent(page)).toBe(edited);
 
@@ -198,14 +192,12 @@ test.describe("Undo/Redo", () => {
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe(before);
 
-    // 2 枚目（2 行目）の画像を削除する。preferredLineAfter は 1 行目（残る 1 枚目の画像のみの行）
-    // で、そこは selectImage 経路に入るため activeStart は null のまま残る
-    await page.evaluate(() => (window as any).enterLine(2, null));
+    // 2 枚目（2 行目）の画像を削除する
+    await page.evaluate(() => (window as any).placeCaretAtRaw(2, null));
     await expect(page.locator(".img-selected")).toHaveCount(1);
     await page.keyboard.press("Backspace");
     const afterDelete = `text0\n${IMAGE_LINE_A}`;
     await expect.poll(() => getContent(page)).toBe(afterDelete);
-    expect(await page.locator("#editor").count()).toBe(0); // activeStart が立っていないことの確認
 
     // redo は「編集を確定した後の状態（画像 2 枚とも残る）」へ巻き戻ってはいけない。
     // 削除で redoStack はクリアされているので no-op（削除後の状態を維持する）
@@ -220,8 +212,8 @@ test.describe("Undo/Redo", () => {
     const { ctx, page } = await openCaptured({ content: "" }, browser);
 
     await enterEdit(page);
-    await page.locator("#editor").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await page.locator("#markdown-view").pressSequentially("abc");
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("abc");
 
     // appWindow.listen ではなく listen('edit-history', ...) 側（グローバルイベント）に

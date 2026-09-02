@@ -12,6 +12,8 @@ const markdown = {
   renderMarkdown: "readonly",
   inlineSegments: "readonly",
   parseImageAlt: "readonly",
+  scanFenceRanges: "readonly",
+  isRevealableKind: "readonly",
 };
 const noteLines = {
   blockOffset: "readonly",
@@ -22,8 +24,12 @@ const noteLines = {
   isEmptyListItem: "readonly",
   CHECKBOX_RE: "readonly",
   isImageOnlyLine: "readonly",
+  isCheckboxLine: "readonly",
   visibleOffsetToRawOffset: "readonly",
   visibleOffsetFromRawOffset: "readonly",
+  revealTargetAt: "readonly",
+  deletionSurvivingFragment: "readonly",
+  widenRangeForEmptiedDecorations: "readonly",
 };
 const history = {
   createHistory: "readonly",

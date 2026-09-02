@@ -65,4 +65,13 @@ test.describe("checkbox autocomplete E2E", () => {
     const text = await getContent(page);
     expect(text).toBe("hello");
   });
+
+  test("does not autocomplete inside a fenced code block", async ({ openNote }) => {
+    const page = await openNote({ content: "```\n\n```" });
+    await enterEdit(page, 1);
+    await page.keyboard.type("- []", { delay: 30 });
+    const text = await getContent(page);
+    // 閉じフェンスが最終行になる編集は applyLines が末尾に空行を確保する（ensureTrailingLineAfterClosedFence）
+    expect(text).toBe("```\n- []\n```\n");
+  });
 });

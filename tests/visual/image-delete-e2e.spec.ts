@@ -6,12 +6,23 @@ import { test, expect, injectNoteMock, getContent } from "./fixtures";
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
 
-/** 生表示を経由せず、選択状態にするための直接呼び出し（画像のみの行なら enterLine が選択する）。 */
+/** キャレット配置を経由せず、選択状態にするための直接呼び出し（画像のみの行なら
+ * placeCaretAtRaw が選択する）。 */
 function selectImageAtLine(page: import("@playwright/test").Page, line: number) {
   return page.evaluate(
-    (l) => (window as unknown as { enterLine(l: number, c: number | null): void }).enterLine(l, null),
+    (l) => (window as unknown as { placeCaretAtRaw(l: number, c: number | null): void }).placeCaretAtRaw(l, null),
     line,
   );
+}
+
+/** 現在の DOM 選択（キャレット）が属する行番号（data-line）。無ければ null。 */
+function caretLine(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const node = window.getSelection()?.anchorNode ?? null;
+    const el = node instanceof Element ? node : node?.parentElement;
+    const line = el?.closest("[data-line]")?.getAttribute("data-line");
+    return line == null ? null : Number(line);
+  });
 }
 
 /**
@@ -77,8 +88,7 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
 
     await expect.poll(() => getContent(page)).toBe("text0\ntext2");
     await expect(page.locator(".img-selected")).toHaveCount(0);
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text0");
+    await expect.poll(() => caretLine(page)).toBe(0);
 
     await ctx.close();
   });
@@ -98,8 +108,8 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
     expectDeleteImageArgs(args, { imagePath: IMAGE_PATH, imageLine: 1, imageOccurrence: 0 });
 
     // 削除後、旧 line2（"text2"）が index 1 に繰り上がる。Delete はその index を優先する
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text2");
+    await expect.poll(() => getContent(page)).toBe("text0\ntext2");
+    await expect.poll(() => caretLine(page)).toBe(1);
 
     await ctx.close();
   });
@@ -117,8 +127,8 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
     await selectImageAtLine(page, 0);
     await page.keyboard.press("Backspace");
 
-    await expect(page.locator("#editor")).toBeVisible();
-    expect(await page.locator("#editor").textContent()).toBe("text1");
+    await expect.poll(() => getContent(page)).toBe("text1\ntext2");
+    await expect.poll(() => caretLine(page)).toBe(0);
 
     await ctx.close();
   });
@@ -136,10 +146,9 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
     await page.keyboard.press("Delete");
 
     await expect.poll(() => lastDeleteImageCall(page)).toBeTruthy();
-    // content は変わらず、選択も解除されない（生表示にも入らない）
+    // content は変わらず、選択も解除されない
     expect(await getContent(page)).toBe(content);
     await expect(page.locator(".img-selected")).toHaveCount(1);
-    await expect(page.locator("#editor")).toHaveCount(0);
 
     await ctx.close();
   });
@@ -171,7 +180,7 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
     await page.goto("/note.html?id=test-note-id");
     await page.waitForLoadState("networkidle");
 
-    // 混在行は画像本体クリックで選択する（生表示中の行ではない）
+    // 混在行は画像本体クリックで選択する
     await page.evaluate(() => {
       const img = document.querySelector("img")!;
       img.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
@@ -255,11 +264,9 @@ test.describe("選択中の画像を Backspace / Delete で削除する", () => 
     await page.waitForLoadState("networkidle");
 
     await page.locator('[data-line="0"]').click();
-    await page.waitForSelector("#editor", { state: "visible" });
-    await page.locator("#editor").click();
     await page.keyboard.type("X"); // scheduleSave() の 300ms デバウンスが保留中になる
 
-    // 画像行を選択状態にする（生表示は commit されるが、保存はまだ飛んでいない）
+    // 画像行を選択状態にする（キャレットは置き換わるが、保存はまだ飛んでいない）
     await selectImageAtLine(page, 1);
     await expect(page.locator(".img-selected")).toHaveCount(1);
 
