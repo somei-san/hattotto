@@ -105,10 +105,11 @@ test.describe("閉じフェンスが最終行になったときの空行自動�
   });
 });
 
-// リテラルの ``` 行での Enter による空コードブロック生成（issue #84 段階①の仕様変更）:
+// リテラルの ``` 行での Enter による空コードブロック生成:
 // 対応する閉じフェンスの無いリテラル行はそのままでは入力できるコードブロックにならないため、
-// この行での Enter（キャレットの列は問わない）を生成のトリガーにする。src/note.js の
-// isFenceEnterTarget を参照。
+// この行での Enter（キャレットの列は問わない）を生成のトリガーにする。トリガーは素の ```
+// 単独行のみで、```js のような言語指定つきは対象外（シンタックスハイライトが無く言語指定に
+// 機能が無いため、``` に続けて打った文字列を不可視の開きフェンス行へ取り込まない）。
 test.describe("リテラルの ``` 行での Enter によるコードブロック生成", () => {
   test("``` 行末で Enter すると空の内容行 + 閉じフェンスが生成され、キャレットは内容行に置かれる", async ({ openNote }) => {
     const page = await openNote({ content: "```" });
@@ -118,12 +119,19 @@ test.describe("リテラルの ``` 行での Enter によるコードブロッ�
     expect(await getContent(page)).toBe("```\ncode\n```\n");
   });
 
-  test("```js のような言語指定つきのリテラル行でも同様に動く", async ({ openNote }) => {
-    const page = await openNote({ content: "```js" });
+  test("```aaa のような文字列つきの行では発動せず、通常の行分割になる（aaa が消えない）", async ({ openNote }) => {
+    const page = await openNote({ content: "```aaa" });
     await placeCaret(page, 0);
     await page.keyboard.press("Enter");
-    await page.keyboard.type("let x = 1;", { delay: 10 });
-    expect(await getContent(page)).toBe("```js\nlet x = 1;\n```\n");
+    expect(await getContent(page)).toBe("```aaa\n");
+    const isCodeBlock = await page.evaluate(() => document.querySelector("#markdown-view pre.md-codeblock") != null);
+    expect(isCodeBlock).toBe(false);
+  });
+
+  test("閉じまで揃った言語指定つきフェンス（```js 〜 ```）はコードブロックとして描画される", async ({ openNote }) => {
+    const page = await openNote({ content: "```js\nlet x = 1;\n```" });
+    const isCodeBlock = await page.evaluate(() => document.querySelector("#markdown-view pre.md-codeblock") != null);
+    expect(isCodeBlock).toBe(true);
   });
 
   test("undo は1手でリテラルの ``` 行に戻る", async ({ openNote }) => {
@@ -153,10 +161,10 @@ test.describe("リテラルの ``` 行での Enter によるコードブロッ�
   });
 
   test("``` 行の途中での Enter でも生成される（キャレットの列は問わない）", async ({ openNote }) => {
-    const page = await openNote({ content: "```js" });
-    await placeCaret(page, 0, 3); // ``` の直後、js の手前
+    const page = await openNote({ content: "```" });
+    await placeCaret(page, 0, 1); // 1 文字目と 2 文字目の間
     await page.keyboard.press("Enter");
-    expect(await getContent(page)).toBe("```js\n\n```\n");
+    expect(await getContent(page)).toBe("```\n\n```\n");
     const isCodeBlock = await page.evaluate(() => document.querySelector("#markdown-view pre.md-codeblock") != null);
     expect(isCodeBlock).toBe(true);
   });

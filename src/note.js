@@ -1367,11 +1367,14 @@ function collapsedBounds(range) {
 // 列は問わない: 矢印キーでこの行に入るとキャレットは行頭に落ちることが多く（WebKit は移動元の
 // 列を引き継ぐ）、行末限定にすると「Enter しても何も起きない」ように見えるため。
 
-/** キャレットが、リテラルの ``` 単独行（```js のような言語指定つきも含む）を指しているか。
- * isFenceEnterTarget が真の行だけ splitLineAt がコードブロック自動生成に分岐する。 */
+/** キャレットが、素の ``` 単独行を指しているか。isFenceEnterTarget が真の行だけ
+ * splitLineAt がコードブロック自動生成に分岐する。```js のような言語指定つきは対象外:
+ * シンタックスハイライトが無い本アプリでは言語指定が機能を持たず、``` に続けて打った
+ * 文字列が Enter で不可視の開きフェンス行に取り込まれると「消えた」ように見えるため
+ * （閉じまで揃った言語指定つきフェンスの描画は互換のため受け付ける）。 */
 function isFenceEnterTarget(lines, start, end) {
   if (start.line !== end.line || start.col !== end.col) return false;
-  return /^```\S*\s*$/.test(lines[start.line]);
+  return /^```\s*$/.test(lines[start.line]);
 }
 
 /** bounds（resolveEditableBounds の結果）の位置で行を分割する。autoContinue が真なら
