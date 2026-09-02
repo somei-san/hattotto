@@ -1336,11 +1336,49 @@ function maybeAutocompleteCheckbox(line, col) {
   applyLines(lines, line, replacement.length);
 }
 
+// ── 変換確定チェックポイント ─────────────────────────────
+// ① は再描画の帰結としての記法変換を受容する（`# ` を打ち終えると見出しに変わる、`**bold**` を
+// 閉じると太字になる、等）。undo は rawContent の splice 履歴なので変換それ自体は取り消し対象に
+// ならないが、変換を起こした splice の直前で明示的に editHistory.commit を打っておけば、その
+// splice がデバウンス（saveNow, 300ms）でまとまる前の内容が undo チェックポイントとして残り、
+// ⌘Z 1 回で「変換を起こした 1 打鍵」だけを取り消せる（変換前のリテラルへ戻る）。
+//
+// 対象は insertText 経由の 1 文字入力（直接の splice と、続けて起きるチェックボックス補完の
+// 追加 splice）に絞る。ペースト・Enter・削除・Tab インデント等は複数行にまたがりうる・意味の
+// 異なる編集であり、同じ判定をかけると打鍵以外の操作でも undo 粒度が変わってしまう。
+// 逆方向（装飾が解除される splice）はチェックポイント不要（lineConversionOccurred 参照）。
+
+/** line に対する 1 回の splice（spliceFn）の前後で lineConversionOccurred なら、splice 前の
+ * rawContent を undo チェックポイントとして明示的に commit する。line は spliceFn の前後で
+ * 行番号が変わらない前提（呼び出し元はいずれも改行を含まない 1 文字挿入）。フェンス内容行は
+ * maybeAutocompleteCheckbox と同じ findBlock 判定で対象外にする（コードとして書いた `- ` や
+ * `` `a` `` を、classifyLine・inlineSegments が行単位でブロック/装飾と誤認して変換扱いしないため）。
+ *
+ * 不変条件: commit するのは splice 前の内容（beforeContent）なので、この呼び出し直後は
+ * historyLast（beforeContent）と rawContent（spliceFn 後の内容）が一時的にずれる。これが害を
+ * 及ぼさないのは、全 splice 経路が applyLines → scheduleSave で終わり、次の saveNow の commit が
+ * いずれ rawContent 側へ追いつくこと、かつ performUndo/performRedo が history を触る前に必ず
+ * flushContent でこの追いつきを先に確定させることの両方が成り立つ限りにおいてである。 */
+function checkpointConversion(line, spliceFn) {
+  const block = findBlock(line);
+  if (block && block.start !== block.end) {
+    spliceFn();
+    return;
+  }
+  const before = getLines()[line] ?? '';
+  const beforeContent = rawContent;
+  spliceFn();
+  const after = getLines()[line] ?? '';
+  if (lineConversionOccurred(before, after)) editHistory?.commit(beforeContent);
+}
+
 function onInsertText(data) {
   const bounds = resolveEditableBounds();
   if (!bounds) return;
-  commitSelectionReplacement(bounds, data);
-  if (data === ']') maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length);
+  checkpointConversion(bounds.start.line, () => commitSelectionReplacement(bounds, data));
+  if (data === ']') {
+    checkpointConversion(bounds.start.line, () => maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length));
+  }
 }
 
 /** collapsed キャレット位置の bounds（start === end）。resolveSelectionBounds のマーカー境界

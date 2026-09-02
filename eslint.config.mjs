@@ -14,6 +14,9 @@ const markdown = {
   parseImageAlt: "readonly",
   scanFenceRanges: "readonly",
   isRevealableKind: "readonly",
+  classifyLine: "readonly",
+  lineConversionOccurred: "readonly",
+  inlineKindCounts: "readonly",
 };
 const noteLines = {
   blockOffset: "readonly",
