@@ -1,4 +1,4 @@
-import { test, expect, placeCaret, getContent, selectMarkdownRange, waitForReveal } from "./fixtures";
+import { test, expect, placeCaret, getContent, selectMarkdownRange, waitForReveal, commitHistory } from "./fixtures";
 
 // collapsed キャレット（選択ではなく一点）での Backspace/Delete。deleteAdjacentVisibleChar
 // （adjacentVisibleCharRawRange 経由）が「direction 側に隣接する可視 1 書記素ぶんの raw 範囲」を
@@ -146,20 +146,20 @@ test.describe("行頭 Backspace の段階解除", () => {
     expect(await caretRawColumn(page)).toBe("before".length);
   });
 
-  test("各段のあいだで保存デバウンス窓をまたぐと、それぞれ独立した undo 1 手になる", async ({ openNote }) => {
+  test("各段のあいだで保存を確定させると、それぞれ独立した undo 1 手になる", async ({ openNote }) => {
     const page = await openNote({ content: "before\n  - item" });
 
     await placeCaret(page, 1, "  - ".length);
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(400); // 各段のあいだで保存を確定させ、history へ別の手として積ませる
+    await commitHistory(page); // 各段のあいだで保存を確定させ、history へ別の手として積ませる
     expect(await getContent(page)).toBe("before\n  item");
 
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     expect(await getContent(page)).toBe("before\nitem");
 
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     expect(await getContent(page)).toBe("beforeitem");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
@@ -206,7 +206,7 @@ test.describe("行頭 Backspace の段階解除", () => {
     const page = await openNote({ content: "```\ncode\n```" });
     await placeCaret(page, 1, 0);
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(400); // 保存デバウンスを確定させ history へ積ませる
+    await commitHistory(page); // 保存を確定させ history へ積ませる
     expect(await getContent(page)).toBe("code");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
@@ -245,7 +245,7 @@ test.describe("行末 Delete のマーカー剥がし連結", () => {
     const page = await openNote({ content: "before\n# Heading" });
     await placeCaret(page, 0, null);
     await page.keyboard.press("Delete");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     expect(await getContent(page)).toBe("beforeHeading");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());

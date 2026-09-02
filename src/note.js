@@ -3178,6 +3178,9 @@ window.selectAllNote = selectAllNote;
 // インライン生表示（reveal）の現在の状態。selectionchange 駆動で非同期に確定するため、
 // テストは DOM の見た目だけでなくこの値で「reveal が確定したか」を待てる
 window.getRevealState = () => revealState;
+// 保留中の保存デバウンスをその場で確定させる。テストが undo の手数を検証する際、実時間で
+// デバウンス窓を待つ代わりにこれを呼べば決定的に commit を確定できる
+window.flushContent = flushContent;
 // 現在のキャレット（collapsed のときのみ）の (line, col) を、アプリ本体と同じ resolveSelectionPoint
 // で求めて返す。行に装飾（可視 ≠ raw）があると DOM のテキスト長からの単純な逆算では raw 列を
 // 正しく復元できないため、テストはこちらを使う

@@ -1,4 +1,4 @@
-import { test, expect, placeCaret, getContent } from "./fixtures";
+import { test, expect, placeCaret, getContent, commitHistory } from "./fixtures";
 
 // 閉じられていない開きフェンス（```）の扱い（issue #84 段階①の仕様変更）:
 //   - 対応する閉じフェンスが無い開きフェンスは、下の内容に関わらず常にリテラルのテキスト行
@@ -60,7 +60,7 @@ test.describe("閉じフェンスが最終行になったときの空行自動�
     await placeCaret(page, 3, 0);
     await page.keyboard.press("Shift+End");
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(400); // saveNow のデバウンス窓を越えて commit させる
+    await commitHistory(page); // 保存を確定させ history へ積ませる
     expect(await getContent(page)).toBe("```\ncode\n```\n");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
@@ -148,7 +148,7 @@ test.describe("リテラルの ``` 行での Enter によるコードブロッ�
     const page = await openNote({ content: "```" });
     await placeCaret(page, 0);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(400); // saveNow のデバウンス窓を越えて commit させる
+    await commitHistory(page); // 保存を確定させ history へ積ませる
     expect(await getContent(page)).toBe("```\n\n```\n");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());

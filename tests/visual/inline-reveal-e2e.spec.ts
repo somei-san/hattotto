@@ -1,6 +1,6 @@
 import {
   test, expect, placeCaret, getContent, selectMarkdownRange, waitForReveal, getRevealState, getCaretPosition,
-  extendSelectionTo,
+  extendSelectionTo, commitHistory,
 } from "./fixtures";
 
 // インライン生表示（reveal）。キャレット（collapsed）が装飾（太字/斜字/取り消し線/インラインコード/
@@ -283,7 +283,7 @@ test.describe("undo で内容が戻っても表示が整合する", () => {
     await waitForReveal(page, { line: 0, start: 0, end: 8 });
     await page.keyboard.type("X", { delay: 10 });
     expect(await getContent(page)).toBe("**boXld**");
-    await page.waitForTimeout(400); // 保存デバウンスを確定させ history へ積ませる
+    await commitHistory(page); // 保存を確定させ history へ積ませる
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
     expect(await getContent(page)).toBe("**bold**");

@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, placeCaret, selectMarkdownRange } from "./fixtures";
+import { test, expect, enterEdit, getContent, placeCaret, selectMarkdownRange, commitHistory } from "./fixtures";
 
 // Enter による行分割・リスト自動継続（beforeinput の insertParagraph）。collapsed キャレットは
 // 装飾記法・行頭マーカーの内部を指せない（visibleOffsetFromRawOffset の境界規約）ため、
@@ -59,7 +59,7 @@ test.describe("Markdown autocontinue E2E", () => {
     await page.keyboard.type("- item1");
     await page.keyboard.press("Enter");
     // Now we have "- item1\n- ", press Enter again on the empty bullet
-    await page.waitForTimeout(400); // 直前の Enter の確定を待ち、undo の手を分ける
+    await commitHistory(page); // 直前の Enter を確定させ、undo の手を分ける
     await page.keyboard.press("Enter");
     const text = await getContent(page);
     // The empty "- " should be removed
@@ -67,7 +67,7 @@ test.describe("Markdown autocontinue E2E", () => {
     expect(text).not.toMatch(/\n- $/);
 
     // マーカー解除は undo 1 手で「- 」の空リスト項目に戻る
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
     expect(await getContent(page)).toBe("- item1\n- ");
   });
@@ -156,11 +156,11 @@ test.describe("Markdown autocontinue E2E", () => {
   // ── フェンス内 Enter は素の改行のみ（自動継続なし） ─────────
   // 閉じフェンスが最終行のまま残る編集なので、applyLines の末尾空行正規化で1行足される
   // （コードブロックの下に入力する場所を常に確保する仕様）
-  test("コードフェンス内で Enter → 自動継続せず素の改行だけ入る、デバウンス窓をまたいだ undo 1 手で戻る", async ({ openNote }) => {
+  test("コードフェンス内で Enter → 自動継続せず素の改行だけ入る、保存を確定させると undo 1 手で戻る", async ({ openNote }) => {
     const page = await openNote({ content: "```\n- item\n```" });
     await placeCaret(page, 1, "- item".length);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     expect(await getContent(page)).toBe("```\n- item\n\n```\n");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());
@@ -178,16 +178,16 @@ test.describe("Markdown autocontinue E2E", () => {
     expect(prefixCount).toBe(1);
   });
 
-  // ── undo で 1 手に戻る（デバウンス窓をまたいだ場合） ─────────
-  test("Enter の自動継続はデバウンス窓をまたぐと undo 1 手で元の 1 行に戻る", async ({ openNote }) => {
+  // ── undo で 1 手に戻る（保存を確定させた場合） ─────────
+  test("Enter の自動継続は保存を確定させると undo 1 手で元の 1 行に戻る", async ({ openNote }) => {
     const page = await openNote();
     await enterEdit(page);
     await page.keyboard.type("- item1");
-    // タイピングの確定を待ってから Enter を押す。待たずに続けて押すと同じデバウンス窓に
+    // タイピングの確定を待ってから Enter を押す。待たずに続けて押すと同じ commit に
     // 収まり、undo が「- item1」の手前（空）まで一気に戻ってしまう
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     expect(await getContent(page)).toContain("- item1\n- ");
 
     await page.evaluate(() => (window as unknown as { performUndo(): void }).performUndo());

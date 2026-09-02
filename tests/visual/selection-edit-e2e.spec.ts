@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, selectMarkdownRange } from "./fixtures";
+import { test, expect, enterEdit, getContent, selectMarkdownRange, commitHistory } from "./fixtures";
 
 // 行またぎ選択（markdown-view の描画テキスト上の Range）に対する削除系の操作。
 // resolveSelectionBounds で生 Markdown の範囲へ解決し、行を splice して applyLines で
@@ -302,8 +302,8 @@ test.describe("行またぎ選択の削除は undo で戻る", () => {
     await page.keyboard.press("Backspace");
     expect(await getContent(page)).toBe("");
 
-    // scheduleSave() の 300ms デバウンスが確定し、history.commit が積まれるのを待つ
-    await page.waitForTimeout(400);
+    // 保存を確定させ、history.commit を積ませる
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe("abc\ndef");

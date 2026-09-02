@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock, enterEdit, getContent, placeCaret } from "./fixtures";
+import { test, expect, injectNoteMock, enterEdit, getContent, placeCaret, commitHistory } from "./fixtures";
 
 // ⌘Z/⌘⇧Z はネイティブメニュー（src-tauri/src/menu.rs）が拾い edit-history イベントで
 // フロントへ通知するため、chromium からはキーボードショートカットを再現できない。
@@ -44,9 +44,9 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("abc");
-    // scheduleSave() の 300ms デバウンスが確定し、history.commit("abc") が積まれるのを待つ
+    // 保存を確定させ、history.commit("abc") を積ませる
     await expect.poll(() => getContent(page)).toBe("abc");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("");
@@ -62,7 +62,7 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
 
     await performUndo(page);
     await expect.poll(() => savedContents(page)).toContain("");
@@ -77,7 +77,7 @@ test.describe("Undo/Redo", () => {
 
     await placeCaret(page, 1);
     await page.locator("#markdown-view").pressSequentially("X");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("line0\nline1X");
 
     await performUndo(page);
@@ -97,11 +97,11 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("a");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("a");
 
     await page.locator("#markdown-view").pressSequentially("b");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("ab");
 
     await performUndo(page);
@@ -118,7 +118,7 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("abc");
 
     await performUndo(page);
@@ -126,7 +126,7 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("xyz");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("xyz");
 
     // "abc" へ戻る redo は消えているはずなので、performRedo は no-op
@@ -184,7 +184,7 @@ test.describe("Undo/Redo", () => {
     // 1手目: text0 行を編集して確定する
     await page.locator('[data-line="0"]').click();
     await page.locator("#markdown-view").pressSequentially("X");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     const edited = `text0X\n${IMAGE_LINE_A}\n${IMAGE_LINE_B}`;
     await expect.poll(() => getContent(page)).toBe(edited);
 
@@ -213,7 +213,7 @@ test.describe("Undo/Redo", () => {
 
     await enterEdit(page);
     await page.locator("#markdown-view").pressSequentially("abc");
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await expect.poll(() => getContent(page)).toBe("abc");
 
     // appWindow.listen ではなく listen('edit-history', ...) 側（グローバルイベント）に

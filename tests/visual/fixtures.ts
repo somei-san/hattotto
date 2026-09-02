@@ -1,4 +1,4 @@
-import { test as base, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 
 // ── Shared defaults ────────────────────────────────────────
 
@@ -255,6 +255,13 @@ export function getRevealState(page: Page): Promise<RevealState> {
   return page.evaluate(() => (window as unknown as { getRevealState(): RevealState }).getRevealState());
 }
 
+/** 保留中の保存デバウンスをその場で確定させ、history.commit を積ませる。実時間の待機
+ * （waitForTimeout）は CI の遅いランナーでデバウンス窓を越えられず flaky になるため、
+ * undo/redo の手数を検証するテストはこちらで決定的に確定を待つ。 */
+export async function commitHistory(page: Page) {
+  await page.evaluate(() => (window as unknown as { flushContent(): Promise<void> }).flushContent());
+}
+
 /** reveal の状態が expected になるまで待つ。selectionchange 駆動で非同期に確定するため、
  * 見た目（.md-reveal の有無）をアサートする前にこれで確定を待つとちらつきに引っかからない。 */
 export async function waitForReveal(page: Page, expected: RevealState) {
@@ -330,6 +337,142 @@ export function extendSelectionTo(page: Page, line: number, visibleOffset: numbe
     },
     [line, visibleOffset] as const,
   );
+}
+
+// ── Caret geometry helpers ──────────────────────────────────
+// raw・DOM 上のキャレット位置が正しくても、見た目の位置・可視性はそれとずれうる（行末スペースが
+// white-space: normal で潰れる／空チェックボックス項目でキャレットが div 直下＝チェックボックス
+// の位置に見える／コードブロック末尾の空行が描画されず行が無い、等）。caretRect/charRect は
+// 実際のピクセル位置（getBoundingClientRect）まで見て、見た目が期待どおりかを機械的に検証する。
+
+type CaretGeometry = { x: number; y: number; height: number } | null;
+
+/** 幅 0 の Range は空の rect（Range.getClientRects() が長さ 0）を返すエンジンがあるため、
+ * 直後（無ければ直前）の 1 文字分に広げた Range で代わりに測る。広げた側と逆の端
+ * （直後に広げたなら左端、直前に広げたなら右端）が、元の幅 0 位置に対応する。テキストノード
+ * 末尾（行送り境界）は、直後の要素を naive な同一点測定より先に見る（下記 rectAtPoint 内コメント
+ * 参照）。page.evaluate に渡す関数はクロージャを持てないため、caretRect/charRect それぞれの
+ * evaluate 内に同じ実装を書く。expectCaretAtVisiblePosition は両者が同じ測定規則であることを
+ * 前提に比較するため、一方を変更したら必ずもう一方も同じ内容に揃えること。 */
+type RectAtPoint = (node: Node, offset: number) => CaretGeometry;
+
+/** 現在の DOM 選択（collapsed のときのみ）が視覚的に占める位置。非 collapsed や選択が無いときは null。 */
+export function caretRect(page: Page): Promise<CaretGeometry> {
+  return page.evaluate(() => {
+    const rectAtPoint: RectAtPoint = (node, offset) => {
+      const measure = (sn: Node, so: number, en: Node, eo: number) => {
+        const r = document.createRange();
+        r.setStart(sn, so);
+        r.setEnd(en, eo);
+        const rects = r.getClientRects();
+        if (rects.length) return rects[rects.length - 1];
+        const rect = r.getBoundingClientRect();
+        return (rect.width > 0 || rect.height > 0) ? rect : null;
+      };
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = node.textContent!.length;
+        if (offset === len) {
+          // テキストノード末尾（例: コードブロックの内容行末の "\n"）の幅 0 Range は、
+          // 「前の行の末尾」と「次の行の先頭」のどちらの矩形を返すかがエンジン依存
+          // （WebKit は前者を返す）。実際にキャレットが視覚的に立つのは次の行の先頭側
+          // （<br> フィラー等）なので、後続ノードがあれば同じ点の naive な測定より先に見る
+          const sib = node.nextSibling;
+          if (sib?.nodeType === Node.TEXT_NODE && sib.textContent!.length > 0) {
+            const r = measure(sib, 0, sib, 1);
+            if (r) return { x: r.left, y: r.top, height: r.height };
+          } else if (sib?.nodeType === Node.ELEMENT_NODE) {
+            const er = (sib as Element).getBoundingClientRect();
+            if (er.width > 0 || er.height > 0) return { x: er.left, y: er.top, height: er.height };
+          }
+        } else {
+          const r = measure(node, offset, node, offset + 1);
+          if (r) return { x: r.left, y: r.top, height: r.height };
+        }
+      }
+      const rect = measure(node, offset, node, offset);
+      if (rect) return { x: rect.left, y: rect.top, height: rect.height };
+      if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+        const r = measure(node, offset - 1, node, offset);
+        if (r) return { x: r.right, y: r.top, height: r.height };
+      }
+      return null;
+    };
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    return rectAtPoint(range.startContainer, range.startOffset);
+  });
+}
+
+/** #markdown-view の指定行（data-line）で、可視オフセット visibleOffset の文字境界が
+ * 視覚的に占める位置。note.js の nodeAt/domPointForContentVisible と同じ TreeWalker 走査を
+ * ページ内で組み立てる（selectMarkdownRange の pointAtInPage と同じアルゴリズム）ため、
+ * note.js 側のキャレット配置ロジックとは独立に「この可視オフセットは本来どこに見えるべきか」
+ * を求められる。該当行が無ければ null。 */
+export function charRect(page: Page, line: number, visibleOffset: number): Promise<CaretGeometry> {
+  return page.evaluate(
+    ([l, o]) => {
+      const rectAtPoint: RectAtPoint = (node, offset) => {
+        const measure = (sn: Node, so: number, en: Node, eo: number) => {
+          const r = document.createRange();
+          r.setStart(sn, so);
+          r.setEnd(en, eo);
+          const rects = r.getClientRects();
+          if (rects.length) return rects[rects.length - 1];
+          const rect = r.getBoundingClientRect();
+          return (rect.width > 0 || rect.height > 0) ? rect : null;
+        };
+        const rect = measure(node, offset, node, offset);
+        if (rect) return { x: rect.left, y: rect.top, height: rect.height };
+        if (node.nodeType === Node.TEXT_NODE) {
+          const len = node.textContent!.length;
+          if (offset < len) {
+            const r = measure(node, offset, node, offset + 1);
+            if (r) return { x: r.left, y: r.top, height: r.height };
+          }
+          if (offset > 0) {
+            const r = measure(node, offset - 1, node, offset);
+            if (r) return { x: r.right, y: r.top, height: r.height };
+          }
+        }
+        return null;
+      };
+      const el = document.querySelector(`#markdown-view [data-line="${l}"]`);
+      if (!el) return null;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let remaining = o as number;
+      let node: Text | null;
+      let last: Text | null = null;
+      while ((node = walker.nextNode() as Text | null)) {
+        last = node;
+        if (remaining <= node.textContent!.length) break;
+        remaining -= node.textContent!.length;
+      }
+      const target = node ?? last;
+      if (!target) return null;
+      const offset = node ? remaining : target.textContent!.length;
+      return rectAtPoint(target, offset);
+    },
+    [line, visibleOffset] as const,
+  );
+}
+
+/** 現在のキャレット（collapsed）が、指定行の可視オフセット visibleOffset の位置に視覚的に
+ * 一致することを assert する（x/y とも許容誤差 tolerance px 以内）。フォントレンダリングの
+ * 微差を吸収しつつ、DOM・raw は正しいが見た目の位置がずれるバグを検出する。 */
+export async function expectCaretAtVisiblePosition(
+  page: Page,
+  line: number,
+  visibleOffset: number,
+  tolerance = 2,
+) {
+  const [actual, expected] = await Promise.all([caretRect(page), charRect(page, line, visibleOffset)]);
+  expect(actual, `caret rect not found (line=${line})`).not.toBeNull();
+  expect(expected, `char rect not found (line=${line}, visibleOffset=${visibleOffset})`).not.toBeNull();
+  expect(Math.abs(actual!.x - expected!.x), `x mismatch: actual=${actual!.x} expected=${expected!.x}`)
+    .toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(actual!.y - expected!.y), `y mismatch: actual=${actual!.y} expected=${expected!.y}`)
+    .toBeLessThanOrEqual(tolerance);
 }
 
 // ── Fixture types ──────────────────────────────────────────

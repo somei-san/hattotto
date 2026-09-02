@@ -1,4 +1,4 @@
-import { test, expect, getContent, injectNoteMock, selectMarkdownRange } from "./fixtures";
+import { test, expect, getContent, injectNoteMock, selectMarkdownRange, commitHistory } from "./fixtures";
 
 const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
 const IMAGE_LINE = `![](${IMAGE_PATH})`;
@@ -29,8 +29,8 @@ test.describe("行またぎ選択 + タイピングで置換される", () => {
 
     expect(await getContent(page)).toBe("# Heading\nxtwo\ntail");
 
-    // scheduleSave() の 300ms デバウンスが確定し、history.commit が積まれるのを待つ
-    await page.waitForTimeout(400);
+    // 保存を確定させ、history.commit を積ませる
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);
@@ -202,7 +202,7 @@ test.describe("ペーストの undo 手数", () => {
     await dispatchPaste(page, "XY");
     expect(await getContent(page)).toBe("aXYef\nghi");
 
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);
@@ -231,7 +231,7 @@ test.describe("ペーストの undo 手数", () => {
       "![](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
 
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe(content);

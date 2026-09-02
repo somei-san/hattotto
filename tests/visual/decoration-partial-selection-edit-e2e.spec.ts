@@ -1,4 +1,4 @@
-import { test, expect, getContent, placeCaret, selectMarkdownRange } from "./fixtures";
+import { test, expect, getContent, placeCaret, selectMarkdownRange, commitHistory } from "./fixtures";
 
 // 部分的に選択された装飾（太字/斜字/取り消し線/インラインコード/リンク）の削除・置換。
 // 選択が装飾セグメントを部分的にしか覆っていないとき、そのセグメントのマーカーは保存し
@@ -106,7 +106,7 @@ test.describe("部分選択された太字の削除はマーカーを保存す�
     await page.keyboard.press("Backspace");
     expect(await getContent(page)).toBe("abc **old** def");
 
-    await page.waitForTimeout(400); // scheduleSave() のデバウンスを確定させ history へ積ませる
+    await commitHistory(page); // 保存を確定させ history へ積ませる
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe("abc **bold** def");
@@ -236,7 +236,7 @@ test.describe("可視文字が空になった装飾はマーカーごと正規�
     await page.keyboard.press("Delete");
     expect(await getContent(page)).toBe("abc  def");
 
-    await page.waitForTimeout(400);
+    await commitHistory(page);
     await page.evaluate(() => (window as unknown as { performUndo(): Promise<void> }).performUndo());
 
     expect(await getContent(page)).toBe("abc **x** def");
