@@ -1,7 +1,7 @@
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createHistory, firstDiffLine } = require("../../src/history.js");
+const { createHistory, firstDiffLine, diffColumn } = require("../../src/history.js");
 
 describe("createHistory: commit", () => {
   test("historyLast と同値の commit は積まない（undo できない）", () => {
@@ -118,5 +118,43 @@ describe("firstDiffLine", () => {
 
   test("末尾行だけ差分がある場合はその行番号", () => {
     assert.equal(firstDiffLine("a\nb", "a\nc"), 1);
+  });
+});
+
+describe("diffColumn", () => {
+  test("行末に文字が追加された場合は追加後の行末（redo-of-insert 相当）", () => {
+    assert.equal(diffColumn("abc", "abcdef"), 6);
+  });
+
+  test("行の途中に文字が挿入された場合は挿入文字の後ろ（redo-of-insert 相当）", () => {
+    assert.equal(diffColumn("abcdef", "abcXdef"), 4);
+  });
+
+  test("行の途中の文字が削除された場合は削除位置（undo-of-insert 相当）", () => {
+    assert.equal(diffColumn("abcXdef", "abcdef"), 3);
+  });
+
+  test("行末の文字が削除され undo で復元される場合は復元文字の後ろ（undo-of-delete 相当）", () => {
+    assert.equal(diffColumn("ab", "abc"), 3);
+  });
+
+  test("行の途中の文字が削除され undo で復元される場合は復元文字の後ろ（undo-of-delete 相当）", () => {
+    assert.equal(diffColumn("acdef", "abcdef"), 2);
+  });
+
+  test("先頭から全く異なる場合（完全置換）は置換後の行末", () => {
+    assert.equal(diffColumn("abc", "xyz"), 3);
+  });
+
+  test("完全一致なら行の長さ", () => {
+    assert.equal(diffColumn("abc", "abc"), 3);
+  });
+
+  test("片方が空文字なら 0", () => {
+    assert.equal(diffColumn("abc", ""), 0);
+  });
+
+  test("戻り値は newLine の長さを超えない（呼び出し側の行境界クランプと独立に安全）", () => {
+    assert.equal(diffColumn("abcdefgh", "abc"), 3);
   });
 });

@@ -37,6 +37,7 @@ const noteLines = {
 const history = {
   createHistory: "readonly",
   firstDiffLine: "readonly",
+  diffColumn: "readonly",
 };
 
 export default [

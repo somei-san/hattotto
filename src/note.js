@@ -1119,7 +1119,10 @@ function flushContent() {
 // メニューイベントの二重到達があっても history の巻き戻りが 1 回で済むようにする
 let applyingHistory = false;
 
-/** history から返った content を適用し、差分行にキャレットを置いて保存する共通処理。 */
+/** history から返った content を適用し、差分位置にキャレットを置いて保存する共通処理。diffLine が
+ * prevContent（差し替え前）と content（差し替え後）の両方に存在する行であれば、その行同士を
+ * diffColumn で比較した列に置く。行数が増減して diffLine が片方にしか無い場合（末尾の行追加・削除）は
+ * 比較対象の行が無いため、行末（col=null）へフォールバックする。 */
 async function applyHistoryContent(prevContent, content) {
   if (content == null) return;
   clearImageSelection();
@@ -1127,7 +1130,13 @@ async function applyHistoryContent(prevContent, content) {
   renderAll();
   const diffLine = firstDiffLine(prevContent, content);
   if (diffLine != null) {
-    placeCaretAtRaw(Math.min(diffLine, getLines().length - 1), null);
+    const lines = getLines();
+    const line = Math.min(diffLine, lines.length - 1);
+    const prevLines = prevContent.split('\n');
+    const col = diffLine < prevLines.length && diffLine < lines.length
+      ? diffColumn(prevLines[diffLine], lines[diffLine])
+      : null;
+    placeCaretAtRaw(line, col);
   }
   await saveNow();
 }
@@ -1320,16 +1329,17 @@ function resolveEditableBounds() {
   return bounds;
 }
 
-/** 打ち終えたチェックボックス記法（`- []`・`-[x]` 等）を `- [ ] `/`- [x] ` へ補完する。
- * line の行頭〜col が丸ごと CHECKBOX_RE に一致するときだけ発火する（マーカーの手前に
- * 他の文字があれば対象外）。フェンス内容行は splitLineAt 等と同じ findBlock 由来の inFence
+/** 打ち終えたチェックボックス記法（`- []`・`-[x]` 等）を `- [ ] `/`- [x] ` へ補完する。col は
+ * 直前に打ったスペースの直後（マーカーの手前に他の文字があれば対象外）。標準記法 `- [ ]`
+ * （`[`と`]`の間に既にスペースがある）はこの時点で CHECKBOX_RE に一致しないため対象外のまま
+ * （そのまま打鍵で成立する）。フェンス内容行は splitLineAt 等と同じ findBlock 由来の inFence
  * 判定で対象外にする（コードとして書いた `- []` を書き換えない）。insertText の splice 直後に
  * 呼ぶことで、debounce 前の追加 splice として同じ undo 単位にまとまる。 */
 function maybeAutocompleteCheckbox(line, col) {
   const block = findBlock(line);
   if (block && block.start !== block.end) return;
   const lines = getLines();
-  const m = lines[line].slice(0, col).match(CHECKBOX_RE);
+  const m = lines[line].slice(0, col - 1).match(CHECKBOX_RE);
   if (!m) return;
   const replacement = m[2].toLowerCase() === 'x' ? `${m[1]} [x] ` : `${m[1]} [ ] `;
   lines[line] = replacement + lines[line].slice(col);
@@ -1375,10 +1385,17 @@ function checkpointConversion(line, spliceFn) {
 function onInsertText(data) {
   const bounds = resolveEditableBounds();
   if (!bounds) return;
-  checkpointConversion(bounds.start.line, () => commitSelectionReplacement(bounds, data));
-  if (data === ']') {
-    checkpointConversion(bounds.start.line, () => maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length));
+  if (data === ' ') {
+    // スペース自体の挿入とチェックボックス補完判定を 1 回の checkpointConversion にまとめる
+    // （スペース打鍵の直前を undo チェックポイントにするため。分けると、スペース挿入だけの
+    // splice を挟んだ状態が checkpoint されてしまい、⌘Z 1 回で打鍵前まで戻らなくなる）
+    checkpointConversion(bounds.start.line, () => {
+      commitSelectionReplacement(bounds, data);
+      maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length);
+    });
+    return;
   }
+  checkpointConversion(bounds.start.line, () => commitSelectionReplacement(bounds, data));
 }
 
 /** collapsed キャレット位置の bounds（start === end）。resolveSelectionBounds のマーカー境界

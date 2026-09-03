@@ -1,4 +1,4 @@
-import { test, expect, enterEdit, getContent, commitHistory, placeCaret, waitForReveal } from "./fixtures";
+import { test, expect, enterEdit, getContent, commitHistory, placeCaret, waitForReveal, getCaretPosition } from "./fixtures";
 
 // ① は再描画の帰結としての記法変換を受容する（`# ` を打ち終えると見出しに変わる等）。
 // ② はその変換を起こした splice の直前で明示的に editHistory.commit するチェックポイントで、
@@ -23,6 +23,8 @@ test.describe("変換確定チェックポイント", () => {
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("#");
+    // 変換確定チェックポイントの undo 後は、行末固定ではなく差分位置（"#" の直後）にキャレットが来る
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 0, col: 1 });
 
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("");
@@ -50,16 +52,21 @@ test.describe("変換確定チェックポイント", () => {
     await expect.poll(() => getContent(page)).toBe("1.");
   });
 
-  test("チェックボックス補完(- [] → - [ ] )の変換確定でチェックポイントが入り、undo 1回で補完前に戻る", async ({ openNote }) => {
+  test("チェックボックス補完(- [] + スペース → - [ ] )の変換確定でチェックポイントが入り、undo 1回でスペース打鍵前に戻る", async ({ openNote }) => {
     const page = await openNote();
     await enterEdit(page);
     await page.keyboard.type("- []", { delay: 30 });
+    // トリガーはスペース。"]" を打った時点ではまだ変換されない
+    await expect.poll(() => getContent(page)).toBe("- []");
+    await page.keyboard.type(" ", { delay: 30 });
     await expect.poll(() => getContent(page)).toBe("- [ ] ");
     await commitHistory(page);
 
-    // 補完前（"- []"、まだ箇条書きのまま）に 1 回で戻る
+    // トリガーのスペースを打つ直前（"- []"、まだ箇条書きのまま）に 1 回で戻る
     await performUndo(page);
     await expect.poll(() => getContent(page)).toBe("- []");
+    // 削除された "]" の手前ではなく、"]" の直後（col 4）にキャレットが来る
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 0, col: 4 });
 
     // 補完前の "- " 成立の打鍵にも独立したチェックポイントが残っている
     await performUndo(page);
