@@ -1,4 +1,4 @@
-import { test, expect, injectNoteMock, enterEdit, getContent, placeCaret, commitHistory } from "./fixtures";
+import { test, expect, injectNoteMock, enterEdit, getContent, placeCaret, commitHistory, getCaretPosition } from "./fixtures";
 
 // ⌘Z/⌘⇧Z はネイティブメニュー（src-tauri/src/menu.rs）が拾い edit-history イベントで
 // フロントへ通知するため、chromium からはキーボードショートカットを再現できない。
@@ -88,6 +88,69 @@ test.describe("Undo/Redo", () => {
       return (node instanceof Element ? node : node?.parentElement)?.closest("[data-line]")?.getAttribute("data-line");
     });
     expect(line).toBe("1");
+
+    await ctx.close();
+  });
+
+  test("undo 後のキャレットが行途中の差分位置に置かれる（行末へ飛ばない）", async ({ browser }) => {
+    const { ctx, page } = await openCaptured({ content: "abcdef" }, browser);
+
+    await placeCaret(page, 0, 3);
+    await page.locator("#markdown-view").pressSequentially("X");
+    await commitHistory(page);
+    await expect.poll(() => getContent(page)).toBe("abcXdef");
+
+    await performUndo(page);
+    await expect.poll(() => getContent(page)).toBe("abcdef");
+    // 差分は行の途中（挿入した X の位置）なので、行末（col 6）ではなくその位置にキャレットが戻る
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 0, col: 3 });
+
+    await performRedo(page);
+    await expect.poll(() => getContent(page)).toBe("abcXdef");
+    // redo は挿入を再適用する側なので、挿入した X の後ろ（col 4）に戻る
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 0, col: 4 });
+
+    await ctx.close();
+  });
+
+  test("Enter で行が増える編集を undo/redo すると、対応する行が無い側は行末に置かれる", async ({ browser }) => {
+    const { ctx, page } = await openCaptured({ content: "" }, browser);
+
+    await enterEdit(page);
+    await page.locator("#markdown-view").pressSequentially("hello");
+    await commitHistory(page);
+    await expect.poll(() => getContent(page)).toBe("hello");
+
+    await page.keyboard.press("Enter");
+    await page.locator("#markdown-view").pressSequentially("world");
+    await commitHistory(page);
+    await expect.poll(() => getContent(page)).toBe("hello\nworld");
+
+    // undo 後は 1 行しかなく、削除された行（diffLine が指す行）を newLine 側に持てないため
+    // diffColumn は使わず、残った行の行末に置く
+    await performUndo(page);
+    await expect.poll(() => getContent(page)).toBe("hello");
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 0, col: 5 });
+
+    // redo で行が戻ったときも、増えた行は oldLine 側に無いので同様に行末へ置く
+    await performRedo(page);
+    await expect.poll(() => getContent(page)).toBe("hello\nworld");
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 1, col: 5 });
+
+    await ctx.close();
+  });
+
+  test("複数行の下の方を行途中で編集して undo → その行のその位置に戻る（末尾行へ飛ばない）", async ({ browser }) => {
+    const { ctx, page } = await openCaptured({ content: "aaa\nbbb\nccc" }, browser);
+
+    await placeCaret(page, 2, 1);
+    await page.locator("#markdown-view").pressSequentially("X");
+    await commitHistory(page);
+    await expect.poll(() => getContent(page)).toBe("aaa\nbbb\ncXcc");
+
+    await performUndo(page);
+    await expect.poll(() => getContent(page)).toBe("aaa\nbbb\nccc");
+    await expect.poll(() => getCaretPosition(page)).toEqual({ line: 2, col: 1 });
 
     await ctx.close();
   });

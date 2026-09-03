@@ -478,6 +478,67 @@ function scanFenceRanges(lines) {
   return ranges;
 }
 
+/** 行（fence 範囲は含まない、1 行単位）のブロック種別を判定する。renderMarkdown 本体と、
+ * note.js の変換検出（splice 前後でこの種別が変わったかを比較し、undo チェックポイントの
+ * トリガーにする）が同じ判定を共有するための土台。fence はここに含めず scanFenceRanges 側の
+ * 責務のまま（複数行にまたがる判定のため 1 行単位のこの関数とは性質が異なる）。
+ *
+ * contentStart は trimmedLine 上でのマーカー長（renderInline に渡す内容の開始位置）。
+ * trimmedLine.slice(contentStart) が renderInline に渡る内容と一致し、renderMarkdown・
+ * lineConversionOccurred の双方がここから同じ値を引く（slice 幅の二重管理を避ける）。 */
+function classifyLine(line) {
+  // インデントは 2 スペース単位。奇数分は切り捨てる（例: 半端な 3 スペースは level 1 のまま）。
+  // タブ文字は非対応（スペースのみ見る）
+  const indentMatch = line.match(/^( +)/);
+  const spaces = indentMatch ? indentMatch[1].length : 0;
+  const level = Math.floor(spaces / 2);
+  const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
+  let type, contentStart;
+  if (/^[-*] \[x\] /i.test(trimmedLine)) { type = 'checked'; contentStart = 6; }
+  else if (/^[-*] \[ \] /.test(trimmedLine)) { type = 'checkbox'; contentStart = 6; }
+  else if (level === 0 && trimmedLine.startsWith('### ')) { type = 'h3'; contentStart = 4; }
+  else if (level === 0 && trimmedLine.startsWith('## ')) { type = 'h2'; contentStart = 3; }
+  else if (level === 0 && trimmedLine.startsWith('# ')) { type = 'h1'; contentStart = 2; }
+  else if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) { type = 'hr'; contentStart = trimmedLine.length; }
+  else if (/^[-*] /.test(trimmedLine)) { type = 'bullet'; contentStart = 2; }
+  else if (/^> /.test(trimmedLine)) { type = 'quote'; contentStart = 2; }
+  else if (/^\d+\. /.test(trimmedLine)) { type = 'ordered'; contentStart = trimmedLine.match(/^\d+\. /)[0].length; }
+  else if (line === '') { type = 'empty'; contentStart = 0; }
+  else { type = 'text'; contentStart = 0; }
+  return { type, trimmedLine, level, contentStart };
+}
+
+/** line 単体のブロック種別・インライン装飾が before → after で新規に成立したか。classifyLine・
+ * inlineSegments という描画側の判定をそのまま比較に使い、変換の意味を独自パーサで再定義しない。
+ * ブロック種別の変化は、行き先が装飾の付かない 'text'/'empty' のとき対象外にする（装飾解除の
+ * 逆方向・空行への最初の 1 文字目は「変換」ではない）。インライン装飾は kind ごとの出現数を
+ * 比較し、増えた kind があれば新規成立とみなす（前段の中間状態が別 kind に見える場合があっても、
+ * 完成した kind の増加自体は検出できる）。inlineKindCounts へは classifyLine の contentStart で
+ * マーカーを除いた内容だけを渡す（マーカー込みで渡すと、行頭の `* ` のようなマーカーの一部を
+ * ITALIC_RE 等が装飾の一部として誤って食い込む）。フェンス内容行の除外は呼び出し側の責務
+ * （note.js の checkpointConversion）で、この関数自身は行の所属を知らない。 */
+function lineConversionOccurred(before, after) {
+  if (before === after) return false;
+  const beforeInfo = classifyLine(before);
+  const afterInfo = classifyLine(after);
+  if (afterInfo.type !== beforeInfo.type && afterInfo.type !== 'text' && afterInfo.type !== 'empty') return true;
+  const beforeCounts = inlineKindCounts(beforeInfo.trimmedLine.slice(beforeInfo.contentStart));
+  for (const [kind, count] of inlineKindCounts(afterInfo.trimmedLine.slice(afterInfo.contentStart))) {
+    if (count > (beforeCounts.get(kind) || 0)) return true;
+  }
+  return false;
+}
+
+/** content（マーカーを除いた内容）の inlineSegments を kind ごとの出現数へ集計する
+ * （プレーンテキスト側の kind: null は含まない）。 */
+function inlineKindCounts(content) {
+  const counts = new Map();
+  for (const seg of inlineSegments(content)) {
+    if (seg.kind) counts.set(seg.kind, (counts.get(seg.kind) || 0) + 1);
+  }
+  return counts;
+}
+
 /** 行内容（マーカーを除いた raw）を装飾込みの html にする。revealRange（{start, end}、
  * text 上のローカルな raw オフセット）を渡すと、それに一致する装飾セグメントだけ生 raw で
  * 表示する（inlineSegments 経由）。無指定時は通常の逐次置換チェーン（inlineMarkdown）を使う。 */
@@ -520,18 +581,13 @@ function renderMarkdown(text, reveal) {
       i = end;
       continue;
     }
-    // Measure and strip indent for nested lists
-    // Indent level is based on 2-space units; odd spaces are truncated (e.g. 3 spaces = level 1)
-    // Note: only spaces are considered; tab characters are not supported and will be ignored
-    const indentMatch = line.match(/^( +)/);
-    const spaces = indentMatch ? indentMatch[1].length : 0;
-    const level = Math.floor(spaces / 2);
-    const trimmedLine = spaces > 0 ? line.slice(spaces) : line;
+    const { type, trimmedLine, level, contentStart } = classifyLine(line);
+    const content = trimmedLine.slice(contentStart);
     const indentClass = level > 0 ? ` md-indent-${Math.min(level, 5)}` : '';
     const revealHere = reveal && reveal.line === i ? { start: reveal.start, end: reveal.end } : null;
 
     // Reset ordered list counters when line is not a numbered list
-    if (!/^\d+\. /.test(trimmedLine)) {
+    if (type !== 'ordered') {
       lastOrderedLevel = -1;
       Object.keys(orderedCounters).forEach(k => delete orderedCounters[k]);
     }
@@ -540,42 +596,41 @@ function renderMarkdown(text, reveal) {
     // 解決（note.js の domPointForContentVisible）がテキストノードを見つけられず、ブロック
     // 直下（<input> の直前 = 見た目上チェックボックスの位置）へフォールバックしてしまう。
     // 潰れない文字（&nbsp;）を 1 つ挟んでテキストノードを確保する
-    if (/^[-*] \[x\] /i.test(trimmedLine)) {
-      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+    if (type === 'checked') {
+      const inner = renderInline(content, revealHere) || '&nbsp;';
       result.push(`<div class="md-check checked${indentClass}" data-line="${i}"><input type="checkbox" checked data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
-    if (/^[-*] \[ \] /.test(trimmedLine)) {
-      const inner = renderInline(trimmedLine.slice(6), revealHere) || '&nbsp;';
+    if (type === 'checkbox') {
+      const inner = renderInline(content, revealHere) || '&nbsp;';
       result.push(`<div class="md-check${indentClass}" data-line="${i}"><input type="checkbox" data-line="${i}"><span>${inner}</span></div>`);
       continue;
     }
-    if (level === 0 && trimmedLine.startsWith('### ')) {
-      result.push(`<div class="md-h3" data-line="${i}">${renderInline(trimmedLine.slice(4), revealHere)}</div>`);
+    if (type === 'h3') {
+      result.push(`<div class="md-h3" data-line="${i}">${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (level === 0 && trimmedLine.startsWith('## ')) {
-      result.push(`<div class="md-h2" data-line="${i}">${renderInline(trimmedLine.slice(3), revealHere)}</div>`);
+    if (type === 'h2') {
+      result.push(`<div class="md-h2" data-line="${i}">${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (level === 0 && trimmedLine.startsWith('# ')) {
-      result.push(`<div class="md-h1" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
+    if (type === 'h1') {
+      result.push(`<div class="md-h1" data-line="${i}">${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (level === 0 && /^([-*_])\s*(?:\1\s*){2,}$/.test(trimmedLine)) {
+    if (type === 'hr') {
       result.push(`<hr class="md-hr" data-line="${i}">`);
       continue;
     }
-    if (/^[-*] /.test(trimmedLine)) {
-      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
+    if (type === 'bullet') {
+      result.push(`<div class="md-bullet${indentClass}" data-line="${i}">${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (/^> /.test(trimmedLine)) {
-      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${renderInline(trimmedLine.slice(2), revealHere)}</div>`);
+    if (type === 'quote') {
+      result.push(`<div class="md-blockquote${indentClass}" data-line="${i}">${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (/^\d+\. /.test(trimmedLine)) {
-      const m = trimmedLine.match(/^(\d+)\. (.*)/);
+    if (type === 'ordered') {
       // Auto-increment: reset counter only for new deeper nesting or new list block
       if (lastOrderedLevel < 0) {
         // New ordered list block after non-list line
@@ -592,20 +647,23 @@ function renderMarkdown(text, reveal) {
       // 内容が空だと通常の半角スペースは contenteditable 上で潰れてしまい（他に文字が無い
       // ノードの末尾空白は折りたたまれる）、キャレットの着地点が無くなって beforeinput が
       // 発火しない。潰れない区切り文字として &nbsp;（U+00A0）を使う
-      const sep = m[2] === '' ? ' ' : ' ';
-      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${renderInline(m[2], revealHere)}</div>`);
+      const sep = content === '' ? ' ' : ' ';
+      result.push(`<div class="md-ordered${indentClass}" data-line="${i}"><span class="md-order-num">${displayNum}.</span>${sep}${renderInline(content, revealHere)}</div>`);
       continue;
     }
-    if (line === '') {
+    if (type === 'empty') {
       result.push(`<div class="md-empty" data-line="${i}"></div>`);
       continue;
     }
-    result.push(`<div class="md-line${indentClass}" data-line="${i}">${renderInline(trimmedLine, revealHere)}</div>`);
+    result.push(`<div class="md-line${indentClass}" data-line="${i}">${renderInline(content, revealHere)}</div>`);
   }
   return result.join('');
 }
 
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges, isRevealableKind };
+  module.exports = {
+    renderMarkdown, inlineMarkdown, inlineSegments, parseImageAlt, scanFenceRanges, isRevealableKind,
+    classifyLine, lineConversionOccurred, inlineKindCounts,
+  };
 }

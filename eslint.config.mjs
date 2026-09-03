@@ -14,6 +14,9 @@ const markdown = {
   parseImageAlt: "readonly",
   scanFenceRanges: "readonly",
   isRevealableKind: "readonly",
+  classifyLine: "readonly",
+  lineConversionOccurred: "readonly",
+  inlineKindCounts: "readonly",
 };
 const noteLines = {
   blockOffset: "readonly",
@@ -34,6 +37,7 @@ const noteLines = {
 const history = {
   createHistory: "readonly",
   firstDiffLine: "readonly",
+  diffColumn: "readonly",
 };
 
 export default [

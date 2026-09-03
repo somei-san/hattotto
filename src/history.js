@@ -68,7 +68,30 @@ function firstDiffLine(oldContent, newContent) {
   return len;
 }
 
+/**
+ * oldLine・newLine の共通 prefix と共通 suffix を取り、newLine 側の変更区間の終端
+ * （newLine.length - 共通 suffix 長）を、undo/redo 後にキャレットを置く raw 列として返す
+ * （firstDiffLine が返した行番号と組み合わせて使う）。prefix だけで求めると、削除された文字の
+ * 復元（undo-of-delete）で復元文字の手前に置かれてしまうため、suffix 側も見て変更区間の終端に置く。
+ * 共通 suffix は共通 prefix と重ならない範囲までしか伸びない（重なりを許すと両方の行長の短い方を
+ * 超えてしまう）ため、戻り値は newLine の長さを超えない。
+ */
+function diffColumn(oldLine, newLine) {
+  const max = Math.min(oldLine.length, newLine.length);
+  let prefix = 0;
+  while (prefix < max && oldLine[prefix] === newLine[prefix]) prefix++;
+  let suffix = 0;
+  const suffixMax = max - prefix;
+  while (
+    suffix < suffixMax &&
+    oldLine[oldLine.length - 1 - suffix] === newLine[newLine.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  return newLine.length - suffix;
+}
+
 // ブラウザでは module が未定義なので、この行は classic script の読み込みに影響しない
 if (typeof module !== 'undefined') {
-  module.exports = { createHistory, firstDiffLine };
+  module.exports = { createHistory, firstDiffLine, diffColumn };
 }

@@ -1119,7 +1119,10 @@ function flushContent() {
 // メニューイベントの二重到達があっても history の巻き戻りが 1 回で済むようにする
 let applyingHistory = false;
 
-/** history から返った content を適用し、差分行にキャレットを置いて保存する共通処理。 */
+/** history から返った content を適用し、差分位置にキャレットを置いて保存する共通処理。diffLine が
+ * prevContent（差し替え前）と content（差し替え後）の両方に存在する行であれば、その行同士を
+ * diffColumn で比較した列に置く。行数が増減して diffLine が片方にしか無い場合（末尾の行追加・削除）は
+ * 比較対象の行が無いため、行末（col=null）へフォールバックする。 */
 async function applyHistoryContent(prevContent, content) {
   if (content == null) return;
   clearImageSelection();
@@ -1127,7 +1130,13 @@ async function applyHistoryContent(prevContent, content) {
   renderAll();
   const diffLine = firstDiffLine(prevContent, content);
   if (diffLine != null) {
-    placeCaretAtRaw(Math.min(diffLine, getLines().length - 1), null);
+    const lines = getLines();
+    const line = Math.min(diffLine, lines.length - 1);
+    const prevLines = prevContent.split('\n');
+    const col = diffLine < prevLines.length && diffLine < lines.length
+      ? diffColumn(prevLines[diffLine], lines[diffLine])
+      : null;
+    placeCaretAtRaw(line, col);
   }
   await saveNow();
 }
@@ -1320,27 +1329,73 @@ function resolveEditableBounds() {
   return bounds;
 }
 
-/** 打ち終えたチェックボックス記法（`- []`・`-[x]` 等）を `- [ ] `/`- [x] ` へ補完する。
- * line の行頭〜col が丸ごと CHECKBOX_RE に一致するときだけ発火する（マーカーの手前に
- * 他の文字があれば対象外）。フェンス内容行は splitLineAt 等と同じ findBlock 由来の inFence
+/** 打ち終えたチェックボックス記法（`- []`・`-[x]` 等）を `- [ ] `/`- [x] ` へ補完する。col は
+ * 直前に打ったスペースの直後（マーカーの手前に他の文字があれば対象外）。標準記法 `- [ ]`
+ * （`[`と`]`の間に既にスペースがある）はこの時点で CHECKBOX_RE に一致しないため対象外のまま
+ * （そのまま打鍵で成立する）。フェンス内容行は splitLineAt 等と同じ findBlock 由来の inFence
  * 判定で対象外にする（コードとして書いた `- []` を書き換えない）。insertText の splice 直後に
  * 呼ぶことで、debounce 前の追加 splice として同じ undo 単位にまとまる。 */
 function maybeAutocompleteCheckbox(line, col) {
   const block = findBlock(line);
   if (block && block.start !== block.end) return;
   const lines = getLines();
-  const m = lines[line].slice(0, col).match(CHECKBOX_RE);
+  const m = lines[line].slice(0, col - 1).match(CHECKBOX_RE);
   if (!m) return;
   const replacement = m[2].toLowerCase() === 'x' ? `${m[1]} [x] ` : `${m[1]} [ ] `;
   lines[line] = replacement + lines[line].slice(col);
   applyLines(lines, line, replacement.length);
 }
 
+// ── 変換確定チェックポイント ─────────────────────────────
+// ① は再描画の帰結としての記法変換を受容する（`# ` を打ち終えると見出しに変わる、`**bold**` を
+// 閉じると太字になる、等）。undo は rawContent の splice 履歴なので変換それ自体は取り消し対象に
+// ならないが、変換を起こした splice の直前で明示的に editHistory.commit を打っておけば、その
+// splice がデバウンス（saveNow, 300ms）でまとまる前の内容が undo チェックポイントとして残り、
+// ⌘Z 1 回で「変換を起こした 1 打鍵」だけを取り消せる（変換前のリテラルへ戻る）。
+//
+// 対象は insertText 経由の 1 文字入力（直接の splice と、続けて起きるチェックボックス補完の
+// 追加 splice）に絞る。ペースト・Enter・削除・Tab インデント等は複数行にまたがりうる・意味の
+// 異なる編集であり、同じ判定をかけると打鍵以外の操作でも undo 粒度が変わってしまう。
+// 逆方向（装飾が解除される splice）はチェックポイント不要（lineConversionOccurred 参照）。
+
+/** line に対する 1 回の splice（spliceFn）の前後で lineConversionOccurred なら、splice 前の
+ * rawContent を undo チェックポイントとして明示的に commit する。line は spliceFn の前後で
+ * 行番号が変わらない前提（呼び出し元はいずれも改行を含まない 1 文字挿入）。フェンス内容行は
+ * maybeAutocompleteCheckbox と同じ findBlock 判定で対象外にする（コードとして書いた `- ` や
+ * `` `a` `` を、classifyLine・inlineSegments が行単位でブロック/装飾と誤認して変換扱いしないため）。
+ *
+ * 不変条件: commit するのは splice 前の内容（beforeContent）なので、この呼び出し直後は
+ * historyLast（beforeContent）と rawContent（spliceFn 後の内容）が一時的にずれる。これが害を
+ * 及ぼさないのは、全 splice 経路が applyLines → scheduleSave で終わり、次の saveNow の commit が
+ * いずれ rawContent 側へ追いつくこと、かつ performUndo/performRedo が history を触る前に必ず
+ * flushContent でこの追いつきを先に確定させることの両方が成り立つ限りにおいてである。 */
+function checkpointConversion(line, spliceFn) {
+  const block = findBlock(line);
+  if (block && block.start !== block.end) {
+    spliceFn();
+    return;
+  }
+  const before = getLines()[line] ?? '';
+  const beforeContent = rawContent;
+  spliceFn();
+  const after = getLines()[line] ?? '';
+  if (lineConversionOccurred(before, after)) editHistory?.commit(beforeContent);
+}
+
 function onInsertText(data) {
   const bounds = resolveEditableBounds();
   if (!bounds) return;
-  commitSelectionReplacement(bounds, data);
-  if (data === ']') maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length);
+  if (data === ' ') {
+    // スペース自体の挿入とチェックボックス補完判定を 1 回の checkpointConversion にまとめる
+    // （スペース打鍵の直前を undo チェックポイントにするため。分けると、スペース挿入だけの
+    // splice を挟んだ状態が checkpoint されてしまい、⌘Z 1 回で打鍵前まで戻らなくなる）
+    checkpointConversion(bounds.start.line, () => {
+      commitSelectionReplacement(bounds, data);
+      maybeAutocompleteCheckbox(bounds.start.line, bounds.start.col + data.length);
+    });
+    return;
+  }
+  checkpointConversion(bounds.start.line, () => commitSelectionReplacement(bounds, data));
 }
 
 /** collapsed キャレット位置の bounds（start === end）。resolveSelectionBounds のマーカー境界
