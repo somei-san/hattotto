@@ -38,6 +38,21 @@ test("settings tab — confirm-delete-toggle default is checked", async ({ setti
   await expect(settingsPage.locator("#confirm-delete-toggle")).toBeChecked();
 });
 
+// ── メニューバーアイコン表示トグル ───────────────────────────
+
+test("settings tab — show-tray-toggle exists", async ({ settingsPage }) => {
+  await expect(settingsPage.locator("#show-tray-toggle")).toBeAttached();
+});
+
+test("settings tab — show-tray-toggle default is checked", async ({ settingsPage }) => {
+  await expect(settingsPage.locator("#show-tray-toggle")).toBeChecked();
+});
+
+test("settings tab — show_tray_icon: false → show-tray-toggle is unchecked", async ({ openSettings }) => {
+  const page = await openSettings({ show_tray_icon: false });
+  await expect(page.locator("#show-tray-toggle")).not.toBeChecked();
+});
+
 // ── ヘルプタブ ─────────────────────────────────────────────
 
 // 英語表示で撮る。日本語のヘルプは `<code>` に日本語が入り、等幅フォントの

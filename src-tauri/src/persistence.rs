@@ -1343,6 +1343,7 @@ mod tests {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            show_tray_icon: true,
             language: LanguageSetting::En,
         };
         save_settings_to(&settings, &path).unwrap();

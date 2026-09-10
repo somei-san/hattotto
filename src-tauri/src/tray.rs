@@ -16,7 +16,11 @@ const TRAY_ID: &str = "main-tray";
 /// 起動時に一度だけ呼ぶ。トレイアイコンを作成してイベントハンドラを登録する。
 /// 言語切り替えでの組み直しは `rebuild_tray` を使う（同じ ID でアイコンが二重に生えないようにするため）。
 pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
+    let (lang, show_tray_icon) = {
+        let state = app.state::<AppState>();
+        let settings = state.settings.recover();
+        (i18n::resolve(settings.language), settings.show_tray_icon)
+    };
     let menu = build_menu(app, lang)?;
 
     let icon = tauri::include_image!("icons/tray.png");
@@ -41,7 +45,20 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
+    if !show_tray_icon {
+        set_tray_visible(app, false)?;
+    }
+
     Ok(())
+}
+
+/// トレイアイコンの表示/非表示を切り替える。`TrayIconBuilder` に visible オプションが無いため
+/// build 後にこの関数で反映する。トレイが無ければ何もしない（`rebuild_tray` と同じパターン）。
+pub(crate) fn set_tray_visible(app: &AppHandle, visible: bool) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    tray.set_visible(visible)
 }
 
 /// 現在の設定言語でトレイのメニューとツールチップを組み直す。

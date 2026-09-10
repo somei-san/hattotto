@@ -72,7 +72,7 @@ test.describe("付箋の英語化", () => {
         payload: {
           default_color: "yellow", opacity: 100, bring_all_to_front: true,
           show_pin_button: true, show_new_button: true, show_color_button: true,
-          confirm_before_delete: true, language: "en", resolved_language: "en",
+          confirm_before_delete: true, show_tray_icon: true, language: "en", resolved_language: "en",
         },
       }));
     });

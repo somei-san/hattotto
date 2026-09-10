@@ -33,7 +33,7 @@ The main differences from macOS Stickies
 - 🗑️ Trash that keeps up to 200 deleted notes for restoring
 - 🔍 Per-note zoom (⌘+ / ⌘- / ⌘0)
 - 🌐 Japanese and English UI, following the OS locale or pinned in settings
-- ⚙️ Settings for the default color, opacity, which buttons to show, delete confirmation and start at login
+- ⚙️ Settings for the default color, opacity, which buttons to show, delete confirmation, menu bar icon visibility and start at login
 
 ## Install
 
