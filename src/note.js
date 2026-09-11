@@ -57,14 +57,6 @@ let hrRevealLines = new Set();
 // ⌘Z/⌘⇧Z の undo/redo 履歴。loadNote() が最初の content で初期化する
 let editHistory = null;
 
-// `save_pasted_image`（Rust 側）が生成するパスの形状（`images/<uuid v4>.<ext>`）とだけ一致させる。
-// asset protocol の scope（$APPDATA/images/**/*）を信じきらず、`images/../notes.json` のような
-// 細工パスを resolveImageSrc で asset URL に変換してしまわないための最終防衛ライン。
-const IMAGE_REL_PATH_RE = /^images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpe?g|gif|webp)$/i;
-function isValidImageRelPath(path) {
-  return typeof path === 'string' && IMAGE_REL_PATH_RE.test(path);
-}
-
 /** 失敗を握り潰してよい操作向けの invoke。エラーはログとトーストに出す。 */
 function fireInvoke(cmd, args, failMessage) {
   return invoke(cmd, args).catch(e => {
@@ -693,40 +685,6 @@ resizeHandle.addEventListener('mouseleave', (e) => {
 // スクロールすると画像とハンドルの対応がずれるので、位置合わせをやり直す前提で一旦隠す
 mdView.addEventListener('scroll', () => hideHandle());
 
-/**
- * line 中でバッククォート 1 組（`...`）に囲まれた区間（開始・終了のバッククォートを含む）を
- * 列挙する。markdown.js の inlineMarkdown が code を先に保護してから画像記法を解釈するのと
- * 同じ解釈で、区間内の `![alt](src)` は画像記法として数えない（occurrence の定義を DOM 側
- * ＝実際に <img> として描画されるものと一致させる）。
- */
-function codeSpanRanges(line) {
-  const ranges = [];
-  const re = /`[^`]+`/g;
-  let m;
-  while ((m = re.exec(line))) {
-    ranges.push([m.index, m.index + m[0].length]);
-  }
-  return ranges;
-}
-
-function isInCodeSpan(ranges, pos) {
-  return ranges.some(([start, end]) => pos >= start && pos < end);
-}
-
-/** 行 lineIdx の Markdown 記法のうち、relSrc と一致する occurrence 番目（0始まり）の画像記法だけ `|width` を追加・置換する。 */
-function rewriteImageWidth(line, relSrc, width, occurrence) {
-  const codeSpans = codeSpanRanges(line);
-  let seen = -1;
-  return line.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, alt, src, offset) => {
-    if (isInCodeSpan(codeSpans, offset)) return whole;
-    if (src !== relSrc) return whole;
-    seen++;
-    if (seen !== occurrence) return whole;
-    const base = alt.replace(/\|\d+$/, '');
-    return `![${base}|${width}](${src})`;
-  });
-}
-
 /** 行 lineEl 内で、relSrc が一致する img のうち img が何番目か（0始まり）。 */
 function imageOccurrenceInLine(lineEl, img, relSrc) {
   const sameSrcImages = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
@@ -822,62 +780,6 @@ resizeHandle.addEventListener('mousedown', (e) => {
 // caret への合流は toMarkdown・下記の document 'paste' リスナーが担う。htmlToMarkdown 単体は
 // window.htmlToMarkdown として引き続きテストから直接呼べる。
 const EMPTY_IMAGE_MAP = new Map();
-
-// Rust 側 save_pasted_image の上限（src-tauri/src/persistence.rs の MAX_IMAGE_BYTES）と揃える。
-// atob() でのデコードは全体をメモリ上に展開するため、送る前に base64 の文字数から概算して弾く。
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const DATA_URI_TOO_LARGE = Symbol('data-uri-too-large');
-
-/**
- * alt / リンクテキストとして使う HTML 属性値を Markdown として安全な形に無害化する。
- * `]` を残すと `![alt](src)` / `[alt](src)` の終端と衝突し記法ごと壊れるため取り除く
- * （エスケープではなく除去。markdown.js の `[^\]]*` も Rust 側の extract_image_paths も
- * バックスラッシュエスケープを解釈しない）。改行は 1 行の記法を壊すため空白に置換する。
- */
-function sanitizeAltText(text) {
-  return text.replace(/\r\n|\r|\n/g, ' ').replace(/]/g, '');
-}
-
-/**
- * 画像記法（`![alt](src)`）の alt にだけ適用する追加の無害化。末尾が `|数字` になると
- * markdown.js の parseImageAlt が表示幅指定と誤解釈するため `|` を除去する。
- * リンクテキストとして使う場合（https 画像のフォールバックなど）は幅記法と無関係なので
- * sanitizeAltText のみを使い、`|` はそのまま残す。
- */
-function sanitizeImageAlt(text) {
-  return sanitizeAltText(text).replace(/\|/g, '');
-}
-
-/** URL 側（href / src）に改行が入ると Markdown 記法が複数行に割れるため取り除く。 */
-function sanitizeUrl(url) {
-  return url.replace(/\r\n|\r|\n/g, '');
-}
-
-/** `src` 属性値が `data:` スキームかどうか（大文字小文字を無視）。 */
-function isDataUri(src) {
-  return /^data:/i.test(src);
-}
-
-/**
- * `data:<media-type>;base64,<data>` 形式をデコードする（`;charset=...;base64,` のような
- * 追加パラメータや `BASE64,` / `DATA:` の大文字小文字表記も許容）。
- * 戻り値: 成功時は Uint8Array、base64 でない・デコード不能なら null（無言で alt にフォールバック）、
- * デコード後サイズが Rust 側の上限を超える見込みなら DATA_URI_TOO_LARGE（呼び出し側でトースト対象）。
- */
-function decodeDataUri(src) {
-  const match = /^data:([^,]*);base64,([\s\S]*)$/i.exec(src);
-  if (!match) return null;
-  const base64 = match[2];
-  if (Math.floor((base64.length * 3) / 4) > MAX_IMAGE_BYTES) return DATA_URI_TOO_LARGE;
-  try {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * `<img src="data:...">` を `save_pasted_image` へ流し、src → 相対パスの Map を返す。
@@ -1724,15 +1626,6 @@ function effectiveCharMap(seg, inlineRaw) {
     return { srcStart: seg.srcStart, len: seg.visibleText.length };
   }
   return null;
-}
-
-const GRAPHEME_SEGMENTER = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter() : null;
-
-/** 文字列 s の書記素クラスタ列。Intl.Segmenter が無い環境（テスト等）では UTF-16 コード単位を
- * 1 書記素として扱うフォールバックにする。 */
-function graphemesOf(s) {
-  if (GRAPHEME_SEGMENTER) return [...GRAPHEME_SEGMENTER.segment(s)].map((g) => g.segment);
-  return [...s];
 }
 
 /**

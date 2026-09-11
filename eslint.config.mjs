@@ -39,6 +39,16 @@ const noteLines = {
   resolveMarkerRun: "readonly",
   toggleEmphasisMarkers: "readonly",
   cycleMarkerRun: "readonly",
+  isValidImageRelPath: "readonly",
+  rewriteImageWidth: "readonly",
+  sanitizeAltText: "readonly",
+  sanitizeImageAlt: "readonly",
+  sanitizeUrl: "readonly",
+  isDataUri: "readonly",
+  MAX_IMAGE_BYTES: "readonly",
+  DATA_URI_TOO_LARGE: "readonly",
+  decodeDataUri: "readonly",
+  graphemesOf: "readonly",
 };
 const history = {
   createHistory: "readonly",
