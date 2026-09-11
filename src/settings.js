@@ -13,6 +13,7 @@ let currentShowNew = true;
 let currentShowColor = true;
 let currentConfirmDelete = true;
 let currentAutostart = false;
+let currentShowTray = true;
 let currentLanguage = 'auto';
 let systemLanguage = 'en'; // get_settings から届く。init で上書きされる
 
@@ -24,6 +25,7 @@ let saved = {
   showNew: currentShowNew, showColor: currentShowColor,
   confirmDelete: currentConfirmDelete,
   autostart: currentAutostart,
+  showTray: currentShowTray,
   language: currentLanguage,
 };
 const saveBtn = document.getElementById('save-btn');
@@ -38,6 +40,7 @@ function checkDirty() {
     || currentShowColor !== saved.showColor
     || currentConfirmDelete !== saved.confirmDelete
     || currentAutostart !== saved.autostart
+    || currentShowTray !== saved.showTray
     || currentLanguage !== saved.language;
   saveBtn.disabled = !dirty;
 }
@@ -50,6 +53,7 @@ function snapshotSaved() {
     showNew: currentShowNew, showColor: currentShowColor,
     confirmDelete: currentConfirmDelete,
     autostart: currentAutostart,
+    showTray: currentShowTray,
     language: currentLanguage,
   };
 }
@@ -118,6 +122,7 @@ saveBtn.addEventListener('click', async () => {
       showNewButton: currentShowNew,
       showColorButton: currentShowColor,
       confirmBeforeDelete: currentConfirmDelete,
+      showTrayIcon: currentShowTray,
       language: currentLanguage,
     });
     // autostart の状態が変わっていたら反映
@@ -143,6 +148,7 @@ saveBtn.addEventListener('click', async () => {
       show_new_button: currentShowNew,
       show_color_button: currentShowColor,
       confirm_before_delete: currentConfirmDelete,
+      show_tray_icon: currentShowTray,
       language: currentLanguage,
       resolved_language: I18N.resolve(currentLanguage, systemLanguage),
     });
@@ -207,6 +213,13 @@ autostartToggle.addEventListener('change', () => {
   checkDirty();
 });
 
+// ── Show Tray Icon Toggle ─────────────────────────────
+const showTrayToggle = document.getElementById('show-tray-toggle');
+showTrayToggle.addEventListener('change', () => {
+  currentShowTray = showTrayToggle.checked;
+  checkDirty();
+});
+
 // ── Language Select ──────────────────────────────────
 // 保存を待たず選択直後に UI へ反映する（プレビュー。保存せず閉じても次回は保存値から読み直すので巻き戻しは不要）
 const languageSelect = document.getElementById('language-select');
@@ -263,6 +276,9 @@ async function init() {
 
   currentAutostart = !!autostartEnabled;
   autostartToggle.checked = currentAutostart;
+
+  currentShowTray = s.show_tray_icon !== false;
+  showTrayToggle.checked = currentShowTray;
 
   snapshotSaved();
 

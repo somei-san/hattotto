@@ -430,7 +430,8 @@ pub(crate) fn save_pasted_image(
 
 /// 設定を更新して保存する。数値は範囲内にクランプされる。
 /// `language` が変わった場合は、アプリメニュー・トレイのメニュー・開いている設定/ゴミ箱
-/// ウィンドウのタイトルを表示中の言語で組み直す。
+/// ウィンドウのタイトルを表示中の言語で組み直す。`show_tray_icon` が変わった場合は
+/// トレイアイコンの表示/非表示を即座に反映する。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri コマンドは個別引数が JS キーに対応するため
 pub(crate) fn update_settings(
@@ -441,6 +442,7 @@ pub(crate) fn update_settings(
     show_new_button: bool,
     show_color_button: bool,
     confirm_before_delete: bool,
+    show_tray_icon: bool,
     language: LanguageSetting,
     app: AppHandle,
     state: State<AppState>,
@@ -457,6 +459,7 @@ pub(crate) fn update_settings(
         settings.show_new_button = show_new_button;
         settings.show_color_button = show_color_button;
         settings.confirm_before_delete = confirm_before_delete;
+        settings.show_tray_icon = show_tray_icon;
         settings.language = language;
         (settings.clone(), language_changed)
     };
@@ -476,7 +479,14 @@ pub(crate) fn update_settings(
             let _ = win.set_title(i18n::text(lang, Msg::TrashWindowTitle));
         }
     }
-    save_settings(&state, &snapshot)
+    save_settings(&state, &snapshot)?;
+    // 保存が成功してから反映する。保存前に切り替えると、保存失敗時にトレイの表示状態が
+    // settings.json の内容と食い違う（次回起動時は保存失敗前の値に戻ってしまう）。
+    // set_tray_visible は同じ値を渡しても副作用が無いため、変化の有無を見ずに毎回呼ぶ
+    if let Err(e) = tray::set_tray_visible(&app, show_tray_icon) {
+        log::error!("set tray visible error: {}", e);
+    }
+    Ok(())
 }
 
 /// 設定ウィンドウを開く（既に開いている場合はフォーカスを移す）。

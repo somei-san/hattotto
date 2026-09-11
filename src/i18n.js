@@ -45,6 +45,7 @@ const I18N_TABLE = {
 
   sectionSystem: { ja: 'システム', en: 'System' },
   toggleAutostart: { ja: 'ログイン時に自動起動', en: 'Start at login' },
+  toggleShowTray: { ja: 'メニューバーにアイコンを表示', en: 'Show icon in menu bar' },
 
   labelLanguage: { ja: '言語', en: 'Language' },
   languageAuto: { ja: 'システムに合わせる', en: 'Match System' },

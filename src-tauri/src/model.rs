@@ -187,6 +187,8 @@ pub struct Settings {
     pub show_color_button: bool,
     #[serde(default = "default_true")]
     pub confirm_before_delete: bool,
+    #[serde(default = "default_true")]
+    pub show_tray_icon: bool,
     #[serde(default)]
     pub language: LanguageSetting,
 }
@@ -205,6 +207,7 @@ impl Default for Settings {
             show_new_button: true,
             show_color_button: true,
             confirm_before_delete: true,
+            show_tray_icon: true,
             language: LanguageSetting::Auto,
         }
     }
@@ -298,6 +301,7 @@ mod tests {
         assert!(s.show_new_button);
         assert!(s.show_color_button);
         assert!(s.confirm_before_delete);
+        assert!(s.show_tray_icon);
     }
 
     // ── Zoom clamp ──
@@ -415,6 +419,26 @@ mod tests {
         let json = r#"{"default_color":"yellow","opacity":100}"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(s.confirm_before_delete);
+    }
+
+    // ── show_tray_icon ──
+
+    #[test]
+    fn settings_deserialize_without_show_tray_icon_defaults_to_true() {
+        let json = r#"{"default_color":"yellow","opacity":100}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.show_tray_icon);
+    }
+
+    #[test]
+    fn settings_json_roundtrip_with_show_tray_icon() {
+        let s = Settings {
+            show_tray_icon: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!loaded.show_tray_icon);
     }
 
     // ── language ──

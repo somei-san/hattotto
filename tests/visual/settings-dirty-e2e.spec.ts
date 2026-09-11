@@ -76,6 +76,25 @@ test.describe("設定画面の dirty チェック", () => {
     await expect(page.locator("#save-btn")).toBeEnabled();
   });
 
+  test("メニューバーアイコン表示トグル変更 → 保存ボタンが有効化", async ({ openSettings }) => {
+    const page = await openSettings();
+    await expect(page.locator("#save-btn")).toBeDisabled();
+
+    await page.locator("#show-tray-toggle + .toggle-track").click();
+    await expect(page.locator("#save-btn")).toBeEnabled();
+  });
+
+  test("メニューバーアイコン表示トグルを外して保存 → update_settings に showTrayIcon: false が渡る", async ({ openSettings }) => {
+    const page = await openSettings();
+
+    await page.locator("#show-tray-toggle + .toggle-track").click();
+    await page.click("#save-btn");
+
+    const calls = await page.evaluate(() => (window as any).__captured_invokes);
+    const call = calls.find((c: any) => c.cmd === "update_settings");
+    expect(call.args.showTrayIcon).toBe(false);
+  });
+
   test("全項目を元に戻す → 保存ボタンが無効に戻る", async ({ openSettings }) => {
     const page = await openSettings();
 

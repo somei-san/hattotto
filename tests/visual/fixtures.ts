@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   show_new_button: true,
   show_color_button: true,
   confirm_before_delete: true,
+  show_tray_icon: true,
   language: "ja",
   system_language: "ja",
   data_dir: "/mock/data-dir",
@@ -134,10 +135,13 @@ async function injectSettingsMock(
     (window as any).__shell_open_calls = shellOpenCalls;
     const emittedEvents: { event: string; payload: unknown }[] = [];
     (window as any).__emitted_events = emittedEvents;
+    const capturedInvokes: { cmd: string; args: unknown }[] = [];
+    (window as any).__captured_invokes = capturedInvokes;
 
     (window as any).__TAURI__ = {
       core: {
-        invoke: async (cmd: string) => {
+        invoke: async (cmd: string, args?: unknown) => {
+          capturedInvokes.push({ cmd, args });
           switch (cmd) {
             case "get_settings":               return data.settings;
             case "update_settings":            return null;
