@@ -180,8 +180,11 @@
   }
 
   /* 空ブロック自身は無地のまま（キャレットの着地点）にし、文言は ::before だけに表示する
-     （テキストノードとして持たせると、それ自体が編集対象になってしまう） */
-  .md-placeholder::before {
+     （テキストノードとして持たせると、それ自体が編集対象になってしまう）。:empty を条件にする
+     のは、IME 変換中に WebKit が未確定文字列をこのブロックへ直接テキストノードとして書き込む
+     ため（note.js は composing 中に介入しない）。条件を付けずに常に表示すると、文言が未確定
+     文字列と並んで残ってしまうので、子ノードが入った時点で消す */
+  .md-placeholder:empty::before {
     content: attr(data-placeholder);
     color: var(--text-muted);
     pointer-events: none;
