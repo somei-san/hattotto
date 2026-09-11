@@ -1747,7 +1747,10 @@ mdView.addEventListener('compositionend', (e) => {
     // 巻き戻す。対象ブロックは内容キーが一致していても必ず作り直す（composition 中の
     // ネイティブ DOM 書き込みは空のテキストノードのように outerHTML の差分に出ないことがある）
     const { point, forceLines } = resolveRollbackTarget(currentSelectionRange());
-    renderAll(forceLines);
+    // forceLines も point 側の解決失敗で null になりうる。その場合は対象を絞れないので全行を
+    // 強制作り直しにする（空のテキストノードが残ったブロックが内容キー一致で取り残されると、
+    // 例えば .md-placeholder が :empty でなくなりプレースホルダ文言が戻らないままになる）
+    renderAll(forceLines ?? { start: 0, end: getLines().length - 1 });
     if (point) placeCaretAtRaw(point.line, point.col);
     return;
   }

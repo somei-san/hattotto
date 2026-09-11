@@ -375,6 +375,50 @@ test.describe("装飾・行頭マーカー・コードブロック内での確�
   });
 });
 
+test.describe("空の付箋でのプレースホルダと変換中表示の重なり", () => {
+  test("compositionstart 後にネイティブ書き込みが入ると ::before の文言が消える", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+    await placeCaret(page, 0, 0);
+
+    const beforeContent = await page.evaluate(() => {
+      const el = document.querySelector(".md-placeholder")!;
+      return getComputedStyle(el, "::before").content;
+    });
+    expect(beforeContent).not.toBe("none");
+
+    await compositionStart(page);
+    await insertNativeCompositionText(page, "あ"); // WebKit が composition 中に空 div へ直接書き込む動きを模擬
+
+    const duringContent = await page.evaluate(() => {
+      const el = document.querySelector(".md-placeholder")!;
+      return getComputedStyle(el, "::before").content;
+    });
+    expect(duringContent).toBe("none");
+    expect(await page.locator(".md-placeholder").textContent()).toBe("あ");
+    expect(await caretLine(page)).toBe(0); // composing 中も note.js がキャレットを他行へ動かさない
+
+    await compositionEnd(page, "あ");
+    expect(await getContent(page)).toBe("あ");
+    expect(await page.locator(".md-placeholder").count()).toBe(0);
+  });
+
+  test("変換取消後はプレースホルダの文言が再び表示される", async ({ openNote }) => {
+    const page = await openNote({ content: "" });
+    await placeCaret(page, 0, 0);
+
+    await compositionStart(page);
+    await insertNativeCompositionText(page, "あ");
+    await compositionEnd(page, "");
+
+    expect(await getContent(page)).toBe("");
+    const afterContent = await page.evaluate(() => {
+      const el = document.querySelector(".md-placeholder")!;
+      return getComputedStyle(el, "::before").content;
+    });
+    expect(afterContent).not.toBe("none");
+  });
+});
+
 // ── 実機でしか確認できない残り ──────────────────────
 // 合成 CompositionEvent は WKWebView 実機の以下の挙動までは再現できない:
 // - compositionend 前後の実際の描画・ペイントのタイミング（「確定直後に入力済みテキストが
@@ -383,4 +427,7 @@ test.describe("装飾・行頭マーカー・コードブロック内での確�
 //   本当に同一マイクロタスク窓に収まるか）
 // - Esc キーでの変換取消時に WebKit が実際にどう compositionend を発火させるか（data 空での
 //   取消として扱う前提が実機と一致するか）
+// - WebKit が composition 中の書き込みをどの DOM 位置に対して行うか。insertNativeCompositionText
+//   は .md-placeholder の内側に子ノードとして書き込む前提で模擬しているが、実機がこれと異なる
+//   位置（#markdown-view 直下の兄弟ノード等）に書く場合、::before が :empty で隠れる保証はない
 // これらは実機での目視・ログ確認が必要（note.js の dbg/dbgNode を参照）。
