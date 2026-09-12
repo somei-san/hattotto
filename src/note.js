@@ -347,6 +347,10 @@ function clearImageSelection() {
   // 「範囲選択中はキャレットを置かない」ガードへ誤って引っかかる）
   const sel = window.getSelection();
   if (sel.rangeCount) sel.removeAllRanges();
+  // ハンドルは隠す。hoverImg は mouseover でしか更新されず、キーボードで選択を外したときは
+  // マウスがもう画像上に無くても古い hover が残っていて、hover 扱いで出しっぱなしになるため。
+  // マウスが本当に画像上にあれば次の mouseover で出し直される
+  hideHandle();
 }
 
 /**
@@ -363,6 +367,17 @@ function selectImageRange(img) {
   sel.addRange(range);
 }
 
+/** selectedImage が指す img 要素を現在の DOM から探す。選択が無い、または対象がもう存在しない
+ * （行が消えた・画像が無くなった等）場合は null。選択状態そのものの解除は呼び出し元に委ねる。 */
+function findSelectedImageElement() {
+  if (!selectedImage) return null;
+  const lineEl = mdView.querySelector(`[data-line="${selectedImage.line}"]`);
+  if (!lineEl) return null;
+  const imgs = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
+    .filter(el => el.dataset.relSrc === selectedImage.relSrc);
+  return imgs[selectedImage.occurrence] ?? null;
+}
+
 /**
  * selectedImage が指す img 要素に選択枠（.img-selected）と DOM 選択を付け直す。renderAll() の
  * 直後に呼び、対象ブロックが入れ替わっていても選択状態を新しい DOM へ引き継ぐ。
@@ -370,17 +385,16 @@ function selectImageRange(img) {
  */
 function applySelectionHighlight() {
   if (!selectedImage) return;
-  const lineEl = mdView.querySelector(`[data-line="${selectedImage.line}"]`);
-  if (!lineEl) { selectedImage = null; return; }
-  const imgs = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
-    .filter(el => el.dataset.relSrc === selectedImage.relSrc);
-  const img = imgs[selectedImage.occurrence];
+  const img = findSelectedImageElement();
   if (!img) { selectedImage = null; return; }
   img.classList.add('img-selected');
   selectImageRange(img);
   // キー操作（←/→/↑/↓）で画面外の画像行へ着地したとき、選択枠が唯一の状態表示なので
   // 見える位置までスクロールする
   img.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // 選択中は常にリサイズハンドルを出す（renderAll 冒頭の hideHandle() で一旦隠れているので、
+  // ここで新しい img に位置合わせして出し直す）
+  showHandleFor(img);
 }
 
 /** 行テキスト中で最初に出てくる画像記法の src を取り出す。無ければ null。 */
@@ -616,8 +630,10 @@ mdView.addEventListener('change', (e) => {
 // ── Zoom ──────────────────────────────────────────
 function applyZoom(zoom) {
   document.getElementById('note').style.zoom = zoom / 100;
-  // ズーム変更でハンドルの座標系（rect と画面 px の対応）が変わるので位置合わせをやり直す
-  hideHandle();
+  // ズーム変更でハンドルの座標系（rect と画面 px の対応）が変わるので位置合わせをやり直す。
+  // 選択中ならその画像に合わせ直し、そうでなければ hover 由来の表示は隠す
+  hoverImg = null;
+  refreshHandle();
 }
 
 let currentZoom = 100;
@@ -644,7 +660,14 @@ resizeHandle.className = 'img-resize-handle';
 document.body.appendChild(resizeHandle);
 
 let dragState = null; // { img, relSrc, startX, startWidth, zoomFactor, maxWidth, currentWidth }
-let hoverImg = null; // ハンドル表示中に位置合わせした画像（ドラッグ対象の特定に使う）
+let hoverImg = null; // ハンドル表示中に位置合わせした画像（hover 由来。選択中の画像は selectedImage 側で持つ）
+
+/** ハンドルを表示・位置合わせする対象の img。選択中の画像を優先し、無ければ hover 中の画像。
+ * ドラッグ対象の特定（resizeHandle の mousedown）と、ハンドルの表示更新（refreshHandle）の
+ * 両方がここに集約される。 */
+function handleTargetImg() {
+  return findSelectedImageElement() ?? hoverImg;
+}
 
 function positionHandle(img) {
   const rect = img.getBoundingClientRect();
@@ -657,6 +680,40 @@ function hideHandle() {
   resizeHandle.classList.remove('visible');
 }
 
+/** ハンドルの位置合わせ点（img の右下）が mdView の可視範囲内にあるか。画像の矩形全体ではなく
+ * 位置合わせ点だけを見るのは、画像の一部がまだ見えていれば出したままにするため。選択中の画像を
+ * mdView の可視範囲外までスクロールしたとき、ハンドルだけが mdView の外に取り残されるのを防ぐのに使う。 */
+function handleAnchorVisible(img) {
+  const rect = img.getBoundingClientRect();
+  const viewRect = mdView.getBoundingClientRect();
+  const x = rect.right - 5;
+  const y = rect.bottom - 5;
+  return x >= viewRect.left && x <= viewRect.right && y >= viewRect.top && y <= viewRect.bottom;
+}
+
+/** img にハンドルを位置合わせして表示する。位置合わせ点が mdView の可視範囲外なら代わりに隠す。 */
+function showHandleFor(img) {
+  if (!handleAnchorVisible(img)) { hideHandle(); return; }
+  positionHandle(img);
+  resizeHandle.classList.add('visible');
+  // 読み込み未完了の画像は高さが確定しておらず、右下の座標がまだ本来位置でない。
+  // 読み込み完了後、その時点でもまだ表示対象なら位置だけ合わせ直す
+  if (!img.complete) {
+    img.addEventListener('load', () => {
+      if (handleTargetImg() === img) refreshHandle();
+    }, { once: true });
+  }
+}
+
+/** handleTargetImg() に合わせてハンドルを出し直す。対象が無くなっていれば隠す。選択中の
+ * 画像がある限り、hover が外れても（スクロール・ズーム・mouseleave・ウィンドウリサイズ等で）
+ * ハンドルは出たまま位置だけ合わせ直される。 */
+function refreshHandle() {
+  const img = handleTargetImg();
+  if (!img) { hideHandle(); return; }
+  showHandleFor(img);
+}
+
 // mouseenter/leave は bubble しないので、mdView での委譲は mouseover を使う
 mdView.addEventListener('mouseover', (e) => {
   if (dragState) return;
@@ -664,26 +721,45 @@ mdView.addEventListener('mouseover', (e) => {
   // リモート URL 等、書き戻し先を特定できない画像にはハンドルを出さない
   if (!img || !isValidImageRelPath(img.dataset.relSrc)) return;
   hoverImg = img;
-  positionHandle(img);
-  resizeHandle.classList.add('visible');
+  // 別の画像が選択中なら、そちらを表示対象とする handleTargetImg の優先順位に合わせて
+  // 位置合わせをスキップする。ここでハンドルを hover 先へ動かすと、mousedown の対象
+  // （handleTargetImg が返す選択中の画像）と表示位置がずれ、見えている画像と違う画像が
+  // リサイズされてしまう
+  const selected = findSelectedImageElement();
+  if (selected && selected !== img) return;
+  showHandleFor(img);
 });
 
 // mdView から出た場合の隠し忘れをケアする。ハンドルは mdView の外（body 直下）にあるので、
-// 画像の右下からハンドルへ移動する経路は mdView を一度離れる（relatedTarget がハンドルならまだ隠さない）
+// 画像の右下からハンドルへ移動する経路は mdView を一度離れる（relatedTarget がハンドルならまだ隠さない）。
+// 選択中の画像から離れた場合は隠さず、選択枠に位置合わせしたまま残す（refreshHandle が判断する）
 mdView.addEventListener('mouseleave', (e) => {
   if (dragState || e.relatedTarget === resizeHandle) return;
-  hideHandle();
+  hoverImg = null;
+  refreshHandle();
 });
 
-// ハンドルから離れた先が画像でなければ隠す（mdView の mouseover では拾えない遷移）
+// ハンドルから離れた先が画像でなければ隠す（mdView の mouseover では拾えない遷移）。
+// mouseleave 同様、選択中なら refreshHandle が選択枠へ位置合わせし直すだけで隠さない
 resizeHandle.addEventListener('mouseleave', (e) => {
   if (dragState) return;
   if (e.relatedTarget?.closest?.('img[data-rel-src]')) return;
-  hideHandle();
+  hoverImg = null;
+  refreshHandle();
 });
 
-// スクロールすると画像とハンドルの対応がずれるので、位置合わせをやり直す前提で一旦隠す
-mdView.addEventListener('scroll', () => hideHandle());
+// スクロールすると画像とハンドルの対応がずれる。選択中なら位置合わせをやり直し、
+// そうでなければ hover 由来の表示は一旦隠す（次の mouseover で出し直す）
+mdView.addEventListener('scroll', () => {
+  hoverImg = null;
+  refreshHandle();
+});
+
+// 付箋の幅が変わると画像は max-width: 100% で追従して縮む・折り返しがずれるが、選択中は
+// ハンドルが古い座標のまま取り残されるので位置合わせをやり直す（ウィンドウのネイティブなリサイズ
+// 通知 appWindow.onResized ではなく webview 自体の viewport 変化を見る。scheduleGeoSave は
+// 引き続き appWindow.onResized 側で行う）
+window.addEventListener('resize', () => refreshHandle());
 
 /** 行 lineEl 内で、relSrc が一致する img のうち img が何番目か（0始まり）。 */
 function imageOccurrenceInLine(lineEl, img, relSrc) {
@@ -744,8 +820,9 @@ function onResizeMouseUp() {
   const state = dragState;
   document.removeEventListener('mousemove', onResizeMouseMove);
   dragState = null;
-  hideHandle();
-  if (!state || state.currentWidth == null) return; // 実質的な移動が無ければ書き換えない
+  // 実質的な移動が無ければ書き換えない。この場合 applyImageWidth の renderAll を経由しないため、
+  // ここで自分から出し直す（選択中ならハンドルを残す）
+  if (!state || state.currentWidth == null) { refreshHandle(); return; }
   applyImageWidth(state.img, state.relSrc, state.currentWidth);
 }
 
@@ -755,17 +832,19 @@ window.addEventListener('blur', () => {
 });
 
 resizeHandle.addEventListener('mousedown', (e) => {
-  if (!hoverImg) return;
-  const relSrc = hoverImg.dataset.relSrc;
+  // hover 由来でなく、選択中の画像に位置合わせされているだけのハンドルからもドラッグを開始できる
+  const img = handleTargetImg();
+  if (!img) return;
+  const relSrc = img.dataset.relSrc;
   if (!isValidImageRelPath(relSrc)) return;
   e.preventDefault();
   e.stopPropagation();
   const zoomFactor = currentZoom / 100;
   dragState = {
-    img: hoverImg,
+    img,
     relSrc,
     startX: e.clientX,
-    startWidth: currentImageWidth(hoverImg, zoomFactor),
+    startWidth: currentImageWidth(img, zoomFactor),
     zoomFactor,
     // 付箋が極端に狭いとき clientWidth が下限を割り込むことがあるため、上限は必ず下限以上にする
     maxWidth: Math.max(IMAGE_RESIZE_MIN, Math.min(mdView.clientWidth || IMAGE_RESIZE_MAX, IMAGE_RESIZE_MAX)),
@@ -949,25 +1028,45 @@ async function savePastedImage(file) {
   }
 }
 
+/** insertedAt に 1 行挿入したとき、行番号を保持したままの状態（画像選択・インライン生表示）を
+ * 追従させる。pasteImage は applyLines を経由せず直接 lines を書き換えるため、これを呼ばないと
+ * ドロップ先より下の行を指していた selectedImage・revealState が挿入後も古い行番号のまま残り、
+ * renderAll 後に選択枠だけが残る／無関係な行が生表示のままになる（applySelectionHighlight は
+ * selectedImage の行に画像が無ければ選択状態を捨てるだけで、ずれた行番号自体は直さない）。 */
+function shiftLineReferencesAfterInsert(insertedAt) {
+  if (selectedImage && selectedImage.line >= insertedAt) selectedImage.line += 1;
+  if (revealState && revealState.line >= insertedAt) revealState.line += 1;
+}
+
 /**
  * ドロップ画像を保存し、生成された相対パスを Markdown 画像記法として fallbackLine の行末へ
  * 追記する（ドロップ先は座標であって caret ではないため、行末追記が唯一の妥当な挿入位置）。
+ * 画像記法の直後に空行を 1 行挿入する（pasteImageAtCaret と揃える）。戻り値は挿入した空行の
+ * 行番号で、pasteImageFiles が複数ファイルを同じ fallbackLine へ順に積むときの次の挿入先になる。
  */
 async function pasteImage(file, fallbackLine) {
   const relPath = await savePastedImage(file);
-  if (!relPath) return;
-  const markdown = `![](${relPath})`;
+  if (!relPath) return fallbackLine;
+  const alt = decideImageAlt(file.name, new Date());
+  const markdown = `![${alt}](${relPath})`;
   const lines = getLines();
   const target = Math.min(Math.max(fallbackLine ?? lines.length - 1, 0), lines.length - 1);
   lines[target] += markdown;
+  const insertedAt = target + 1;
+  lines.splice(insertedAt, 0, '');
+  shiftLineReferencesAfterInsert(insertedAt);
   rawContent = lines.join('\n');
   renderAll();
   await saveNow();
+  return insertedAt;
 }
 
-/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。 */
+/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。
+ * 明示的なドロップ先（fallbackLine が非 null）でも、2 件目以降は前の画像の下にできた空行へ
+ * 積むよう fallbackLine を更新する（同じ行へ連結されるのを防ぐ）。 */
 async function pasteImageFiles(files, fallbackLine) {
-  for (const file of files) await pasteImage(file, fallbackLine);
+  let line = fallbackLine;
+  for (const file of files) line = await pasteImage(file, line);
 }
 
 /** ドロップ先の要素から挿入対象の行番号を求める。フェンスは行単位のマッピングを持たないので末尾に置く。 */
@@ -1254,11 +1353,15 @@ mdView.addEventListener('keydown', (e) => {
 
 /** 現在の選択から、挿入・置換の対象にする raw bounds を求める（判定フェーズ）。collapsed なら
  * collapsedBounds、非 collapsed なら resolveSelectionBounds。画像選択（selectImageRange が張った
- * Range）は img 自体が可視幅 0 のため、非 collapsed な選択でも raw bounds が同じ点に潰れて退化する。
- * ここで無視しないと、画像を消さずにその raw 位置へ文字だけ挿入してしまう（画像は残ったまま隣に
- * 文字が入る）。画像の置換は Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側の
- * ファイル削除込み）に委ねる。 */
+ * Range）は selectionStillCoversSelectedImage で明示的に除外する。画像を消さずにその raw 位置へ
+ * 文字だけ挿入する（画像は残ったまま隣に文字が入る）ような編集を許さないため、画像の置換は
+ * Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側のファイル削除込み）に委ねる。
+ * resolveSelectionBounds は画像 1 個だけを覆う選択の終端を画像記法の末尾まで解決するため、
+ * 退化判定（boundsAreDegenerate）だけでは除外できない。DOM 選択が selectedImage を経由せず
+ * テキスト側へ既に移っている場合は横取りしない（Backspace/Delete 側の
+ * selectionStillCoversSelectedImage と同じ整合性チェック）。 */
 function resolveEditableBounds() {
+  if (selectedImage && selectionStillCoversSelectedImage()) return null;
   const range = currentSelectionRange();
   if (!range) return null;
   if (range.collapsed) return collapsedBounds(range);
@@ -1881,6 +1984,29 @@ function visibleOffsetInLine(lineEl, node, offset) {
 }
 
 /**
+ * (node, offset) が block の内容全体の末尾（最後の子孫の直後）とちょうど一致する位置かどうか。
+ * Range.compareBoundaryPoints は「親要素 + 子インデックス」と「子孫ノード自身」という異なる
+ * DOM 表現の境界点を正しく比較できるため、可視文字数に頼らず構造的に「本当の行末」かどうかを
+ * 判定できる。画像等の可視幅 0 な要素が末尾にあると、可視文字数（Range.toString().length）
+ * だけでは行頭直後・行末のどちらの境界点も同じ 0 文字になり区別できないため、resolveSelectionPoint
+ * の選択終端解決がここに頼る。
+ * block 自身が DOM 上の子を 1 つも持たない場合（`<hr>` 等）は対象外にする: 子が無いと「先頭」と
+ * 「末尾」が同じ (block, 0) に潰れて区別できず、hr のように raw のテキストが実 DOM の子ノードでは
+ * なく特別扱いの 1 セグメント（inlineSegments の hr 分岐、charMap 経由）として表現される行では、
+ * その既存の解決に任せないと選択の前半だけの操作でも行全体を含めてしまう。
+ */
+function isDomPointAtBlockEnd(block, node, offset) {
+  if (block.childNodes.length === 0) return false;
+  const end = document.createRange();
+  end.selectNodeContents(block);
+  end.collapse(false);
+  const point = document.createRange();
+  point.setStart(node, offset);
+  point.collapse(true);
+  return end.compareBoundaryPoints(Range.START_TO_START, point) === 0;
+}
+
+/**
  * 選択の一端（node, offset）が指す位置を、文書全体での (行番号, raw 列オフセット) に変換する。
  * isEnd は選択の終了端かどうか（装飾記法の内部に境界が落ちたときの丸め方向に使う。
  * visibleOffsetToRawOffset 参照）。対応する行が見つからなければ null。
@@ -1936,6 +2062,11 @@ function resolveSelectionPoint(node, offset, isEnd) {
   const inlineRaw = lineText.slice(markerLen);
   const prefixLen = orderedDisplayPrefixLength(block);
   const contentVisible = Math.max(0, visible - prefixLen);
+  // 選択の終了端が構造的にその行の末尾に位置しているときは、画像のような可視幅 0 の記法を
+  // 跨いだ行末を指しているとみなし、行の raw 全体を含める（判定の詳細は isDomPointAtBlockEnd 参照）
+  if (isEnd && isDomPointAtBlockEnd(block, target, targetOffset)) {
+    return { line, col: lineText.length };
+  }
   const rawOffset = markerLen + visibleOffsetToRawOffset(inlineRaw, contentVisible, isEnd, revealRangeForLine(line));
   return { line, col: rawOffset };
 }
@@ -2834,7 +2965,8 @@ async function pasteImageAtCaret(file, bounds) {
   const snapshot = rawContent;
   const relPath = await savePastedImage(file);
   if (!relPath) return;
-  applyResolvedPaste(bounds, snapshot, `![](${relPath})\n`);
+  const alt = decideImageAlt(file.name, new Date(), isGenericImageFileName);
+  applyResolvedPaste(bounds, snapshot, `![${alt}](${relPath})\n`);
 }
 
 /**

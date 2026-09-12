@@ -365,3 +365,289 @@ test.describe("画像のリサイズハンドル", () => {
     await ctx.close();
   });
 });
+
+// 選択中は hover の有無に関係なく常にハンドルを出す。ハンドルの表示・位置合わせ・ドラッグ可否を見る。
+test.describe("選択中は常にリサイズハンドルを表示する", () => {
+  const handleVisible = (page: import("@playwright/test").Page) =>
+    page.evaluate(() => document.querySelector(".img-resize-handle")!.classList.contains("visible"));
+
+  test("選択後にマウスが画像の外へ出てもハンドルは visible のまま", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      const img = document.querySelector("img")!;
+      img.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      img.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    expect(await handleVisible(page)).toBe(true);
+
+    // mdView を完全に離れる（relatedTarget が画像でもハンドルでもない）。選択中はこの遷移でも隠れない
+    await page.evaluate(() => {
+      document.getElementById("markdown-view")!.dispatchEvent(
+        new MouseEvent("mouseleave", { relatedTarget: document.body }),
+      );
+    });
+
+    expect(await handleVisible(page)).toBe(true);
+
+    await ctx.close();
+  });
+
+  test("未選択の画像は、hover を離れるとハンドルが消える", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      document.querySelector("img")!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(await handleVisible(page)).toBe(true);
+
+    await page.evaluate(() => {
+      document.getElementById("markdown-view")!.dispatchEvent(
+        new MouseEvent("mouseleave", { relatedTarget: document.body }),
+      );
+    });
+
+    expect(await handleVisible(page)).toBe(false);
+
+    await ctx.close();
+  });
+
+  test("選択解除でハンドルも消える（画像を hover していない場合）", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    await page.keyboard.press("Escape");
+
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+    expect(await handleVisible(page)).toBe(false);
+
+    await ctx.close();
+  });
+
+  test("hover したまま選択した画像からキーボードでキャレットを移すと、ハンドルは残らない", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![](${IMAGE_PATH})\nafter` });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    // mouseover で hover が記録された状態のまま選択する。マウスはその後動かさない
+    // （hover の記録は mouseover でしか更新されないので、古いまま残る）
+    await page.evaluate(() => {
+      const img = document.querySelector("img")!;
+      img.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      img.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    await page.keyboard.press("ArrowDown");
+
+    await expect(page.locator(".img-selected")).toHaveCount(0);
+    expect(await handleVisible(page)).toBe(false);
+
+    await ctx.close();
+  });
+
+  test("選択中に mdView をスクロールしてもハンドルは消えず、画像の右下に追従する", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 400 } });
+    const page = await ctx.newPage();
+    const before = Array.from({ length: 20 }, (_, i) => `line${i}`);
+    const after = Array.from({ length: 20 }, (_, i) => `line${i + 20}`);
+    const content = [...before, `![|100](${IMAGE_PATH})`, ...after].join("\n");
+    await injectNoteMock(page, { content });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    // 画像を可視範囲の中ほどに置く（端に寄せると小さなスクロールで見切れて次のアサートが
+    // 「消える」側と区別できなくなるため）
+    await page.evaluate(() => {
+      const mdView = document.getElementById("markdown-view")!;
+      const block = document.querySelector("img")!.closest<HTMLElement>("[data-line]")!;
+      mdView.scrollTop = block.offsetTop - mdView.clientHeight / 2;
+    });
+    await page.evaluate(() => {
+      document.querySelector("img")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    await page.evaluate(() => {
+      const mdView = document.getElementById("markdown-view")!;
+      mdView.scrollTop -= 30;
+      mdView.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(await handleVisible(page)).toBe(true);
+    const [imgRect, handleRect] = await page.evaluate(() => [
+      document.querySelector("img")!.getBoundingClientRect().toJSON(),
+      document.querySelector(".img-resize-handle")!.getBoundingClientRect().toJSON(),
+    ]);
+    // positionHandle は画像の右下（rect.right/rect.bottom）から 5px 内側にハンドルの左上を置く
+    expect(Math.abs(handleRect.left - (imgRect.right - 5))).toBeLessThanOrEqual(2);
+    expect(Math.abs(handleRect.top - (imgRect.bottom - 5))).toBeLessThanOrEqual(2);
+
+    await ctx.close();
+  });
+
+  test("選択中の画像を mdView の可視範囲外までスクロールすると、ハンドルは mdView の外に取り残されず隠れる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 150 } });
+    const page = await ctx.newPage();
+    const lines = Array.from({ length: 30 }, (_, i) => `line${i}`);
+    const content = [...lines, `![|100](${IMAGE_PATH})`].join("\n");
+    await injectNoteMock(page, { content });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => document.querySelector("img")!.scrollIntoView());
+    await page.evaluate(() => {
+      document.querySelector("img")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    // 画像が見えなくなるまで先頭へ戻す
+    await page.evaluate(() => {
+      const mdView = document.getElementById("markdown-view")!;
+      mdView.scrollTop = 0;
+      mdView.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(await handleVisible(page)).toBe(false);
+    // 選択そのものは維持したまま（再びスクロールすればハンドルは戻る）
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await ctx.close();
+  });
+
+  test("付箋の幅が変わって選択中の画像が可視範囲外へ押し出されたら、ハンドルも取り残されず消える", async ({ browser }) => {
+    // 折り返しのある長い行の下に画像を置く。付箋を狭めると折り返し行数が増えて画像が下へ
+    // 押し出され、mdView の可視範囲（高さ固定）から外れる。ウィンドウのネイティブなリサイズ
+    // 通知（appWindow.onResized）はテストのモックが no-op のため使えないので、webview の
+    // window resize イベントで refreshHandle が呼ばれることを確認する
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 150 } });
+    const page = await ctx.newPage();
+    const content = `${"a".repeat(200)}\n![](${IMAGE_PATH})`;
+    await injectNoteMock(page, { content });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => document.querySelector("img")!.scrollIntoView());
+    await page.evaluate(() => {
+      document.querySelector("img")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    const scrollTopBefore = await page.evaluate(() => document.getElementById("markdown-view")!.scrollTop);
+    await page.setViewportSize({ width: 80, height: 150 });
+    // scrollTop 自体が変わって scroll イベント経由で隠れたのではなく、window の resize
+    // イベント経由で隠れたことを確認する（scrollTop が動いていれば別経路と区別できない）
+    expect(await page.evaluate(() => document.getElementById("markdown-view")!.scrollTop)).toBe(scrollTopBefore);
+    await page.waitForFunction(() => !document.querySelector(".img-resize-handle")!.classList.contains("visible"));
+
+    // 選択そのものは維持したまま（幅を戻せばハンドルは復帰する）
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await ctx.close();
+  });
+
+  test("選択中の画像は hover を経ずハンドルからドラッグでリサイズできる。確定後もハンドルと選択枠が残る", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 600, height: 400 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    // mouseover を経由せずクリックだけで選択する（ハンドルは選択由来で出ているはず）
+    await page.evaluate(() => {
+      document.querySelector("img")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    await page.evaluate(([startX, endX]) => {
+      const handle = document.querySelector(".img-resize-handle")!;
+      handle.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, clientX: startX, clientY: 0, buttons: 1 }),
+      );
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { bubbles: true, clientX: endX, clientY: 0, buttons: 1 }),
+      );
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: endX, clientY: 0 }));
+    }, [0, 50]);
+
+    expect(await getContent(page)).toBe(`![|250](${IMAGE_PATH})`);
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+    expect(await handleVisible(page)).toBe(true);
+
+    await ctx.close();
+  });
+
+  test("選択中の画像と別の画像を hover しても、ハンドルは選択中の画像に留まりそちらだけがリサイズされる", async ({ browser }) => {
+    // ハンドルの表示位置（選択優先）と mousedown のリサイズ対象（handleTargetImg）は
+    // 常に同じ画像を指す必要がある。hover 側が表示を奪うと、見えている画像と違う画像が
+    // 黙ってリサイズされてしまう
+    const ctx = await browser.newContext({ viewport: { width: 600, height: 400 } });
+    const page = await ctx.newPage();
+    const content = `![](${IMAGE_PATH})\n![](${IMAGE_PATH})`;
+    await injectNoteMock(page, { content }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      document.querySelectorAll("img")[0].dispatchEvent(
+        new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
+      );
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    // 別の（未選択の）画像を hover する
+    await page.evaluate(() => {
+      document.querySelectorAll("img")[1].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    // ハンドルは選択中の 1 個目の画像に留まる（2 個目の画像へ動かない）。
+    // 2 枚は別行で x 座標が同じになるため、行ごとに違う y 座標（画像下端）側で判定する
+    const [firstBottom, secondBottom] = await page.evaluate(() => [
+      document.querySelectorAll("img")[0].getBoundingClientRect().bottom,
+      document.querySelectorAll("img")[1].getBoundingClientRect().bottom,
+    ]);
+    const handleTop = await page.evaluate(() =>
+      parseFloat((document.querySelector(".img-resize-handle") as HTMLElement).style.top),
+    );
+    expect(Math.abs(handleTop - (firstBottom - 5))).toBeLessThanOrEqual(2);
+    expect(Math.abs(handleTop - (secondBottom - 5))).toBeGreaterThan(5);
+
+    await page.evaluate(([startX, endX]) => {
+      const handle = document.querySelector(".img-resize-handle")!;
+      handle.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, clientX: startX, clientY: 0, buttons: 1 }),
+      );
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { bubbles: true, clientX: endX, clientY: 0, buttons: 1 }),
+      );
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: endX, clientY: 0 }));
+    }, [0, 50]);
+
+    // 1 個目（選択中）だけに幅が付き、2 個目（hover しただけ）は無指定のまま
+    expect(await getContent(page)).toBe(`![|250](${IMAGE_PATH})\n![](${IMAGE_PATH})`);
+
+    await ctx.close();
+  });
+});

@@ -25,7 +25,7 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     ).toBe(1);
 
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)");
+    expect(content).toBe("![dropped](images/00000000-0000-4000-8000-000000000001.png)\n");
 
     await ctx.close();
   });
@@ -55,7 +55,7 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     ).toBe(1);
 
     const content = await getContent(page);
-    expect(content).toBe("line1\nline2![](images/00000000-0000-4000-8000-000000000001.png)");
+    expect(content).toBe("line1\nline2![dropped](images/00000000-0000-4000-8000-000000000001.png)\n");
 
     await ctx.close();
   });
@@ -103,11 +103,13 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     const timeline = await page.evaluate(() => (window as any).__invoke_timeline);
     expect(timeline).toEqual(["start:0", "end:0", "start:1", "end:1"]);
 
-    // 挿入自体は2回行われている（モックは同一パスを返すため2回連結される）。
-    // どちらも同じ対象行の末尾へ追記されるため連結される
+    // 挿入自体は2回行われている（モックは同一パスを返すため区別できないが、逐次実行の
+    // タイムラインで確認済み）。1件目の画像の下には空行ができ、pasteImageFiles が
+    // 次のドロップ先をその空行へ進めるため、2件目は連結されず別の行になる
     const content = await getContent(page);
     expect(content).toBe(
-      "![](images/00000000-0000-4000-8000-000000000001.png)".repeat(2),
+      "![a](images/00000000-0000-4000-8000-000000000001.png)\n"
+      + "![b](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
 
     await ctx.close();
@@ -134,8 +136,60 @@ test.describe("ドラッグ&ドロップでの画像追加", () => {
     // drop ハンドラは非同期（save_pasted_image → renderAll → saveNow）なので、
     // dispatchEvent 自体は完了を待たない。保存が終わるまで content を待ち受ける
     await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
-      "line0X\nline1\nline2![](images/00000000-0000-4000-8000-000000000001.png)",
+      "line0X\nline1\nline2![dropped](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
+  });
+
+  // fallbackLine が特定の行を指す（ドロップ先が判定できた）場合でも、pasteImageFiles は
+  // 1件目の下にできた空行へ2件目のドロップ先を進める。進めないと2件目が1件目と同じ行へ
+  // 連結され、「画像の下に空行ができる」という契約が2件目以降で崩れる
+  test("ドロップ先の行が特定できる複数ファイル同時ドロップ → 2件目は1件目の下の空行に入る（同じ行に連結されない）", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "line0" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-line="0"]')!;
+      const file1 = new File([new Uint8Array([137, 80, 78, 71, 1])], "a.png", { type: "image/png" });
+      const file2 = new File([new Uint8Array([137, 80, 78, 71, 2])], "b.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file1);
+      dt.items.add(file2);
+      const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
+      target.dispatchEvent(dropEvent);
+    });
+
+    await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
+      "line0![a](images/00000000-0000-4000-8000-000000000001.png)\n"
+      + "![b](images/00000000-0000-4000-8000-000000000001.png)\n",
+    );
+
+    await ctx.close();
+  });
+
+  test("ファイル名が image.png のドロップ → 日時にフォールバックせずファイル名を alt にする", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      const view = document.getElementById("markdown-view")!;
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const dropEvent = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
+      view.dispatchEvent(dropEvent);
+    });
+
+    await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
+      "![image](images/00000000-0000-4000-8000-000000000001.png)\n",
+    );
+
+    await ctx.close();
   });
 
   test("画像以外のファイルのみのドロップ → トーストが出て内容は変わらない", async ({ browser }) => {

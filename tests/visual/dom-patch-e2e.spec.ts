@@ -1,4 +1,4 @@
-import { test, expect, placeCaret, getContent, waitForReveal, selectMarkdownRange } from "./fixtures";
+import { test, expect, placeCaret, getContent, waitForReveal, selectMarkdownRange, injectNoteMock } from "./fixtures";
 
 // renderAll() はブロック単位の DOM パッチ（patchMarkdownView）を経由する。前回描画の
 // mdView.children と新しい HTML のブロック列を、data-line[-end] の値を無視した内容キーで
@@ -202,7 +202,7 @@ test.describe("パッチの自己修復性・選択中ブロックの再利用",
       dt.items.add(file);
       target.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
     });
-    await expect.poll(() => getContent(page)).toBe(`![](${imagePath})\ntext1![](${imagePath})`);
+    await expect.poll(() => getContent(page)).toBe(`![](${imagePath})\ntext1![dropped](${imagePath})\n`);
 
     const state = await page.evaluate(() => {
       const img = document.querySelector("img") as (HTMLImageElement & { __probe?: boolean }) | null;
@@ -210,5 +210,57 @@ test.describe("パッチの自己修復性・選択中ブロックの再利用",
     });
     expect(state.unchanged).toBe(true);
     expect(state.selected).toBe(true);
+  });
+
+  // pasteImage（ドロップ）は applyLines を経由せず lines を splice するため、行番号を保持した
+  // ままの状態（selectedImage）を自分でずらす必要がある。ずらさないと、選択中の画像より前の行への
+  // ドロップで挿入された空行ぶん実際の画像の行がずれても selectedImage.line は古いままになり、
+  // 選択枠は残るのに Backspace 等が別の行（画像の無い行）を対象にしてしまう
+  test("選択中の画像より前の行への画像ドロップ → 挿入で行がずれても選択は同じ画像を指し続ける", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    const imagePath = "images/00000000-0000-4000-8000-000000000001.png";
+    await injectNoteMock(page, { content: `text0\n![](${imagePath})` }, {}, { captureInvokes: true });
+    await page.addInitScript((path) => {
+      const prevInvoke = (window as any).__TAURI__.core.invoke;
+      (window as any).__TAURI__.core.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "delete_image") {
+          // captureInvokes の記録はここで肩代わりする（下の分岐は通らないため素通りしない）
+          (window as any).__captured_invokes?.push({ cmd, args });
+          return `text0![dropped](${path})\n`;
+        }
+        return prevInvoke(cmd, args);
+      };
+    }, imagePath);
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(() => {
+      const img = document.querySelector("img")!;
+      img.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-line="0"]')!;
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "dropped.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      target.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    });
+    // ドロップ先（1行目）で1行増えるため、選択中の画像は2行目から3行目（index 2）へずれる
+    await expect.poll(() => getContent(page)).toBe(`text0![dropped](${imagePath})\n\n![](${imagePath})`);
+    await expect(page.locator(".img-selected")).toHaveCount(1);
+
+    // 選択が古い行番号のまま（追従できていない）だと Backspace が selectionStillCoversSelectedImage
+    // で弾かれ、delete_image が invoke されない
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => getContent(page)).toBe(`text0![dropped](${imagePath})\n`);
+
+    const deleteCalls = await page.evaluate(() =>
+      (window as any).__captured_invokes.filter((c: any) => c.cmd === "delete_image"));
+    expect(deleteCalls[0].args.imageLine).toBe(2);
+
+    await ctx.close();
   });
 });

@@ -10,14 +10,18 @@ function dispatchPaste(page: import("@playwright/test").Page, plain: string, htm
   }, [plain, html] as const);
 }
 
-function dispatchImagePaste(page: import("@playwright/test").Page, bytes: number[] = [137, 80, 78, 71]) {
-  return page.evaluate((b) => {
-    const file = new File([new Uint8Array(b)], "pasted.png", { type: "image/png" });
+function dispatchImagePaste(
+  page: import("@playwright/test").Page,
+  bytes: number[] = [137, 80, 78, 71],
+  fileName = "pasted.png",
+) {
+  return page.evaluate(([b, name]) => {
+    const file = new File([new Uint8Array(b as number[])], name as string, { type: "image/png" });
     const dt = new DataTransfer();
     dt.items.add(file);
     const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
     document.dispatchEvent(ev);
-  }, bytes);
+  }, [bytes, fileName] as const);
 }
 
 test.describe("ペースト処理", () => {
@@ -106,8 +110,54 @@ test.describe("ペースト処理", () => {
 
     // 画像記法の直後で行が割れ、キャレットは次の（空の）行にある
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\n");
+    expect(content).toBe("![pasted](images/00000000-0000-4000-8000-000000000001.png)\n");
     expect(await getCaretPosition(page)).toEqual({ line: 1, col: 0 });
+
+    await ctx.close();
+  });
+
+  test("ファイル名が image（ブラウザの既定名）のクリップボード画像ペースト → 取り込み時刻を alt にする", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+    await enterEdit(page);
+
+    await dispatchImagePaste(page, [137, 80, 78, 71], "image.png");
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toMatch(/^!\[\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\]\(images\/00000000-0000-4000-8000-000000000001\.png\)\n$/);
+
+    await ctx.close();
+  });
+
+  test("ファイル名が空のクリップボード画像ペースト → 取り込み時刻を alt にする", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+    await enterEdit(page);
+
+    await dispatchImagePaste(page, [137, 80, 78, 71], "");
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        (window as any).__captured_invokes.filter((c: any) => c.cmd === "save_pasted_image").length,
+      ),
+      { timeout: 3000 },
+    ).toBe(1);
+
+    const content = await getContent(page);
+    expect(content).toMatch(/^!\[\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\]\(images\/00000000-0000-4000-8000-000000000001\.png\)\n$/);
 
     await ctx.close();
   });
@@ -132,7 +182,7 @@ test.describe("ペースト処理", () => {
     ).toBe(1);
 
     const content = await getContent(page);
-    expect(content).toBe("hello![](images/00000000-0000-4000-8000-000000000001.png)\n world");
+    expect(content).toBe("hello![pasted](images/00000000-0000-4000-8000-000000000001.png)\n world");
     // 分割後の行は先頭が空白（" world"）になる。このテストでは行番号のみを確認する
     expect((await getCaretPosition(page))?.line).toBe(1);
 
@@ -158,7 +208,7 @@ test.describe("ペースト処理", () => {
     ).toBe(1);
 
     const content = await getContent(page);
-    expect(content).toBe("![](images/00000000-0000-4000-8000-000000000001.png)\nhello");
+    expect(content).toBe("![pasted](images/00000000-0000-4000-8000-000000000001.png)\nhello");
     expect(await getCaretPosition(page)).toEqual({ line: 1, col: 0 });
 
     await ctx.close();
@@ -304,7 +354,7 @@ test.describe("ペースト処理", () => {
     await page.keyboard.type("X");
 
     await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
-      "line0X![](images/00000000-0000-4000-8000-000000000001.png)\n",
+      "line0X![pasted](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
 
     await ctx.close();

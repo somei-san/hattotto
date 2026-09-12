@@ -582,11 +582,56 @@ function sanitizeAltText(text) {
 /**
  * 画像記法（`![alt](src)`）の alt にだけ適用する追加の無害化。末尾が `|数字` になると
  * markdown.js の parseImageAlt が表示幅指定と誤解釈するため `|` を除去する。
- * リンクテキストとして使う場合（https 画像のフォールバックなど）は幅記法と無関係なので
- * sanitizeAltText のみを使い、`|` はそのまま残す。
+ * `` ` `` も除去する: markdown.js はコードスパンを他の記法より先に退避してプレースホルダへ
+ * 差し替え、alt の HTML 属性エスケープ後に復元するため、alt にバッククォート対が残ると
+ * 復元された生テキストが `img` タグの属性文脈へエスケープされないまま挿入され、`"` を含む
+ * ファイル名から任意の HTML 属性（`onerror` 等）を注入できてしまう。
+ * リンクテキストとして使う場合（https 画像のフォールバックなど）は幅記法・コードスパンの
+ * 復元と無関係なので sanitizeAltText のみを使い、`|`/`` ` `` はそのまま残す。
  */
 function sanitizeImageAlt(text) {
-  return sanitizeAltText(text).replace(/\|/g, '');
+  return sanitizeAltText(text).replace(/[|`]/g, '');
+}
+
+/** ファイル名から拡張子を除いた部分を返す。`.tar.gz` のような多段拡張子は末尾の 1 つだけ除く。
+ * 先頭ドットだけの隠しファイル名（`.png` 等）はそれ自体を拡張子とみなさずそのまま返す。 */
+function stripFileExtension(fileName) {
+  const dot = fileName.lastIndexOf('.');
+  if (dot <= 0) return fileName;
+  return fileName.slice(0, dot);
+}
+
+/** Date をローカル時刻で `YYYY-MM-DD HH-mm-ss` に整形する。画像 alt の日時フォールバックに使う。 */
+function formatDateForAlt(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+}
+
+/** 拡張子を除いたファイル名がブラウザの汎用既定名（大文字小文字を無視して `image`）かどうか。
+ * クリップボード画像ペーストで、ファイル名から取り込み時刻へフォールバックする判定に使う。 */
+function isGenericImageFileName(stem) {
+  return stem.toLowerCase() === 'image';
+}
+
+/**
+ * 画像取り込み時に使う alt を、元ファイル名（と取り込み時刻）から決める。
+ * ファイル名の拡張子を除いた部分を優先し、空、またはブラウザの汎用既定名（`useGenericFallback`
+ * が true を返す場合）なら取り込み時刻（now）の日時表記にフォールバックする。
+ * 空判定・汎用名判定は sanitizeImageAlt を通した後の名前に対して行う（`]`/`|`/`` ` `` しか
+ * 含まない名前や `image` に無害化で一致する名前も、無害化前の見た目ではなく無害化後の
+ * 結果でフォールバックの要否を判断するため）。
+ *
+ * @param {string} fileName 取り込んだファイルの名前（File.name）
+ * @param {Date} now 取り込み時刻（日時フォールバック用）
+ * @param {(stem: string) => boolean} [useGenericFallback] 無害化後の名前を汎用名として
+ *   弾くかどうかの判定。省略時は弾かない（ドロップ経路: どんなファイル名でもそのまま使う）
+ * @returns {string}
+ */
+function decideImageAlt(fileName, now, useGenericFallback = () => false) {
+  const stem = sanitizeImageAlt(stripFileExtension(fileName));
+  const useFallback = !stem || useGenericFallback(stem);
+  return useFallback ? formatDateForAlt(now) : stem;
 }
 
 /** URL 側（href / src）に改行が入ると Markdown 記法が複数行に割れるため取り除く。 */
@@ -645,6 +690,7 @@ if (typeof module !== 'undefined') {
     inlineDecorationKeepRanges, deletionSurvivingFragment, widenRangeForEmptiedDecorations,
     resolveMarkerRun, toggleEmphasisMarkers, cycleMarkerRun,
     isValidImageRelPath, rewriteImageWidth,
+    stripFileExtension, formatDateForAlt, isGenericImageFileName, decideImageAlt,
     sanitizeAltText, sanitizeImageAlt, sanitizeUrl, isDataUri,
     MAX_IMAGE_BYTES, DATA_URI_TOO_LARGE, decodeDataUri,
     graphemesOf,
