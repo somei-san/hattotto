@@ -347,6 +347,10 @@ function clearImageSelection() {
   // 「範囲選択中はキャレットを置かない」ガードへ誤って引っかかる）
   const sel = window.getSelection();
   if (sel.rangeCount) sel.removeAllRanges();
+  // ハンドルは隠す。hoverImg は mouseover でしか更新されず、キーボードで選択を外したときは
+  // マウスがもう画像上に無くても古い hover が残っていて、hover 扱いで出しっぱなしになるため。
+  // マウスが本当に画像上にあれば次の mouseover で出し直される
+  hideHandle();
 }
 
 /**
@@ -363,6 +367,17 @@ function selectImageRange(img) {
   sel.addRange(range);
 }
 
+/** selectedImage が指す img 要素を現在の DOM から探す。選択が無い、または対象がもう存在しない
+ * （行が消えた・画像が無くなった等）場合は null。選択状態そのものの解除は呼び出し元に委ねる。 */
+function findSelectedImageElement() {
+  if (!selectedImage) return null;
+  const lineEl = mdView.querySelector(`[data-line="${selectedImage.line}"]`);
+  if (!lineEl) return null;
+  const imgs = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
+    .filter(el => el.dataset.relSrc === selectedImage.relSrc);
+  return imgs[selectedImage.occurrence] ?? null;
+}
+
 /**
  * selectedImage が指す img 要素に選択枠（.img-selected）と DOM 選択を付け直す。renderAll() の
  * 直後に呼び、対象ブロックが入れ替わっていても選択状態を新しい DOM へ引き継ぐ。
@@ -370,17 +385,16 @@ function selectImageRange(img) {
  */
 function applySelectionHighlight() {
   if (!selectedImage) return;
-  const lineEl = mdView.querySelector(`[data-line="${selectedImage.line}"]`);
-  if (!lineEl) { selectedImage = null; return; }
-  const imgs = Array.from(lineEl.querySelectorAll('img[data-rel-src]'))
-    .filter(el => el.dataset.relSrc === selectedImage.relSrc);
-  const img = imgs[selectedImage.occurrence];
+  const img = findSelectedImageElement();
   if (!img) { selectedImage = null; return; }
   img.classList.add('img-selected');
   selectImageRange(img);
   // キー操作（←/→/↑/↓）で画面外の画像行へ着地したとき、選択枠が唯一の状態表示なので
   // 見える位置までスクロールする
   img.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // 選択中は常にリサイズハンドルを出す（renderAll 冒頭の hideHandle() で一旦隠れているので、
+  // ここで新しい img に位置合わせして出し直す）
+  showHandleFor(img);
 }
 
 /** 行テキスト中で最初に出てくる画像記法の src を取り出す。無ければ null。 */
@@ -616,8 +630,10 @@ mdView.addEventListener('change', (e) => {
 // ── Zoom ──────────────────────────────────────────
 function applyZoom(zoom) {
   document.getElementById('note').style.zoom = zoom / 100;
-  // ズーム変更でハンドルの座標系（rect と画面 px の対応）が変わるので位置合わせをやり直す
-  hideHandle();
+  // ズーム変更でハンドルの座標系（rect と画面 px の対応）が変わるので位置合わせをやり直す。
+  // 選択中ならその画像に合わせ直し、そうでなければ hover 由来の表示は隠す
+  hoverImg = null;
+  refreshHandle();
 }
 
 let currentZoom = 100;
@@ -644,7 +660,14 @@ resizeHandle.className = 'img-resize-handle';
 document.body.appendChild(resizeHandle);
 
 let dragState = null; // { img, relSrc, startX, startWidth, zoomFactor, maxWidth, currentWidth }
-let hoverImg = null; // ハンドル表示中に位置合わせした画像（ドラッグ対象の特定に使う）
+let hoverImg = null; // ハンドル表示中に位置合わせした画像（hover 由来。選択中の画像は selectedImage 側で持つ）
+
+/** ハンドルを表示・位置合わせする対象の img。選択中の画像を優先し、無ければ hover 中の画像。
+ * ドラッグ対象の特定（resizeHandle の mousedown）と、ハンドルの表示更新（refreshHandle）の
+ * 両方がここに集約される。 */
+function handleTargetImg() {
+  return findSelectedImageElement() ?? hoverImg;
+}
 
 function positionHandle(img) {
   const rect = img.getBoundingClientRect();
@@ -657,6 +680,40 @@ function hideHandle() {
   resizeHandle.classList.remove('visible');
 }
 
+/** ハンドルの位置合わせ点（img の右下）が mdView の可視範囲内にあるか。画像の矩形全体ではなく
+ * 位置合わせ点だけを見るのは、画像の一部がまだ見えていれば出したままにするため。選択中の画像を
+ * mdView の可視範囲外までスクロールしたとき、ハンドルだけが mdView の外に取り残されるのを防ぐのに使う。 */
+function handleAnchorVisible(img) {
+  const rect = img.getBoundingClientRect();
+  const viewRect = mdView.getBoundingClientRect();
+  const x = rect.right - 5;
+  const y = rect.bottom - 5;
+  return x >= viewRect.left && x <= viewRect.right && y >= viewRect.top && y <= viewRect.bottom;
+}
+
+/** img にハンドルを位置合わせして表示する。位置合わせ点が mdView の可視範囲外なら代わりに隠す。 */
+function showHandleFor(img) {
+  if (!handleAnchorVisible(img)) { hideHandle(); return; }
+  positionHandle(img);
+  resizeHandle.classList.add('visible');
+  // 読み込み未完了の画像は高さが確定しておらず、右下の座標がまだ本来位置でない。
+  // 読み込み完了後、その時点でもまだ表示対象なら位置だけ合わせ直す
+  if (!img.complete) {
+    img.addEventListener('load', () => {
+      if (handleTargetImg() === img) refreshHandle();
+    }, { once: true });
+  }
+}
+
+/** handleTargetImg() に合わせてハンドルを出し直す。対象が無くなっていれば隠す。選択中の
+ * 画像がある限り、hover が外れても（スクロール・ズーム・mouseleave・ウィンドウリサイズ等で）
+ * ハンドルは出たまま位置だけ合わせ直される。 */
+function refreshHandle() {
+  const img = handleTargetImg();
+  if (!img) { hideHandle(); return; }
+  showHandleFor(img);
+}
+
 // mouseenter/leave は bubble しないので、mdView での委譲は mouseover を使う
 mdView.addEventListener('mouseover', (e) => {
   if (dragState) return;
@@ -664,26 +721,45 @@ mdView.addEventListener('mouseover', (e) => {
   // リモート URL 等、書き戻し先を特定できない画像にはハンドルを出さない
   if (!img || !isValidImageRelPath(img.dataset.relSrc)) return;
   hoverImg = img;
-  positionHandle(img);
-  resizeHandle.classList.add('visible');
+  // 別の画像が選択中なら、そちらを表示対象とする handleTargetImg の優先順位に合わせて
+  // 位置合わせをスキップする。ここでハンドルを hover 先へ動かすと、mousedown の対象
+  // （handleTargetImg が返す選択中の画像）と表示位置がずれ、見えている画像と違う画像が
+  // リサイズされてしまう
+  const selected = findSelectedImageElement();
+  if (selected && selected !== img) return;
+  showHandleFor(img);
 });
 
 // mdView から出た場合の隠し忘れをケアする。ハンドルは mdView の外（body 直下）にあるので、
-// 画像の右下からハンドルへ移動する経路は mdView を一度離れる（relatedTarget がハンドルならまだ隠さない）
+// 画像の右下からハンドルへ移動する経路は mdView を一度離れる（relatedTarget がハンドルならまだ隠さない）。
+// 選択中の画像から離れた場合は隠さず、選択枠に位置合わせしたまま残す（refreshHandle が判断する）
 mdView.addEventListener('mouseleave', (e) => {
   if (dragState || e.relatedTarget === resizeHandle) return;
-  hideHandle();
+  hoverImg = null;
+  refreshHandle();
 });
 
-// ハンドルから離れた先が画像でなければ隠す（mdView の mouseover では拾えない遷移）
+// ハンドルから離れた先が画像でなければ隠す（mdView の mouseover では拾えない遷移）。
+// mouseleave 同様、選択中なら refreshHandle が選択枠へ位置合わせし直すだけで隠さない
 resizeHandle.addEventListener('mouseleave', (e) => {
   if (dragState) return;
   if (e.relatedTarget?.closest?.('img[data-rel-src]')) return;
-  hideHandle();
+  hoverImg = null;
+  refreshHandle();
 });
 
-// スクロールすると画像とハンドルの対応がずれるので、位置合わせをやり直す前提で一旦隠す
-mdView.addEventListener('scroll', () => hideHandle());
+// スクロールすると画像とハンドルの対応がずれる。選択中なら位置合わせをやり直し、
+// そうでなければ hover 由来の表示は一旦隠す（次の mouseover で出し直す）
+mdView.addEventListener('scroll', () => {
+  hoverImg = null;
+  refreshHandle();
+});
+
+// 付箋の幅が変わると画像は max-width: 100% で追従して縮む・折り返しがずれるが、選択中は
+// ハンドルが古い座標のまま取り残されるので位置合わせをやり直す（ウィンドウのネイティブなリサイズ
+// 通知 appWindow.onResized ではなく webview 自体の viewport 変化を見る。scheduleGeoSave は
+// 引き続き appWindow.onResized 側で行う）
+window.addEventListener('resize', () => refreshHandle());
 
 /** 行 lineEl 内で、relSrc が一致する img のうち img が何番目か（0始まり）。 */
 function imageOccurrenceInLine(lineEl, img, relSrc) {
@@ -744,8 +820,9 @@ function onResizeMouseUp() {
   const state = dragState;
   document.removeEventListener('mousemove', onResizeMouseMove);
   dragState = null;
-  hideHandle();
-  if (!state || state.currentWidth == null) return; // 実質的な移動が無ければ書き換えない
+  // 実質的な移動が無ければ書き換えない。この場合 applyImageWidth の renderAll を経由しないため、
+  // ここで自分から出し直す（選択中ならハンドルを残す）
+  if (!state || state.currentWidth == null) { refreshHandle(); return; }
   applyImageWidth(state.img, state.relSrc, state.currentWidth);
 }
 
@@ -755,17 +832,19 @@ window.addEventListener('blur', () => {
 });
 
 resizeHandle.addEventListener('mousedown', (e) => {
-  if (!hoverImg) return;
-  const relSrc = hoverImg.dataset.relSrc;
+  // hover 由来でなく、選択中の画像に位置合わせされているだけのハンドルからもドラッグを開始できる
+  const img = handleTargetImg();
+  if (!img) return;
+  const relSrc = img.dataset.relSrc;
   if (!isValidImageRelPath(relSrc)) return;
   e.preventDefault();
   e.stopPropagation();
   const zoomFactor = currentZoom / 100;
   dragState = {
-    img: hoverImg,
+    img,
     relSrc,
     startX: e.clientX,
-    startWidth: currentImageWidth(hoverImg, zoomFactor),
+    startWidth: currentImageWidth(img, zoomFactor),
     zoomFactor,
     // 付箋が極端に狭いとき clientWidth が下限を割り込むことがあるため、上限は必ず下限以上にする
     maxWidth: Math.max(IMAGE_RESIZE_MIN, Math.min(mdView.clientWidth || IMAGE_RESIZE_MAX, IMAGE_RESIZE_MAX)),
