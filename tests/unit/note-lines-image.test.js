@@ -8,6 +8,10 @@ global.CODE_RE = require("../../src/markdown.js").CODE_RE;
 const {
   isValidImageRelPath,
   rewriteImageWidth,
+  stripFileExtension,
+  formatDateForAlt,
+  isGenericImageFileName,
+  decideImageAlt,
   sanitizeAltText,
   sanitizeImageAlt,
   sanitizeUrl,
@@ -111,6 +115,86 @@ describe("rewriteImageWidth", () => {
   });
 });
 
+describe("stripFileExtension", () => {
+  test("通常の拡張子を除く", () => {
+    assert.equal(stripFileExtension("photo.png"), "photo");
+  });
+
+  test("多段拡張子は末尾の 1 つだけ除く", () => {
+    assert.equal(stripFileExtension("archive.tar.gz"), "archive.tar");
+  });
+
+  test("拡張子が無い名前はそのまま", () => {
+    assert.equal(stripFileExtension("IMG_1234"), "IMG_1234");
+  });
+
+  test("先頭ドットだけの名前（隠しファイル相当）はそのまま", () => {
+    assert.equal(stripFileExtension(".png"), ".png");
+  });
+
+  test("空文字はそのまま", () => {
+    assert.equal(stripFileExtension(""), "");
+  });
+});
+
+describe("formatDateForAlt", () => {
+  test("1 桁の月日時分秒をゼロ埋めする", () => {
+    assert.equal(formatDateForAlt(new Date(2026, 0, 5, 3, 4, 9)), "2026-01-05 03-04-09");
+  });
+
+  test("2 桁の月日時分秒はそのまま（ゼロ埋め不要）", () => {
+    assert.equal(formatDateForAlt(new Date(2026, 8, 11, 10, 23, 45)), "2026-09-11 10-23-45");
+  });
+});
+
+describe("isGenericImageFileName", () => {
+  test("大文字小文字を無視して image と一致 → true", () => {
+    assert.equal(isGenericImageFileName("image"), true);
+    assert.equal(isGenericImageFileName("IMAGE"), true);
+    assert.equal(isGenericImageFileName("Image"), true);
+  });
+
+  test("image 以外 → false", () => {
+    assert.equal(isGenericImageFileName("photo"), false);
+    assert.equal(isGenericImageFileName(""), false);
+  });
+});
+
+describe("decideImageAlt", () => {
+  const NOW = new Date(2026, 8, 11, 10, 23, 45);
+
+  test("通常のファイル名は拡張子を除いた名前を alt にする", () => {
+    assert.equal(decideImageAlt("dropped.png", NOW), "dropped");
+  });
+
+  test("拡張子を除いた名前が空なら日時にフォールバックする", () => {
+    assert.equal(decideImageAlt("", NOW), formatDateForAlt(NOW));
+  });
+
+  test("useGenericFallback を渡さない場合（ドロップ経路）は汎用名でもそのまま使う", () => {
+    assert.equal(decideImageAlt("image.png", NOW), "image");
+  });
+
+  test("useGenericFallback が true を返す名前（ペースト経路の image.png）は日時にフォールバックする", () => {
+    assert.equal(decideImageAlt("image.png", NOW, isGenericImageFileName), formatDateForAlt(NOW));
+    assert.equal(decideImageAlt("IMAGE.PNG", NOW, isGenericImageFileName), formatDateForAlt(NOW));
+  });
+
+  test("`]` や `|` を含む名前は sanitizeImageAlt で除去される", () => {
+    assert.equal(decideImageAlt("a]b|c.png", NOW), "abc");
+  });
+
+  test("無害化で空になる名前（`]`/`|`/`` ` `` のみ）は日時にフォールバックする", () => {
+    assert.equal(decideImageAlt("].png", NOW), formatDateForAlt(NOW));
+    assert.equal(decideImageAlt("|.png", NOW), formatDateForAlt(NOW));
+    assert.equal(decideImageAlt("`.png", NOW), formatDateForAlt(NOW));
+  });
+
+  test("無害化後に汎用既定名と一致する名前（ペースト経路）も日時にフォールバックする", () => {
+    assert.equal(decideImageAlt("image].png", NOW, isGenericImageFileName), formatDateForAlt(NOW));
+  });
+});
+
 describe("sanitizeAltText", () => {
   test("改行は空白に置換する", () => {
     assert.equal(sanitizeAltText("a\nb"), "a b");
@@ -138,6 +222,10 @@ describe("sanitizeImageAlt", () => {
 
   test("`|` を含まない文字列は sanitizeAltText と同じ結果", () => {
     assert.equal(sanitizeImageAlt("a]b\nc"), sanitizeAltText("a]b\nc"));
+  });
+
+  test("`` ` `` も除去する（markdown.js のコードスパン復元が属性エスケープ後に走るため）", () => {
+    assert.equal(sanitizeImageAlt("a`b`c"), "abc");
   });
 });
 

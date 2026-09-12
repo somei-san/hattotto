@@ -949,25 +949,45 @@ async function savePastedImage(file) {
   }
 }
 
+/** insertedAt に 1 行挿入したとき、行番号を保持したままの状態（画像選択・インライン生表示）を
+ * 追従させる。pasteImage は applyLines を経由せず直接 lines を書き換えるため、これを呼ばないと
+ * ドロップ先より下の行を指していた selectedImage・revealState が挿入後も古い行番号のまま残り、
+ * renderAll 後に選択枠だけが残る／無関係な行が生表示のままになる（applySelectionHighlight は
+ * selectedImage の行に画像が無ければ選択状態を捨てるだけで、ずれた行番号自体は直さない）。 */
+function shiftLineReferencesAfterInsert(insertedAt) {
+  if (selectedImage && selectedImage.line >= insertedAt) selectedImage.line += 1;
+  if (revealState && revealState.line >= insertedAt) revealState.line += 1;
+}
+
 /**
  * ドロップ画像を保存し、生成された相対パスを Markdown 画像記法として fallbackLine の行末へ
  * 追記する（ドロップ先は座標であって caret ではないため、行末追記が唯一の妥当な挿入位置）。
+ * 画像記法の直後に空行を 1 行挿入する（pasteImageAtCaret と揃える）。戻り値は挿入した空行の
+ * 行番号で、pasteImageFiles が複数ファイルを同じ fallbackLine へ順に積むときの次の挿入先になる。
  */
 async function pasteImage(file, fallbackLine) {
   const relPath = await savePastedImage(file);
-  if (!relPath) return;
-  const markdown = `![](${relPath})`;
+  if (!relPath) return fallbackLine;
+  const alt = decideImageAlt(file.name, new Date());
+  const markdown = `![${alt}](${relPath})`;
   const lines = getLines();
   const target = Math.min(Math.max(fallbackLine ?? lines.length - 1, 0), lines.length - 1);
   lines[target] += markdown;
+  const insertedAt = target + 1;
+  lines.splice(insertedAt, 0, '');
+  shiftLineReferencesAfterInsert(insertedAt);
   rawContent = lines.join('\n');
   renderAll();
   await saveNow();
+  return insertedAt;
 }
 
-/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。 */
+/** 画像 File を順番どおりに挿入する。挿入のたびに行番号がずれるため並列にはできない。
+ * 明示的なドロップ先（fallbackLine が非 null）でも、2 件目以降は前の画像の下にできた空行へ
+ * 積むよう fallbackLine を更新する（同じ行へ連結されるのを防ぐ）。 */
 async function pasteImageFiles(files, fallbackLine) {
-  for (const file of files) await pasteImage(file, fallbackLine);
+  let line = fallbackLine;
+  for (const file of files) line = await pasteImage(file, line);
 }
 
 /** ドロップ先の要素から挿入対象の行番号を求める。フェンスは行単位のマッピングを持たないので末尾に置く。 */
@@ -2866,7 +2886,8 @@ async function pasteImageAtCaret(file, bounds) {
   const snapshot = rawContent;
   const relPath = await savePastedImage(file);
   if (!relPath) return;
-  applyResolvedPaste(bounds, snapshot, `![](${relPath})\n`);
+  const alt = decideImageAlt(file.name, new Date(), isGenericImageFileName);
+  applyResolvedPaste(bounds, snapshot, `![${alt}](${relPath})\n`);
 }
 
 /**

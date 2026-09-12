@@ -109,7 +109,7 @@ test.describe("行またぎ選択 + ペーストで置換される", () => {
     });
 
     await expect.poll(() => getContent(page)).toBe(
-      "![](images/00000000-0000-4000-8000-000000000001.png)\n",
+      "![pasted](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
   });
 });
@@ -228,7 +228,7 @@ test.describe("ペーストの undo 手数", () => {
     });
 
     await expect.poll(() => getContent(page), { timeout: 3000 }).toBe(
-      "![](images/00000000-0000-4000-8000-000000000001.png)\n",
+      "![pasted](images/00000000-0000-4000-8000-000000000001.png)\n",
     );
 
     await commitHistory(page);
