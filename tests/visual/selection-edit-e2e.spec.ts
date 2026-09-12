@@ -188,6 +188,18 @@ test.describe("マーカー付き単一行の全選択削除", () => {
 
     expect(await getContent(page)).toBe("");
   });
+
+  // 画像は可視幅 0 のため、末尾が画像記法の行では resolveSelectionBounds の選択終端が
+  // 画像の手前で止まらず画像記法の末尾まで含める（コピーと同じ解決を共有するため、ここで
+  // 消えずに残ると通常コピー・「Markdown をコピー」だけ画像を含み削除は画像を残す非対称になる）
+  test("末尾が画像行を含む ⌘A → Backspace で画像記法ごと全消去される", async ({ openNote }) => {
+    const page = await openNote({ content: `before\n${IMAGE_LINE}` });
+
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Backspace");
+
+    expect(await getContent(page)).toBe("");
+  });
 });
 
 test.describe("行またぎ選択中の Enter / Shift+Enter", () => {

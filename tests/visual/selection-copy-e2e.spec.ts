@@ -183,6 +183,132 @@ test.describe("通常コピー（markdown-view のテキスト選択、⌘C 相�
   });
 });
 
+// 画像は inlineSegments 上の可視幅が 0 のため、選択終端がその手前・後ろのどちらにあっても
+// 同じ可視オフセットに潰れる。選択終端がその行の可視テキストを丸ごと消費している（＝画像を
+// 跨いで本当の行末を指している）ケースを Meta+a の全選択（実際のブラウザ選択 API）で再現し、
+// 末尾・行末の画像も imageDisplayLabel のラベルで text/plain に含まれることを確認する
+test.describe("通常コピー: 選択終端が画像を跨いだ行末に落ちるケース（Meta+a 全選択）", () => {
+  const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
+
+  test("末尾行が画像のみ → text/plain に画像ラベルが含まれる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `before\n![cap](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await page.keyboard.press("Meta+a");
+    const { plain } = await dispatchCopyWithClipboardData(page);
+
+    expect(plain).toBe("before\n(cap.png)");
+
+    await ctx.close();
+  });
+
+  test("行末に画像 → text/plain に画像ラベルが含まれる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `before ![cap](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await page.keyboard.press("Meta+a");
+    const { plain } = await dispatchCopyWithClipboardData(page);
+
+    expect(plain).toBe("before (cap.png)");
+
+    await ctx.close();
+  });
+
+  test("画像のみ → text/plain が画像ラベルになる（空文字にならない）", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `![cap](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await page.keyboard.press("Meta+a");
+    const { plain } = await dispatchCopyWithClipboardData(page);
+
+    expect(plain).toBe("(cap.png)");
+
+    await ctx.close();
+  });
+
+  test("中間行の画像を挟んだ全選択（Meta+a）→ 画像もラベルとして含まれる", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `before\n![cap](${IMAGE_PATH})\nafter` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await page.keyboard.press("Meta+a");
+    const { plain } = await dispatchCopyWithClipboardData(page);
+
+    expect(plain).toBe("before\n(cap.png)\nafter");
+
+    await ctx.close();
+  });
+});
+
+test.describe("右クリックメニューの「Markdown をコピー」: 選択終端が画像を跨いだ行末に落ちるケース", () => {
+  const IMAGE_PATH = "images/00000000-0000-4000-8000-000000000001.png";
+
+  // resolveSelectionRange（「Markdown をコピー」）も resolveSelectionBounds を共有するため、
+  // 末尾の画像記法を落とさず生 Markdown のまま含める
+  test("行末の画像を含む全選択でも画像記法が落ちない", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: `before ![cap](${IMAGE_PATH})` }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    await page.click("#markdown-view");
+    await page.keyboard.press("Meta+a");
+    await page.locator("#markdown-view").click({ button: "right" });
+
+    await expect.poll(async () => (await capturedCalls(page, "show_context_menu")).length).toBe(1);
+
+    await page.evaluate(() => {
+      const listeners = (window as any).__appWindowListeners["ctx-copy-markdown"] || [];
+      listeners.forEach((fn: () => void) => fn());
+    });
+
+    await expect.poll(async () => (await capturedCalls(page, "copy_markdown")).length).toBe(1);
+    const copyCalls = await capturedCalls(page, "copy_markdown");
+    expect((copyCalls[0].args as any).text).toBe(`before ![cap](${IMAGE_PATH})`);
+
+    await ctx.close();
+  });
+});
+
+// isDomPointAtBlockEnd（画像を跨いだ選択終端の判定）は block が DOM 上の子を持たない場合
+// （<hr> 等）を対象外にする。子が無いと「行頭」と「行末」が同じ (block, 0) に潰れて区別できず、
+// 対象にすると hr の手前で止めたはずの選択が hr の raw（"---" 等）まで巻き込んでしまう
+test.describe("通常コピー: 選択終端が hr の手前で止まるケース（画像と同じ盲点）", () => {
+  test("hr の直前まで選択 → hr の raw は含まれない", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "a\n---" }, {}, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    // 1 行目の先頭（0,0）〜 2 行目（hr）の可視オフセット 0（hr は可視テキストを持たないため
+    // これが唯一の可視位置）
+    await selectMarkdownRange(page, 0, 0, 1, 0);
+    const { plain } = await dispatchCopyWithClipboardData(page);
+
+    expect(plain).toBe("a\n");
+    expect(plain).not.toContain("---");
+
+    await ctx.close();
+  });
+});
+
 test.describe("通常コピー: text/html のセマンティック変換（複数行選択）", () => {
   test("見出し・入れ子リスト・チェックボックス・引用・コードブロック・空行・通常行が構造化された HTML になり、data-*/class を含まない", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });

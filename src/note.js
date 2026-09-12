@@ -1254,11 +1254,15 @@ mdView.addEventListener('keydown', (e) => {
 
 /** 現在の選択から、挿入・置換の対象にする raw bounds を求める（判定フェーズ）。collapsed なら
  * collapsedBounds、非 collapsed なら resolveSelectionBounds。画像選択（selectImageRange が張った
- * Range）は img 自体が可視幅 0 のため、非 collapsed な選択でも raw bounds が同じ点に潰れて退化する。
- * ここで無視しないと、画像を消さずにその raw 位置へ文字だけ挿入してしまう（画像は残ったまま隣に
- * 文字が入る）。画像の置換は Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側の
- * ファイル削除込み）に委ねる。 */
+ * Range）は selectionStillCoversSelectedImage で明示的に除外する。画像を消さずにその raw 位置へ
+ * 文字だけ挿入する（画像は残ったまま隣に文字が入る）ような編集を許さないため、画像の置換は
+ * Backspace/Delete（removeSelectedImage、確認ダイアログ・Rust 側のファイル削除込み）に委ねる。
+ * resolveSelectionBounds は画像 1 個だけを覆う選択の終端を画像記法の末尾まで解決するため、
+ * 退化判定（boundsAreDegenerate）だけでは除外できない。DOM 選択が selectedImage を経由せず
+ * テキスト側へ既に移っている場合は横取りしない（Backspace/Delete 側の
+ * selectionStillCoversSelectedImage と同じ整合性チェック）。 */
 function resolveEditableBounds() {
+  if (selectedImage && selectionStillCoversSelectedImage()) return null;
   const range = currentSelectionRange();
   if (!range) return null;
   if (range.collapsed) return collapsedBounds(range);
@@ -1881,6 +1885,29 @@ function visibleOffsetInLine(lineEl, node, offset) {
 }
 
 /**
+ * (node, offset) が block の内容全体の末尾（最後の子孫の直後）とちょうど一致する位置かどうか。
+ * Range.compareBoundaryPoints は「親要素 + 子インデックス」と「子孫ノード自身」という異なる
+ * DOM 表現の境界点を正しく比較できるため、可視文字数に頼らず構造的に「本当の行末」かどうかを
+ * 判定できる。画像等の可視幅 0 な要素が末尾にあると、可視文字数（Range.toString().length）
+ * だけでは行頭直後・行末のどちらの境界点も同じ 0 文字になり区別できないため、resolveSelectionPoint
+ * の選択終端解決がここに頼る。
+ * block 自身が DOM 上の子を 1 つも持たない場合（`<hr>` 等）は対象外にする: 子が無いと「先頭」と
+ * 「末尾」が同じ (block, 0) に潰れて区別できず、hr のように raw のテキストが実 DOM の子ノードでは
+ * なく特別扱いの 1 セグメント（inlineSegments の hr 分岐、charMap 経由）として表現される行では、
+ * その既存の解決に任せないと選択の前半だけの操作でも行全体を含めてしまう。
+ */
+function isDomPointAtBlockEnd(block, node, offset) {
+  if (block.childNodes.length === 0) return false;
+  const end = document.createRange();
+  end.selectNodeContents(block);
+  end.collapse(false);
+  const point = document.createRange();
+  point.setStart(node, offset);
+  point.collapse(true);
+  return end.compareBoundaryPoints(Range.START_TO_START, point) === 0;
+}
+
+/**
  * 選択の一端（node, offset）が指す位置を、文書全体での (行番号, raw 列オフセット) に変換する。
  * isEnd は選択の終了端かどうか（装飾記法の内部に境界が落ちたときの丸め方向に使う。
  * visibleOffsetToRawOffset 参照）。対応する行が見つからなければ null。
@@ -1936,6 +1963,11 @@ function resolveSelectionPoint(node, offset, isEnd) {
   const inlineRaw = lineText.slice(markerLen);
   const prefixLen = orderedDisplayPrefixLength(block);
   const contentVisible = Math.max(0, visible - prefixLen);
+  // 選択の終了端が構造的にその行の末尾に位置しているときは、画像のような可視幅 0 の記法を
+  // 跨いだ行末を指しているとみなし、行の raw 全体を含める（判定の詳細は isDomPointAtBlockEnd 参照）
+  if (isEnd && isDomPointAtBlockEnd(block, target, targetOffset)) {
+    return { line, col: lineText.length };
+  }
   const rawOffset = markerLen + visibleOffsetToRawOffset(inlineRaw, contentVisible, isEnd, revealRangeForLine(line));
   return { line, col: rawOffset };
 }
