@@ -496,6 +496,16 @@ pub(crate) fn should_sweep_images(
     notes_loaded && trash_loaded && (notes_source_ok || trash_source_ok)
 }
 
+/// ウェルカム付箋（初回起動時のサンプル付箋）を作ってよいか。真になるのは notes.json が
+/// `Loaded::Missing` のときだけ。
+///
+/// 付箋 0 件を初回起動と混同しないための判定。全削除した直後は notes.json が
+/// `Loaded::Ok` で 0 件のまま残るので false になる。`Loaded::Unreadable` でも false で、
+/// 読めなかった既存データをウェルカム付箋で上書きしない。
+pub(crate) fn should_create_welcome_notes(notes_loaded: bool, notes_source_ok: bool) -> bool {
+    notes_loaded && !notes_source_ok
+}
+
 /// 大文字小文字を無視した比較用に正規化する。`images/` 配下は uuid v4 の hex 部と
 /// 拡張子（`is_valid_image_rel_path` は大文字も許容する）で構成され非 ASCII を含まないため
 /// `to_ascii_lowercase` で足りる。
@@ -1190,6 +1200,25 @@ mod tests {
     fn should_sweep_images_false_when_either_side_unreadable() {
         assert!(!should_sweep_images(false, true, false, true));
         assert!(!should_sweep_images(true, false, true, false));
+    }
+
+    // ── should_create_welcome_notes ──
+
+    #[test]
+    fn should_create_welcome_notes_true_when_notes_json_missing() {
+        assert!(should_create_welcome_notes(true, false));
+    }
+
+    /// 付箋を全削除した直後は notes.json が `Loaded::Ok`（0 件）で残る。この状態で
+    /// ウェルカム付箋を作り直すと毎回復活してしまうため false。
+    #[test]
+    fn should_create_welcome_notes_false_after_deleting_all_notes_and_relaunching() {
+        assert!(!should_create_welcome_notes(true, true));
+    }
+
+    #[test]
+    fn should_create_welcome_notes_false_when_notes_json_unreadable() {
+        assert!(!should_create_welcome_notes(false, false));
     }
 
     // ── save_pasted_image ──
