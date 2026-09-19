@@ -89,6 +89,16 @@ pub(crate) fn is_valid_default_color(color: &str) -> bool {
     color == "random" || is_valid_color_key(color)
 }
 
+/// `COLOR_DEFS` 順で次の色キーを返す（末尾の次は先頭に戻る巡回）。
+/// ウェルカム付箋で日本語版・英語版の色を必ず分けるために使う。
+/// `COLOR_DEFS` に無いキーを渡された場合は先頭の色を返す。
+pub(crate) fn next_color_key(color: &str) -> &'static str {
+    match COLOR_DEFS.iter().position(|c| c.key == color) {
+        Some(i) => COLOR_DEFS[(i + 1) % COLOR_DEFS.len()].key,
+        None => COLOR_DEFS[0].key,
+    }
+}
+
 // ── Data Model ──────────────────────────────────────────────
 
 pub(crate) const TRASH_MAX: usize = 200;
@@ -531,5 +541,30 @@ mod tests {
     #[test]
     fn is_valid_default_color_rejects_unknown_key() {
         assert!(!is_valid_default_color("bogus"));
+    }
+
+    // ── next_color_key ──
+
+    #[test]
+    fn next_color_key_returns_the_following_color() {
+        assert_eq!(next_color_key("yellow"), "blue");
+        assert_eq!(next_color_key("blue"), "green");
+    }
+
+    #[test]
+    fn next_color_key_wraps_from_last_to_first() {
+        assert_eq!(next_color_key("gray"), "yellow");
+    }
+
+    #[test]
+    fn next_color_key_differs_from_input_for_every_color_def() {
+        for c in COLOR_DEFS {
+            assert_ne!(next_color_key(c.key), c.key);
+        }
+    }
+
+    #[test]
+    fn next_color_key_falls_back_to_first_color_for_unknown_key() {
+        assert_eq!(next_color_key("bogus"), COLOR_DEFS[0].key);
     }
 }

@@ -18,8 +18,10 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use i18n::{Lang, Msg};
-use model::{resolve_color, AppState, Note, RecoverMutex, Settings};
-use persistence::{load_notes, load_settings, load_trash, save_notes, Loaded};
+use model::{next_color_key, resolve_color, AppState, Note, RecoverMutex, Settings};
+use persistence::{
+    load_notes, load_settings, load_trash, save_notes, should_create_welcome_notes, Loaded,
+};
 use window::{bring_all_to_front, open_note_window};
 
 // ── App Entry ───────────────────────────────────────────────
@@ -230,17 +232,19 @@ pub fn run() {
             // Restore saved notes
             let notes = state.notes.recover().clone();
 
-            if notes.is_empty() {
-                // Create default notes on first launch — one in Japanese, one in
-                // English, so a first-time user sees both regardless of OS locale.
+            if should_create_welcome_notes(state.notes_loaded, notes_source_ok) {
+                // notes.json が存在しない初回起動だけサンプル付箋を作る。付箋を全削除した
+                // 後の再起動（notes.json は残り 0 件）では作り直さない。
+                // 日本語版と英語版の 2 枚を作るのは、OS ロケールに関わらず両方見せるため
                 drop(notes);
                 let default_color = state.settings.recover().default_color.clone();
-                let color = resolve_color(&default_color);
+                let color_ja = resolve_color(&default_color);
+                let color_en = next_color_key(&color_ja);
 
-                let mut note_ja = Note::new(&color);
+                let mut note_ja = Note::new(&color_ja);
                 note_ja.content = String::from(i18n::welcome_note(Lang::Ja));
 
-                let mut note_en = Note::new(&color);
+                let mut note_en = Note::new(color_en);
                 note_en.content = String::from(i18n::welcome_note(Lang::En));
                 note_en.x += note_en.width + 20.0;
 
