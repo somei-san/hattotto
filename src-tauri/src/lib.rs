@@ -22,7 +22,7 @@ use model::{next_color_key, resolve_color, AppState, Note, RecoverMutex, Setting
 use persistence::{
     load_notes, load_settings, load_trash, save_notes, should_create_welcome_notes, Loaded,
 };
-use window::{bring_all_to_front, open_note_window};
+use window::{create_note_with_window, open_note_window, reopen_notes};
 
 // ── App Entry ───────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ pub fn run() {
         // 起動そのものを止める。データディレクトリに触る前に終了させる必要があるので、
         // このプラグインは他より先に登録する
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            bring_all_to_front(app);
+            reopen_notes(app);
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -256,6 +256,11 @@ pub fn run() {
                 if let Err(e) = save_notes(&state, &notes) {
                     log::error!("save notes error: {}", e);
                 }
+            } else if notes.is_empty() {
+                // 付箋 0 件のまま起動すると、ウィンドウが 1 枚も無く操作の入口が
+                // メニューバーとアプリメニューしか残らない。トレイアイコンは設定で
+                // 消せるので、1 枚作って必ず入口を用意する
+                create_note_with_window(app.handle(), &state);
             } else {
                 for note in &notes {
                     open_note_window(app.handle(), note);
@@ -266,9 +271,17 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Hattotto")
-        .run(|app, event| {
-            if let tauri::RunEvent::Reopen { .. } = event {
-                bring_all_to_front(app);
+        .run(|app, event| match event {
+            tauri::RunEvent::Reopen { .. } => reopen_notes(app),
+            // 最後の付箋を削除するとウィンドウが 1 枚も無くなり、既定ではそこでアプリ本体が
+            // 終了する。メニューバーのアイコンとアプリメニューも道連れになるので、
+            // ウィンドウ都合の終了だけ止めて常駐させる。
+            // `code` が `Some` なのは `app.exit()` を通ったとき、つまりトレイの「終了」で、
+            // そちらはそのまま終了させる。アプリメニューの Quit と OS のログアウト・
+            // シャットダウンは `NSApp terminate:` でここを通らずに落ちるので影響しない
+            tauri::RunEvent::ExitRequested { api, code, .. } if code.is_none() => {
+                api.prevent_exit();
             }
+            _ => {}
         });
 }

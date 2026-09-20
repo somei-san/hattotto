@@ -228,10 +228,22 @@ pub(crate) fn open_trash_window(app: &AppHandle) {
     }
 }
 
-// ── Bring All Notes to Front ────────────────────────────────
+// ── Reopen Notes (Dock/Alfred Reopen, Single-Instance Relaunch) ──────
 
-pub(crate) fn bring_all_to_front(app: &AppHandle) {
+/// Show every note window, recreating any that were closed. If there are no
+/// notes at all, create one so reopening the app is never a no-op.
+pub(crate) fn reopen_notes(app: &AppHandle) {
     let state: State<AppState> = app.state();
+    // Read the count into a binding so the lock is released before
+    // create_note_with_window takes it again.
+    let is_empty = state.notes.recover().is_empty();
+    if is_empty {
+        let note = create_note_with_window(app, &state);
+        if let Some(win) = app.get_webview_window(&format!("note-{}", note.id)) {
+            let _ = win.set_focus();
+        }
+        return;
+    }
     let notes = state.notes.recover();
     for note in notes.iter() {
         if let Some(win) = app.get_webview_window(&format!("note-{}", note.id)) {
