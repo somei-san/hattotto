@@ -228,9 +228,10 @@ pub(crate) fn open_trash_window(app: &AppHandle) {
     }
 }
 
-// ── Bring All Notes to Front ────────────────────────────────
+// ── Reopen Notes (Dock/Alfred Reopen, Single-Instance Relaunch) ──────
 
-pub(crate) fn bring_all_to_front(app: &AppHandle) {
+/// Show every note window, recreating any that were closed.
+pub(crate) fn reopen_notes(app: &AppHandle) {
     let state: State<AppState> = app.state();
     let notes = state.notes.recover();
     for note in notes.iter() {

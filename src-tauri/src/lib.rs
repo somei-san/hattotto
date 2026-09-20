@@ -22,7 +22,7 @@ use model::{next_color_key, resolve_color, AppState, Note, RecoverMutex, Setting
 use persistence::{
     load_notes, load_settings, load_trash, save_notes, should_create_welcome_notes, Loaded,
 };
-use window::{bring_all_to_front, open_note_window};
+use window::{open_note_window, reopen_notes};
 
 // ── App Entry ───────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ pub fn run() {
         // 起動そのものを止める。データディレクトリに触る前に終了させる必要があるので、
         // このプラグインは他より先に登録する
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            bring_all_to_front(app);
+            reopen_notes(app);
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -268,7 +268,7 @@ pub fn run() {
         .expect("error while building Hattotto")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
-                bring_all_to_front(app);
+                reopen_notes(app);
             }
         });
 }
