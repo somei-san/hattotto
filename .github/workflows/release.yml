@@ -75,8 +75,10 @@ jobs:
 
             url "https://github.com/somei-san/hattotto/releases/download/v#{version}/${DMG_NAME}"
             name "Hattotto"
-            desc "macOS Stickies-style sticky notes desktop app"
+            desc "Stickies-style sticky notes desktop app"
             homepage "https://github.com/somei-san/hattotto"
+
+            depends_on :macos
 
             app "Hattotto.app"
 
@@ -84,14 +86,12 @@ jobs:
               run "/usr/bin/xattr", args: ["-cr", "{{appdir}}/Hattotto.app"]
             end
 
+            zap trash: "~/Library/Application Support/com.hattotto.app"
+
             caveats <<~EOS
               #{token} is not signed with an Apple Developer ID.
               The quarantine attribute has been automatically removed during installation.
             EOS
-
-            zap trash: [
-              "~/Library/Application Support/com.hattotto.app",
-            ]
           end
           CASK_EOF
 
