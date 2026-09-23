@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 前提条件: Rust 1.77+、Xcode Command Line Tools、Node.js（テスト用）
 
-`cargo` が PATH に無い環境（Homebrew の keg-only な rustup。恒久的な対処は DEVELOPMENT.md）では `env PATH="/opt/homebrew/opt/rustup/bin:$PATH" cargo ...` と前置する。素の `cargo` が `command not found` で落ちたまま、grep でフィルタした出力を「警告なし」と誤読しない。
+`cargo` が PATH に無い環境（Homebrew の keg-only な rustup）では、コマンドに `PATH=` を前置せず、DEVELOPMENT.md「ソースからビルド」の手順で PATH に通すようユーザーに依頼する。前置は `$PATH` の展開で毎回手動承認が出る。素の `cargo` が `command not found` で落ちたまま、grep でフィルタした出力を「警告なし」と誤読しない。
 
 ## コミット前の検証
 
