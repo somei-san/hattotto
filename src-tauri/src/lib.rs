@@ -1,3 +1,4 @@
+mod autostart;
 mod commands;
 mod context_menu;
 mod i18n;
@@ -73,7 +74,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![autostart::AUTOSTART_ARG]),
         ))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -213,6 +214,8 @@ pub fn run() {
                 std::process::exit(0);
             }
 
+            autostart::migrate_launch_agent(app.handle());
+
             // single-instance プラグインは他のプラグインより先に登録してあり、2 個目の
             // インスタンスはここへ来る前に exit している。全プラグイン登録後のこの
             // setup 内でスイープすることで、1 個目のインスタンスの undo 履歴にしか
@@ -256,10 +259,12 @@ pub fn run() {
                 if let Err(e) = save_notes(&state, &notes) {
                     log::error!("save notes error: {}", e);
                 }
-            } else if notes.is_empty() {
+            } else if notes.is_empty() && !autostart::launched_from_autostart(std::env::args()) {
                 // 付箋 0 件のまま起動すると、ウィンドウが 1 枚も無く操作の入口が
                 // メニューバーとアプリメニューしか残らない。トレイアイコンは設定で
-                // 消せるので、1 枚作って必ず入口を用意する
+                // 消せるので、1 枚作って必ず入口を用意する。
+                // ただし自動起動での起動は、バックグラウンドで常駐させたいだけの
+                // 使い方と噛み合わないため、意図しない空付箋を作らない
                 create_note_with_window(app.handle(), &state);
             } else {
                 for note in &notes {
