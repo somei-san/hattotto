@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## ブランチ運用
 
-機能変更は main に直接コミットせず、ブランチを切って draft PR を出す（作成前に `~/.claude/rules/pr-rules.md` を読む）。タイポ修正や既存 PR への追従など機能変更に当たらないものは main へ直接コミットしてよい。
+機能変更は main に直接コミットせず、ブランチを切って draft PR を出す。タイポ修正や既存 PR への追従など機能変更に当たらないものは main へ直接コミットしてよい。
 
 ## リリース
 
