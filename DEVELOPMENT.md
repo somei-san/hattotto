@@ -105,6 +105,8 @@ cargo release tag --manifest-path src-tauri/Cargo.toml --execute
 cargo release push --manifest-path src-tauri/Cargo.toml --execute
 ```
 
+`--execute` は実行前に確認プロンプト `[y/N]` を出します。Claude Code の `!` のように標準入力を受けられない環境から実行すると、ここで止まるので、`--no-confirm` を付けてください。
+
 ### 初回セットアップ（リポジトリ管理者のみ）
 
 1. GitHub で Fine-grained PAT を作成（scope: `somei-san/homebrew-tap`, Contents: Read and write）
