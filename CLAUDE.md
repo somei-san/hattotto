@@ -50,7 +50,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - VRT — `toHaveScreenshot` によるスクリーンショット比較（`note.spec.ts` / `settings.spec.ts` / `trash.spec.ts`）。ベースラインは `tests/visual/__screenshots__/darwin/` の 1 セットで、更新経路は `npm run test:update` だけ。CI も同じ macOS で走らせている（`visual-test.yml` の `runs-on`）。手元の macOS を上げたらランナーのピンも上げる
   - 等幅フォント内の日本語はスクリーンショットに入れない。CJK のフォールバックが手元と CI ランナーで揃わず、ピクセル差が出る
 - UT — 上記以外の非 E2E spec。リッチテキストから Markdown への変換、アクセシビリティ、コンテキストメニュー等。DOM が要る単体テストはこちらに置く
-- E2E（`*-e2e.spec.ts`）— 行の生表示切替・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト。実機が WKWebView のため chromium に加えて webkit プロジェクトでも実行する（`playwright.config.ts` の `testMatch` で E2E のみに限定。VRT・UT は chromium のみ）
+- E2E（`*-e2e.spec.ts`）— 生表示（reveal）・ペースト・オートセーブ・削除・ズーム・IME ガード等の振る舞いテスト。実機が WKWebView のため chromium に加えて webkit プロジェクトでも実行する（`playwright.config.ts` の `testMatch` で E2E のみに限定。VRT・UT は chromium のみ）
 - `fixtures.ts` — Tauri API モック・テストフィクスチャ
 
 ## アーキテクチャ
@@ -77,7 +77,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 
 この読み込み順は `eslint.config.mjs` にも書いてある。各 `.js` の `globals` が「そのファイルより先に読まれるファイルの識別子」だけを持つので、`settings.js` から `renderMarkdown` を呼ぶような誤りは `no-undef` で落ちる。`<script>` の並びを変えたら設定側も直すこと。
 
-- `note.html` / `note.js` — 付箋ウィンドウ。常に Markdown を描画し、キャレットのある行だけ生 Markdown の `.raw-editor` に差し替える（以降この状態を「生表示」と呼ぶ）。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
+- `note.html` / `note.js` — 付箋ウィンドウ。常に Markdown を描画し、キャレットが装飾（太字・斜字・取り消し線・インラインコード・リンク）の中か境界にあるあいだだけ、その要素を生マーカー付きで表示する（以降この状態を「生表示」、コード上は reveal と呼ぶ）。見出し・リスト・引用の行頭マーカーは生表示の対象外。水平線だけは選択の端が乗っている行ごと生表示にする。ほかにリッチテキストペースト変換、カスタム右クリックメニュー、入力補助
 - `settings.html` / `settings.js` — 設定画面。デフォルトカラー / 透過度 / 表示ボタン制御（前面表示・ピン・新規・カラー）/ 削除確認 / 言語 / 自動起動
 - `trash.html` / `trash.js` — ゴミ箱ウィンドウ。削除した付箋の一覧・復元・全削除
 - `note-lines.js` — 付箋の編集で使う純粋関数（行頭マーカー長・リスト継続のプレフィックス・ブロック内オフセット・画像記法の検証と無害化・書記素分割）。DOM にもアプリの状態にも触らないので `tests/unit/` から `require` できる

@@ -25,7 +25,7 @@ The main differences from macOS Stickies
 ## Features
 
 - 📋 Markdown support
-  - 👀 While you edit, only the line under the cursor turns back into raw Markdown — the rest stays rendered
+  - 👀 Markdown syntax shows only for the bold text or link under the cursor — everything else stays rendered
   - ✏️ Input help, such as continuing a list on Enter
   - 🔗 Pasted rich text becomes Markdown
 - 🪟 Clicking one note brings every note to the front
