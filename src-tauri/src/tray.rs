@@ -33,7 +33,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray_new_note" => {
                 let state: State<AppState> = app.state();
-                create_note_with_window(app, &state);
+                create_note_with_window(app, &state, None);
             }
             "settings" => {
                 open_settings_window(app, None);

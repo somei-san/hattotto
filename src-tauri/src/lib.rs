@@ -265,7 +265,7 @@ pub fn run() {
                 // 消せるので、1 枚作って必ず入口を用意する。
                 // ただし自動起動での起動は、バックグラウンドで常駐させたいだけの
                 // 使い方と噛み合わないため、意図しない空付箋を作らない
-                create_note_with_window(app.handle(), &state);
+                create_note_with_window(app.handle(), &state, None);
             } else {
                 for note in &notes {
                     open_note_window(app.handle(), note);

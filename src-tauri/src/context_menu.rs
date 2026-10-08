@@ -226,7 +226,10 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             }
         }
         "ctx_new" => {
-            create_note_with_window(app, &state);
+            // フォーカス中の付箋ではなく、右クリックした付箋の隣に出す。macOS では
+            // フォーカスしていない付箋を右クリックしてもフォーカスが移らない可能性が
+            // ある（未確認）ため、フォーカスでは判定しない
+            create_note_with_window(app, &state, Some(&win_label));
         }
         "ctx_delete" => {
             if confirm_delete_if_needed(app, &state, &note_id) {
