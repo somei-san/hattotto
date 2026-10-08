@@ -125,6 +125,10 @@ fn default_zoom() -> u32 {
     100
 }
 
+/// 新しい付箋の既定位置（論理座標）。基準にする付箋が無いときはここから
+/// 階段状にずらし、どのモニターにも入らない付箋もここへ戻す。
+pub(crate) const DEFAULT_POSITION: (f64, f64) = (120.0, 120.0);
+
 /// zoom の許容範囲（50〜200%）にクランプする。
 pub(crate) fn clamp_zoom(zoom: u32) -> u32 {
     zoom.clamp(50, 200)
@@ -146,8 +150,8 @@ impl Note {
             id: Uuid::new_v4().to_string(),
             content: String::new(),
             color: color.into(),
-            x: 120.0,
-            y: 120.0,
+            x: DEFAULT_POSITION.0,
+            y: DEFAULT_POSITION.1,
             width: 280.0,
             height: 320.0,
             zoom: 100,

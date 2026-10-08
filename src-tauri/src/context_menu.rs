@@ -226,7 +226,7 @@ pub(crate) fn handle_context_menu_event(app: &AppHandle, event_id: &str) {
             }
         }
         "ctx_new" => {
-            create_note_with_window(app, &state);
+            create_note_with_window(app, &state, Some(&win_label));
         }
         "ctx_delete" => {
             if confirm_delete_if_needed(app, &state, &note_id) {

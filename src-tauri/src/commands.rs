@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::context_menu::build_context_menu;
@@ -502,9 +502,10 @@ pub(crate) fn open_trash(app: AppHandle) {
 }
 
 /// 新しい付箋を作成してウィンドウを開き、作成した付箋を返す。
+/// 付箋の＋ボタンから呼ばれたときは、その付箋の隣に出す。
 #[tauri::command]
-pub(crate) fn create_note(app: AppHandle, state: State<AppState>) -> Note {
-    create_note_with_window(&app, &state)
+pub(crate) fn create_note(app: AppHandle, window: WebviewWindow, state: State<AppState>) -> Note {
+    create_note_with_window(&app, &state, Some(window.label()))
 }
 
 #[tauri::command]

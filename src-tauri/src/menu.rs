@@ -45,7 +45,7 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
             }
             "new_note" => {
                 let state: State<AppState> = app.state();
-                create_note_with_window(app, &state);
+                create_note_with_window(app, &state, None);
             }
             "open_trash" => {
                 open_trash_window(app);
