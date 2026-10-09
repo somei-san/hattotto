@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::model::{is_valid_default_color, AppState, Note, Settings, TRASH_MAX};
+use crate::model::{clamp_zoom, is_valid_default_color, AppState, Note, Settings, TRASH_MAX};
 
 /// ファイル読み込みの結果。「無い」「読めた」「あるが読めない」を区別する。
 /// `Vec<Note>` の `Default` が空であるのと同じ形になってしまう `Unreadable` を
@@ -152,6 +152,8 @@ fn load_settings_from(path: &Path) -> Loaded<Settings> {
             if !is_valid_default_color(&s.default_color) {
                 s.default_color = Settings::default().default_color;
             }
+            // 範囲外の `default_zoom` も、そのまま新しい付箋に入らないよう範囲内に収める
+            s.default_zoom = clamp_zoom(s.default_zoom);
             Loaded::Ok(s)
         }
         other => other,
@@ -1374,6 +1376,7 @@ mod tests {
             confirm_before_delete: true,
             show_tray_icon: true,
             language: LanguageSetting::En,
+            default_zoom: 130,
         };
         save_settings_to(&settings, &path).unwrap();
         let loaded = unwrap_ok(load_settings_from(&path));
@@ -1382,6 +1385,29 @@ mod tests {
         assert!(!loaded.bring_all_to_front);
         assert!(loaded.confirm_before_delete);
         assert_eq!(loaded.language, LanguageSetting::En);
+        assert_eq!(loaded.default_zoom, 130);
+    }
+
+    #[test]
+    fn load_settings_without_default_zoom_defaults_to_100() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"default_color":"yellow","opacity":100}"#).unwrap();
+        let loaded = unwrap_ok(load_settings_from(&path));
+        assert_eq!(loaded.default_zoom, 100);
+    }
+
+    #[test]
+    fn load_settings_out_of_range_default_zoom_is_clamped() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"default_color":"yellow","opacity":100,"default_zoom":500}"#,
+        )
+        .unwrap();
+        let loaded = unwrap_ok(load_settings_from(&path));
+        assert_eq!(loaded.default_zoom, 200);
     }
 
     #[test]

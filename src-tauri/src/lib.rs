@@ -126,6 +126,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::open_settings,
+            commands::preview_zoom,
             commands::get_trash,
             commands::get_trash_max,
             commands::restore_note,
@@ -240,15 +241,20 @@ pub fn run() {
                 // 後の再起動（notes.json は残り 0 件）では作り直さない。
                 // 日本語版と英語版の 2 枚を作るのは、OS ロケールに関わらず両方見せるため
                 drop(notes);
-                let default_color = state.settings.recover().default_color.clone();
+                let (default_color, default_zoom) = {
+                    let settings = state.settings.recover();
+                    (settings.default_color.clone(), settings.default_zoom)
+                };
                 let color_ja = resolve_color(&default_color);
                 let color_en = next_color_key(&color_ja);
 
                 let mut note_ja = Note::new(&color_ja);
                 note_ja.content = String::from(i18n::welcome_note(Lang::Ja));
+                note_ja.zoom = default_zoom;
 
                 let mut note_en = Note::new(color_en);
                 note_en.content = String::from(i18n::welcome_note(Lang::En));
+                note_en.zoom = default_zoom;
                 note_en.x += note_en.width + 20.0;
 
                 open_note_window(app.handle(), &note_ja);

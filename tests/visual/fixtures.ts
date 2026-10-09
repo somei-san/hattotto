@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   confirm_before_delete: true,
   show_tray_icon: true,
   language: "ja",
+  default_zoom: 100,
   system_language: "ja",
   data_dir: "/mock/data-dir",
 };
@@ -145,6 +146,7 @@ async function injectSettingsMock(
           switch (cmd) {
             case "get_settings":               return data.settings;
             case "update_settings":            return null;
+            case "preview_zoom":               return null;
             case "plugin:autostart|is_enabled": return data.autostart;
             case "plugin:autostart|enable":    return null;
             case "plugin:autostart|disable":   return null;

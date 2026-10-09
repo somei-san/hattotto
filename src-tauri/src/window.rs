@@ -6,7 +6,10 @@ use tauri::{
 };
 
 use crate::i18n::{self, Msg};
-use crate::model::{resolve_color, AppState, Note, RecoverMutex, DEFAULT_POSITION};
+use crate::model::{
+    clamp_zoom, is_valid_color_key, resolve_color, AppState, Note, RecoverMutex, COLOR_DEFS,
+    DEFAULT_POSITION, DEFAULT_SIZE,
+};
 use crate::persistence::save_notes;
 
 // ── Monitor geometry (pure functions for testability) ────────
@@ -247,7 +250,10 @@ pub(crate) fn create_note_with_window(
     state: &AppState,
     anchor_label: Option<&str>,
 ) -> Note {
-    let default_color = state.settings.recover().default_color.clone();
+    let (default_color, default_zoom) = {
+        let settings = state.settings.recover();
+        (settings.default_color.clone(), settings.default_zoom)
+    };
     let color = resolve_color(&default_color);
     // Read the live windows rather than the saved notes: geometry is saved
     // with a debounce and may lag right after the user drags a note.
@@ -255,6 +261,7 @@ pub(crate) fn create_note_with_window(
     let anchor_window = pick_anchor(&windows, anchor_label);
     let monitors = work_area_rects(app);
     let mut n = Note::new(&color);
+    n.zoom = default_zoom;
     // Only read the notes under the lock; monitor queries stay outside it
     let (x, y) = {
         let notes = state.notes.recover();
@@ -431,7 +438,7 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         None => "settings.html".to_string(),
     };
     let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
-    if let Err(e) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
+    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
         .title(i18n::text(lang, Msg::SettingsWindowTitle))
         .inner_size(440.0, 600.0)
         .min_inner_size(380.0, 460.0)
@@ -439,7 +446,73 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         .visible(true)
         .build()
     {
-        log::error!("open settings window error: {}", e);
+        Ok(win) => {
+            // プレビューは設定画面の付属物なので、設定画面と一緒に閉じる
+            let app_handle = app.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::Destroyed = event {
+                    if let Some(preview) = app_handle.get_webview_window(ZOOM_PREVIEW_LABEL) {
+                        let _ = preview.close();
+                    }
+                }
+            });
+        }
+        Err(e) => log::error!("open settings window error: {}", e),
+    }
+}
+
+/// 設定画面の「新しい付箋のズーム」のプレビューに使うウィンドウのラベル。
+/// `note-` で始めないので、付箋としては保存も基準選びもされない
+pub(crate) const ZOOM_PREVIEW_LABEL: &str = "zoom-preview";
+
+/// 新しい付箋が `zoom`・`color` でどう見えるかを、付箋と同じ大きさのウィンドウで見せる。
+/// 既に開いていれば中身だけ差し替える。位置は設定画面を基準に、新しい付箋と同じ規則で決める
+pub(crate) fn show_zoom_preview(app: &AppHandle, zoom: u32, color: &str) {
+    let zoom = clamp_zoom(zoom);
+    // ランダムは開くたびに色が変わって見本にならないので、先頭の色で見せる
+    let color = if is_valid_color_key(color) {
+        color
+    } else {
+        COLOR_DEFS[0].key
+    };
+    if let Some(win) = app.get_webview_window(ZOOM_PREVIEW_LABEL) {
+        let _ = win.emit_to(
+            ZOOM_PREVIEW_LABEL,
+            "zoom-preview-update",
+            serde_json::json!({ "zoom": zoom, "color": color }),
+        );
+        return;
+    }
+    let windows = window_snapshots(app);
+    let anchor = windows
+        .iter()
+        .find(|w| w.label == "settings")
+        .map(|w| Anchor::new(w, false));
+    let (x, y) = new_note_position(
+        anchor.as_ref(),
+        DEFAULT_SIZE,
+        &work_area_rects(app),
+        &note_rects(&windows),
+        0,
+    );
+    let (x, y) = clamp_to_screen(app, x, y);
+    let url = format!("note.html?preview=1&zoom={zoom}&color={color}");
+    match WebviewWindowBuilder::new(app, ZOOM_PREVIEW_LABEL, WebviewUrl::App(url.into()))
+        .title("")
+        .inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
+        .resizable(false)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        // 設定画面からフォーカスを奪わず、クリックも受けない。見るためだけのウィンドウ
+        .focused(false)
+        .visible(true)
+        .build()
+    {
+        Ok(win) => {
+            let _ = win.set_ignore_cursor_events(true);
+        }
+        Err(e) => log::error!("open zoom preview window error: {}", e),
     }
 }
 

@@ -7,6 +7,7 @@ const SUPPORT_URL = 'https://buymeacoffee.com/somei';
 
 let currentColor   = 'yellow';
 let currentOpacity = 100;
+let currentDefaultZoom = 100;
 let currentBringAll = true;
 let currentShowPin = true;
 let currentShowNew = true;
@@ -21,6 +22,7 @@ let systemLanguage = 'en'; // get_settings から届く。init で上書きさ�
 let saved = {
   color: currentColor,
   opacity: currentOpacity,
+  defaultZoom: currentDefaultZoom,
   bringAll: currentBringAll, showPin: currentShowPin,
   showNew: currentShowNew, showColor: currentShowColor,
   confirmDelete: currentConfirmDelete,
@@ -34,6 +36,7 @@ const saveFooter = document.getElementById('save-footer');
 function checkDirty() {
   const dirty = currentColor !== saved.color
     || currentOpacity !== saved.opacity
+    || currentDefaultZoom !== saved.defaultZoom
     || currentBringAll !== saved.bringAll
     || currentShowPin !== saved.showPin
     || currentShowNew !== saved.showNew
@@ -49,6 +52,7 @@ function snapshotSaved() {
   saved = {
     color: currentColor,
     opacity: currentOpacity,
+    defaultZoom: currentDefaultZoom,
     bringAll: currentBringAll, showPin: currentShowPin,
     showNew: currentShowNew, showColor: currentShowColor,
     confirmDelete: currentConfirmDelete,
@@ -94,6 +98,7 @@ document.querySelectorAll('#color-picker .color-dot').forEach(dot => {
     dot.setAttribute('tabindex', '0');
     currentColor = dot.dataset.color;
     checkDirty();
+    if (zoomPreviewShown) showZoomPreview();
   });
   dot.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dot.click(); }
@@ -124,6 +129,7 @@ saveBtn.addEventListener('click', async () => {
       confirmBeforeDelete: currentConfirmDelete,
       showTrayIcon: currentShowTray,
       language: currentLanguage,
+      defaultZoom: currentDefaultZoom,
     });
     // autostart の状態が変わっていたら反映
     if (currentAutostart !== saved.autostart) {
@@ -150,6 +156,7 @@ saveBtn.addEventListener('click', async () => {
       confirm_before_delete: currentConfirmDelete,
       show_tray_icon: currentShowTray,
       language: currentLanguage,
+      default_zoom: currentDefaultZoom,
       resolved_language: I18N.resolve(currentLanguage, systemLanguage),
     });
     snapshotSaved();
@@ -168,6 +175,26 @@ opacitySlider.addEventListener('input', () => {
   currentOpacity = parseInt(opacitySlider.value, 10);
   opacityValue.textContent = `${currentOpacity}%`;
   checkDirty();
+});
+
+// ── Default Zoom Slider ───────────────────────────────
+const defaultZoomSlider = document.getElementById('default-zoom-slider');
+const defaultZoomValue  = document.getElementById('default-zoom-value');
+
+// スライダーに触るまではプレビューを開かない。開いた後は色の変更も反映する
+let zoomPreviewShown = false;
+
+function showZoomPreview() {
+  zoomPreviewShown = true;
+  invoke('preview_zoom', { zoom: currentDefaultZoom, color: currentColor })
+    .catch(e => console.error('preview_zoom failed:', e));
+}
+
+defaultZoomSlider.addEventListener('input', () => {
+  currentDefaultZoom = parseInt(defaultZoomSlider.value, 10);
+  defaultZoomValue.textContent = `${currentDefaultZoom}%`;
+  checkDirty();
+  showZoomPreview();
 });
 
 // ── Bring All Toggle ──────────────────────────────
@@ -258,6 +285,11 @@ async function init() {
   currentOpacity = s.opacity ?? 100;
   opacitySlider.value = currentOpacity;
   opacityValue.textContent = `${currentOpacity}%`;
+
+  // 手編集などで 10 刻みから外れた値は、スライダーが丸めた値に揃えて表示と食い違わせない
+  defaultZoomSlider.value = s.default_zoom ?? 100;
+  currentDefaultZoom = parseInt(defaultZoomSlider.value, 10);
+  defaultZoomValue.textContent = `${currentDefaultZoom}%`;
 
   currentBringAll = s.bring_all_to_front !== false;
   bringAllToggle.checked = currentBringAll;

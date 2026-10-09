@@ -33,6 +33,11 @@ const I18N_TABLE = {
   defaultColorGroupLabel: { ja: 'デフォルトカラー', en: 'Default Color' },
 
   sectionOpacity: { ja: '透過度', en: 'Opacity' },
+  sectionDefaultZoom: { ja: '新しい付箋のズーム', en: 'Zoom for new notes' },
+  zoomPreviewSample: {
+    ja: '# 見本\n新しい付箋はこの大きさで開きます。\n\n- 箇条書き\n- [ ] チェックボックス\n\n**太字** や `コード` も同じ倍率で表示されます。\n\n1 枚にどれくらい書けるかの目安にしてください。',
+    en: '# Sample\nNew notes open at this size.\n\n- Bullet\n- [ ] Checkbox\n\n**Bold** and `code` use the same zoom.\n\nUse this to see how much fits on one note.',
+  },
 
   sectionDisplay: { ja: '表示', en: 'Display' },
   toggleBringAllToFront: { ja: '付箋をクリックしたら全付箋を前面に表示', en: 'Bring all notes to front when clicking a note' },

@@ -400,6 +400,15 @@
     </div>
   </div>
 
+  <div class="section" role="group" aria-label="新しい付箋のズーム" data-i18n-aria-label="sectionDefaultZoom">
+    <div class="section-title" data-i18n="sectionDefaultZoom">新しい付箋のズーム</div>
+    <!-- 範囲と刻みは note.js の changeZoom・Rust の clamp_zoom と揃える -->
+    <div class="opacity-row">
+      <input type="range" class="opacity-slider" id="default-zoom-slider" min="50" max="200" step="10" value="100" aria-label="新しい付箋のズーム" data-i18n-aria-label="sectionDefaultZoom" />
+      <span class="opacity-value" id="default-zoom-value">100%</span>
+    </div>
+  </div>
+
   <div class="section" role="group" aria-label="表示" data-i18n-aria-label="sectionDisplay">
     <div class="section-title" data-i18n="sectionDisplay">表示</div>
     <div class="toggle-row">

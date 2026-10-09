@@ -18,6 +18,7 @@ use crate::persistence::{
 };
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
+    show_zoom_preview,
 };
 use crate::{menu, tray};
 
@@ -444,6 +445,7 @@ pub(crate) fn update_settings(
     confirm_before_delete: bool,
     show_tray_icon: bool,
     language: LanguageSetting,
+    default_zoom: u32,
     app: AppHandle,
     state: State<AppState>,
 ) -> Result<(), String> {
@@ -461,6 +463,7 @@ pub(crate) fn update_settings(
         settings.confirm_before_delete = confirm_before_delete;
         settings.show_tray_icon = show_tray_icon;
         settings.language = language;
+        settings.default_zoom = clamp_zoom(default_zoom);
         (settings.clone(), language_changed)
     };
     if language_changed {
@@ -493,6 +496,12 @@ pub(crate) fn update_settings(
 #[tauri::command]
 pub(crate) fn open_settings(app: AppHandle) {
     open_settings_window(&app, None);
+}
+
+/// 設定画面で選んでいる新しい付箋のズームと色を、付箋と同じ大きさのプレビューで見せる。
+#[tauri::command]
+pub(crate) fn preview_zoom(app: AppHandle, zoom: u32, color: String) {
+    show_zoom_preview(&app, zoom, &color);
 }
 
 /// ゴミ箱ウィンドウを開く（既に開いている場合はフォーカスを移す）。
