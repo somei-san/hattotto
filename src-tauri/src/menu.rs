@@ -209,7 +209,7 @@ fn build_menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
     let zoom_reset_item = MenuItem::with_id(
         app,
         "zoom_reset",
-        i18n::text(lang, Msg::MenuActualSize),
+        i18n::text(lang, Msg::ZoomReset),
         true,
         Some("CmdOrCtrl+0"),
     )?;
