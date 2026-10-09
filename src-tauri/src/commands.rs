@@ -499,9 +499,10 @@ pub(crate) fn open_settings(app: AppHandle) {
 }
 
 /// 設定画面で選んでいるズーム・色・透過度を、付箋と同じ大きさのプレビューで見せる。
+/// `hold` はスライダーを操作中か（その間はプレビューを消さない）。
 #[tauri::command]
-pub(crate) fn preview_note(app: AppHandle, zoom: u32, color: String, opacity: u32) {
-    show_note_preview(&app, zoom, &color, opacity);
+pub(crate) fn preview_note(app: AppHandle, zoom: u32, color: String, opacity: u32, hold: bool) {
+    show_note_preview(&app, zoom, &color, opacity, hold);
 }
 
 /// ゴミ箱ウィンドウを開く（既に開いている場合はフォーカスを移す）。

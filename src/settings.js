@@ -173,11 +173,21 @@ const opacityValue  = document.getElementById('opacity-value');
 
 // 透過度かズームのスライダーに触るまではプレビューを開かない。開いた後は色の変更も反映する
 let previewShown = false;
+// 掴んでいるスライダー。離した後も、ポインタがその上から外れるまでは掴んだままとみなし、
+// プレビューを消さない
+let heldSlider = null;
 
 function showPreview() {
   previewShown = true;
-  invoke('preview_note', { zoom: currentDefaultZoom, color: currentColor, opacity: currentOpacity })
-    .catch(e => console.error('preview_note failed:', e));
+  invoke('preview_note', {
+    zoom: currentDefaultZoom, color: currentColor, opacity: currentOpacity, hold: heldSlider !== null,
+  }).catch(e => console.error('preview_note failed:', e));
+}
+
+/** スライダーを手放し、プレビューにフェードアウトまでの時間を数え始めさせる。 */
+function releaseHeldSlider() {
+  heldSlider = null;
+  showPreview();
 }
 
 opacitySlider.addEventListener('input', () => {
@@ -196,6 +206,24 @@ defaultZoomSlider.addEventListener('input', () => {
   defaultZoomValue.textContent = `${currentDefaultZoom}%`;
   checkDirty();
   showPreview();
+});
+
+for (const slider of [opacitySlider, defaultZoomSlider]) {
+  // 値を変えずに掴んだだけでもプレビューを出す
+  slider.addEventListener('pointerdown', () => {
+    heldSlider = slider;
+    showPreview();
+  });
+  // 掴んだままスライダーの外へ出たときは、まだ手放さない（離した時点で下の pointerup が判定する）
+  slider.addEventListener('pointerleave', (e) => {
+    if (heldSlider === slider && e.buttons === 0) releaseHeldSlider();
+  });
+}
+// スライダーの外で離したときは、その時点で手放す
+window.addEventListener('pointerup', (e) => {
+  if (heldSlider && document.elementFromPoint(e.clientX, e.clientY) !== heldSlider) {
+    releaseHeldSlider();
+  }
 });
 
 // ── Bring All Toggle ──────────────────────────────

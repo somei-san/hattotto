@@ -10,6 +10,31 @@ const noteId = params.get('id');
 // show_note_preview）。見本の本文を表示するだけで、付箋としての保存は一切しない
 const isPreview = params.get('preview') === '1';
 
+// プレビューは設定画面の操作が止まって PREVIEW_IDLE_MS たつとフェードアウトし、自分で閉じる。
+// 隠すだけにしないのは、Rust から再表示（show）すると設定画面のフォーカスを奪うおそれがあるため
+// （macOS では tao の set_visible が makeKeyAndOrderFront を呼ぶ）。
+// 次の操作では設定画面側が preview_note を呼び、開き直す
+const PREVIEW_IDLE_MS = 2000;
+const PREVIEW_FADE_IN_MS = 300;
+const PREVIEW_FADE_OUT_MS = 1000;
+let previewFadeTimer = null;
+
+/** プレビューを表示する。`hold` の間（スライダーを操作中）は、フェードアウトまでの時間を数えない。 */
+function keepPreviewVisible(hold) {
+  clearTimeout(previewFadeTimer);
+  document.body.style.transition = `opacity ${PREVIEW_FADE_IN_MS}ms`;
+  document.body.style.opacity = '1';
+  if (hold) return;
+  previewFadeTimer = setTimeout(() => {
+    document.body.style.transition = `opacity ${PREVIEW_FADE_OUT_MS}ms`;
+    document.body.style.opacity = '0';
+    previewFadeTimer = setTimeout(() => appWindow.close(), PREVIEW_FADE_OUT_MS);
+  }, PREVIEW_IDLE_MS);
+}
+
+// 開くときもフェードインさせる
+if (isPreview) document.body.style.opacity = '0';
+
 const noteEl    = document.getElementById('note');
 const titlebar  = document.getElementById('titlebar');
 const picker    = document.getElementById('color-picker');
@@ -174,6 +199,11 @@ async function loadNote() {
   // Apply per-note zoom
   currentZoom = note.zoom ?? 100;
   applyZoom(currentZoom);
+  // 透明の状態を一度描画させてから表示に切り替えないと、フェードインにならない
+  if (isPreview) {
+    const hold = params.get('hold') === '1';
+    requestAnimationFrame(() => requestAnimationFrame(() => keepPreviewVisible(hold)));
+  }
 }
 
 // ── Render ─────────────────────────────────────────
@@ -3462,6 +3492,7 @@ unlisteners.push(appWindow.listen('note-preview-update', (e) => {
   currentZoom = e.payload.zoom;
   applyZoom(currentZoom);
   noteEl.style.opacity = e.payload.opacity / 100;
+  keepPreviewVisible(e.payload.hold);
 }));
 
 // ── Listen for settings changes ──────────────────
