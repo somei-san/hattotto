@@ -33,6 +33,50 @@ test.describe("ズーム操作", () => {
     expect(parseFloat(zoom)).toBe(1);
   });
 
+  test("default_zoom: 130 の設定で resetZoom() → 100% ではなく 130% に戻り保存される", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 300, height: 350 } });
+    const page = await ctx.newPage();
+    await injectNoteMock(page, { content: "テスト", zoom: 80 }, { default_zoom: 130 }, { captureInvokes: true });
+    await page.goto("/note.html?id=test-note-id");
+    await page.waitForLoadState("networkidle");
+
+    const zoom = await page.evaluate(() => {
+      (window as any).__captured_invokes.length = 0;
+      (window as any).resetZoom();
+      return document.getElementById("note")!.style.zoom;
+    });
+    expect(parseFloat(zoom)).toBe(1.3);
+
+    const calls = await page.evaluate(() =>
+      (window as any).__captured_invokes.filter((c: any) => c.cmd === "update_note_zoom"),
+    );
+    expect((calls[0] as any).args.zoom).toBe(130);
+
+    await ctx.close();
+  });
+
+  test("settings-changed で default_zoom が変わる → resetZoom() は新しい値に戻る", async ({ openNote }) => {
+    const page = await openNote({ content: "テスト", zoom: 150 });
+
+    const zoom = await page.evaluate(() => {
+      (window as any).__globalListeners["settings-changed"].forEach((fn: any) => fn({
+        payload: { default_color: "yellow", opacity: 100, default_zoom: 70 },
+      }));
+      (window as any).resetZoom();
+      return document.getElementById("note")!.style.zoom;
+    });
+    expect(parseFloat(zoom)).toBe(0.7);
+  });
+
+  test("default_zoom を変えても既存の付箋のズームは変わらない", async ({ openNote }) => {
+    const page = await openNote({ content: "テスト", zoom: 80 }, { default_zoom: 150 });
+
+    const zoom = await page.evaluate(
+      () => document.getElementById("note")!.style.zoom,
+    );
+    expect(parseFloat(zoom)).toBe(0.8);
+  });
+
   test("初期 zoom: 80 → style.zoom が 0.8 で読み込まれる", async ({ openNote }) => {
     const page = await openNote({ content: "テスト", zoom: 80 });
 

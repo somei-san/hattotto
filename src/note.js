@@ -6,6 +6,34 @@ const appWindow = getCurrentWebviewWindow();
 
 const params = new URLSearchParams(window.location.search);
 const noteId = params.get('id');
+// 設定画面のプレビューとして開かれたか（src-tauri/src/window.rs の
+// show_note_preview）。見本の本文を表示するだけで、付箋としての保存は一切しない
+const isPreview = params.get('preview') === '1';
+
+// プレビューは設定画面の操作が止まって PREVIEW_IDLE_MS たつとフェードアウトし、自分で閉じる。
+// 隠すだけにしないのは、Rust から再表示（show）すると設定画面のフォーカスを奪うおそれがあるため
+// （macOS では tao の set_visible が makeKeyAndOrderFront を呼ぶ）。
+// 次の操作では設定画面側が preview_note を呼び、開き直す
+const PREVIEW_IDLE_MS = 2000;
+const PREVIEW_FADE_IN_MS = 300;
+const PREVIEW_FADE_OUT_MS = 1000;
+let previewFadeTimer = null;
+
+/** プレビューを表示する。`hold` の間（スライダーを操作中）は、フェードアウトまでの時間を数えない。 */
+function keepPreviewVisible(hold) {
+  clearTimeout(previewFadeTimer);
+  document.body.style.transition = `opacity ${PREVIEW_FADE_IN_MS}ms`;
+  document.body.style.opacity = '1';
+  if (hold) return;
+  previewFadeTimer = setTimeout(() => {
+    document.body.style.transition = `opacity ${PREVIEW_FADE_OUT_MS}ms`;
+    document.body.style.opacity = '0';
+    previewFadeTimer = setTimeout(() => appWindow.close(), PREVIEW_FADE_OUT_MS);
+  }, PREVIEW_IDLE_MS);
+}
+
+// 開くときもフェードインさせる
+if (isPreview) document.body.style.opacity = '0';
 
 const noteEl    = document.getElementById('note');
 const titlebar  = document.getElementById('titlebar');
@@ -59,6 +87,8 @@ let editHistory = null;
 
 /** 失敗を握り潰してよい操作向けの invoke。エラーはログとトーストに出す。 */
 function fireInvoke(cmd, args, failMessage) {
+  // プレビューは保存先の付箋を持たない。移動等で保存処理が走っても Rust へは送らない
+  if (isPreview) return Promise.resolve();
   return invoke(cmd, args).catch(e => {
     console.error(`${cmd} failed:`, e);
     showToast(failMessage);
@@ -68,6 +98,7 @@ function fireInvoke(cmd, args, failMessage) {
 // ── Apply Settings to UI ─────────────────────────
 function applySettings(s) {
   noteEl.style.opacity = (s.opacity ?? 100) / 100;
+  defaultZoom = s.default_zoom ?? 100;
   pinBtn.style.display = s.show_pin_button === false ? 'none' : '';
   newBtn.style.display = s.show_new_button === false ? 'none' : '';
   colorBtn.style.display = s.show_color_button === false ? 'none' : '';
@@ -118,20 +149,30 @@ async function loadNote() {
   let note, settings;
   try {
     [note, settings] = await Promise.all([
-      invoke('get_note', { id: noteId }),
+      isPreview ? null : invoke('get_note', { id: noteId }),
       invoke('get_settings'),
     ]);
   } catch (e) {
     console.error('loadNote failed:', e);
     return;
   }
-  if (!note) {
+  if (!note && !isPreview) {
     console.error('Note not found, closing window:', noteId);
     appWindow.close();
     return;
   }
 
   I18N.setLang(I18N.resolve(settings?.language, settings?.system_language));
+  if (isPreview) {
+    note = {
+      content: I18N.t('notePreviewSample'),
+      color: params.get('color'),
+      zoom: Number(params.get('zoom')) || 100,
+      pinned: false,
+    };
+    // 保存済みの透過度ではなく、設定画面で選んでいる透過度で見せる
+    settings = { ...settings, opacity: Number(params.get('opacity')) || 100 };
+  }
 
   // 貼り付け画像の asset protocol URL 組み立て。data_dir は起動のたびに変わらないので一度だけ設定する
   if (settings?.data_dir) {
@@ -158,6 +199,11 @@ async function loadNote() {
   // Apply per-note zoom
   currentZoom = note.zoom ?? 100;
   applyZoom(currentZoom);
+  // 透明の状態を一度描画させてから表示に切り替えないと、フェードインにならない
+  if (isPreview) {
+    const hold = params.get('hold') === '1';
+    requestAnimationFrame(() => requestAnimationFrame(() => keepPreviewVisible(hold)));
+  }
 }
 
 // ── Render ─────────────────────────────────────────
@@ -637,8 +683,11 @@ function applyZoom(zoom) {
 }
 
 let currentZoom = 100;
+// 設定の「新しい付箋のズーム」。⌘0 のリセット先
+let defaultZoom = 100;
 
 async function changeZoom(delta) {
+  // 範囲と刻みは Rust の clamp_zoom・settings.html のズームのスライダーと揃える
   const next = Math.max(50, Math.min(200, currentZoom + delta * 10));
   if (next === currentZoom) return;
   currentZoom = next;
@@ -3398,10 +3447,11 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Zoom Shortcuts (⌘+ / ⌘- / ⌘0) ───────────────
+// ⌘0 は 100% ではなく設定のズームに戻す（大きい・小さいモニター向けに既定を変えている人のため）
 function resetZoom() {
-  currentZoom = 100;
-  applyZoom(100);
-  fireInvoke('update_note_zoom', { id: noteId, zoom: 100 }, I18N.t('toastSaveFailed'));
+  currentZoom = defaultZoom;
+  applyZoom(defaultZoom);
+  fireInvoke('update_note_zoom', { id: noteId, zoom: defaultZoom }, I18N.t('toastSaveFailed'));
 }
 
 // Listen for zoom events from app menu (only apply to focused window)
@@ -3436,6 +3486,14 @@ unlisteners.push(appWindow.listen('ctx-zoom', (e) => {
 }));
 // Rust has already saved the color; only update the UI here
 unlisteners.push(appWindow.listen('ctx-apply-color', (e) => applyColor(e.payload)));
+// 設定画面でスライダーや色を動かすたびに届く（プレビューのウィンドウだけ）
+unlisteners.push(appWindow.listen('note-preview-update', (e) => {
+  applyColor(e.payload.color);
+  currentZoom = e.payload.zoom;
+  applyZoom(currentZoom);
+  noteEl.style.opacity = e.payload.opacity / 100;
+  keepPreviewVisible(e.payload.hold);
+}));
 
 // ── Listen for settings changes ──────────────────
 unlisteners.push(listen('settings-changed', (e) => {

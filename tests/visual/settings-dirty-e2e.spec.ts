@@ -36,6 +36,28 @@ test.describe("設定画面の dirty チェック", () => {
     await expect(page.locator("#save-btn")).toBeEnabled();
   });
 
+  test("新しい付箋のズームを変えて保存 → update_settings に defaultZoom が渡る", async ({ openSettings }) => {
+    const page = await openSettings();
+    await expect(page.locator("#save-btn")).toBeDisabled();
+
+    await page.locator("#default-zoom-slider").fill("130");
+    await expect(page.locator("#default-zoom-value")).toHaveText("130%");
+    await expect(page.locator("#save-btn")).toBeEnabled();
+    await page.click("#save-btn");
+
+    const calls = await page.evaluate(() => (window as any).__captured_invokes);
+    const call = calls.find((c: any) => c.cmd === "update_settings");
+    expect(call.args.defaultZoom).toBe(130);
+  });
+
+  test("10 刻みでない default_zoom を読む → スライダーが丸めた値で表示し、dirty にならない", async ({ openSettings }) => {
+    const page = await openSettings({ default_zoom: 123 });
+
+    await expect(page.locator("#default-zoom-slider")).toHaveValue("120");
+    await expect(page.locator("#default-zoom-value")).toHaveText("120%");
+    await expect(page.locator("#save-btn")).toBeDisabled();
+  });
+
   test("トグル変更 → 保存ボタンが有効化", async ({ openSettings }) => {
     const page = await openSettings();
     await expect(page.locator("#save-btn")).toBeDisabled();

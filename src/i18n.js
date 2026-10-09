@@ -33,6 +33,11 @@ const I18N_TABLE = {
   defaultColorGroupLabel: { ja: 'デフォルトカラー', en: 'Default Color' },
 
   sectionOpacity: { ja: '透過度', en: 'Opacity' },
+  sectionDefaultZoom: { ja: '新しい付箋のズーム', en: 'Zoom for new notes' },
+  notePreviewSample: {
+    ja: '# 見本\n設定画面で選んでいるズームと透過度で表示しています。\n\n- 箇条書き\n- [ ] チェックボックス\n\n文字の大きさや透け具合の目安にしてください。',
+    en: '# Sample\nShown with the zoom and opacity selected in Settings.\n\n- Bullet\n- [ ] Checkbox\n\nUse this to check the text size and how see-through notes are.',
+  },
 
   sectionDisplay: { ja: '表示', en: 'Display' },
   toggleBringAllToFront: { ja: '付箋をクリックしたら全付箋を前面に表示', en: 'Bring all notes to front when clicking a note' },

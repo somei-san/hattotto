@@ -6,7 +6,10 @@ use tauri::{
 };
 
 use crate::i18n::{self, Msg};
-use crate::model::{resolve_color, AppState, Note, RecoverMutex, DEFAULT_POSITION};
+use crate::model::{
+    clamp_opacity, clamp_zoom, is_valid_color_key, resolve_color, AppState, Note, RecoverMutex,
+    COLOR_DEFS, DEFAULT_POSITION, DEFAULT_SIZE,
+};
 use crate::persistence::save_notes;
 
 // ── Monitor geometry (pure functions for testability) ────────
@@ -148,17 +151,7 @@ pub(crate) fn new_note_position(
         let offset = ((note_count % 20) as f64) * CASCADE_STEP;
         return (DEFAULT_POSITION.0 + offset, DEFAULT_POSITION.1 + offset);
     };
-    // The anchor's top-left can be off every monitor (dragged past the left
-    // edge, or in a gap between monitors), so fall back to the nearest one
-    let distance = |m: &Rect| {
-        let dx = (m.x - a.x).max(a.x - (m.x + m.w)).max(0.0);
-        let dy = (m.y - a.y).max(a.y - (m.y + m.h)).max(0.0);
-        dx * dx + dy * dy
-    };
-    let Some(m) = monitors
-        .iter()
-        .min_by(|p, q| distance(p).total_cmp(&distance(q)))
-    else {
+    let Some(m) = nearest_monitor(a, monitors) else {
         return (a.x + CASCADE_STEP, a.y + CASCADE_STEP);
     };
     let cascade = || {
@@ -171,6 +164,42 @@ pub(crate) fn new_note_position(
         return cascade();
     }
     beside(a, size, m, notes).unwrap_or_else(cascade)
+}
+
+/// The monitor the anchor is on. The anchor's top-left can be off every
+/// monitor (dragged past the left edge, or in a gap between monitors), so
+/// fall back to the nearest one.
+fn nearest_monitor<'a>(a: &Anchor, monitors: &'a [Rect]) -> Option<&'a Rect> {
+    let distance = |m: &Rect| {
+        let dx = (m.x - a.x).max(a.x - (m.x + m.w)).max(0.0);
+        let dy = (m.y - a.y).max(a.y - (m.y + m.h)).max(0.0);
+        dx * dx + dy * dy
+    };
+    monitors
+        .iter()
+        .min_by(|p, q| distance(p).total_cmp(&distance(q)))
+}
+
+/// Position of the settings screen's preview: right of the settings window
+/// (`a`), or left of it when the right doesn't fit in the monitor. Unlike a
+/// new note it never goes below or above, and it may cover notes, since it
+/// only shows for a moment. When neither side fits, it is pushed into the
+/// monitor from the right and covers the settings window.
+pub(crate) fn preview_position(a: &Anchor, size: (f64, f64), monitors: &[Rect]) -> (f64, f64) {
+    let right = a.x + a.w + BESIDE_GAP;
+    let Some(m) = nearest_monitor(a, monitors) else {
+        return (right, a.y);
+    };
+    let y = a.y.min(m.y + m.h - size.1).max(m.y);
+    let left = a.x - size.0 - BESIDE_GAP;
+    let x = if right + size.0 <= m.x + m.w {
+        right
+    } else if left >= m.x {
+        left
+    } else {
+        right.min(m.x + m.w - size.0).max(m.x)
+    };
+    (x, y)
 }
 
 /// A spot right of, left of, below or above the anchor (in that order) that
@@ -247,7 +276,10 @@ pub(crate) fn create_note_with_window(
     state: &AppState,
     anchor_label: Option<&str>,
 ) -> Note {
-    let default_color = state.settings.recover().default_color.clone();
+    let (default_color, default_zoom) = {
+        let settings = state.settings.recover();
+        (settings.default_color.clone(), settings.default_zoom)
+    };
     let color = resolve_color(&default_color);
     // Read the live windows rather than the saved notes: geometry is saved
     // with a debounce and may lag right after the user drags a note.
@@ -255,6 +287,7 @@ pub(crate) fn create_note_with_window(
     let anchor_window = pick_anchor(&windows, anchor_label);
     let monitors = work_area_rects(app);
     let mut n = Note::new(&color);
+    n.zoom = default_zoom;
     // Only read the notes under the lock; monitor queries stay outside it
     let (x, y) = {
         let notes = state.notes.recover();
@@ -431,7 +464,7 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         None => "settings.html".to_string(),
     };
     let lang = i18n::resolve(app.state::<AppState>().settings.recover().language);
-    if let Err(e) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
+    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
         .title(i18n::text(lang, Msg::SettingsWindowTitle))
         .inner_size(440.0, 600.0)
         .min_inner_size(380.0, 460.0)
@@ -439,7 +472,75 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
         .visible(true)
         .build()
     {
-        log::error!("open settings window error: {}", e);
+        Ok(win) => {
+            // プレビューは設定画面の付属物なので、設定画面と一緒に閉じる
+            let app_handle = app.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::Destroyed = event {
+                    if let Some(preview) = app_handle.get_webview_window(NOTE_PREVIEW_LABEL) {
+                        let _ = preview.close();
+                    }
+                }
+            });
+        }
+        Err(e) => log::error!("open settings window error: {}", e),
+    }
+}
+
+/// 設定画面で選んでいる見た目のプレビューに使うウィンドウのラベル。
+/// `note-` で始めないので、付箋としては保存も基準選びもされない
+pub(crate) const NOTE_PREVIEW_LABEL: &str = "settings-preview";
+
+/// 付箋が `zoom`・`color`・`opacity` でどう見えるかを、付箋と同じ大きさのウィンドウで見せる。
+/// 既に開いていれば中身だけ差し替える。位置は設定画面の左右（`preview_position`）。
+/// `hold` が true の間（スライダーを操作中）は、プレビューはフェードアウトしない
+pub(crate) fn show_note_preview(app: &AppHandle, zoom: u32, color: &str, opacity: u32, hold: bool) {
+    let zoom = clamp_zoom(zoom);
+    let opacity = clamp_opacity(opacity);
+    // ランダムは開くたびに色が変わって見本にならないので、先頭の色で見せる
+    let color = if is_valid_color_key(color) {
+        color
+    } else {
+        COLOR_DEFS[0].key
+    };
+    if let Some(win) = app.get_webview_window(NOTE_PREVIEW_LABEL) {
+        let _ = win.emit_to(
+            NOTE_PREVIEW_LABEL,
+            "note-preview-update",
+            serde_json::json!({ "zoom": zoom, "color": color, "opacity": opacity, "hold": hold }),
+        );
+        return;
+    }
+    let windows = window_snapshots(app);
+    let (x, y) = match windows.iter().find(|w| w.label == "settings") {
+        Some(settings) => preview_position(
+            &Anchor::new(settings, false),
+            DEFAULT_SIZE,
+            &work_area_rects(app),
+        ),
+        None => DEFAULT_POSITION,
+    };
+    let (x, y) = clamp_to_screen(app, x, y);
+    let url = format!(
+        "note.html?preview=1&zoom={zoom}&color={color}&opacity={opacity}&hold={}",
+        u8::from(hold)
+    );
+    match WebviewWindowBuilder::new(app, NOTE_PREVIEW_LABEL, WebviewUrl::App(url.into()))
+        .title("")
+        .inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
+        .resizable(false)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        // 設定画面からフォーカスを奪わず、クリックも受けない。見るためだけのウィンドウ
+        .focused(false)
+        .visible(true)
+        .build()
+    {
+        Ok(win) => {
+            let _ = win.set_ignore_cursor_events(true);
+        }
+        Err(e) => log::error!("open note preview window error: {}", e),
     }
 }
 
@@ -763,6 +864,55 @@ mod tests {
         assert_eq!(
             new_note_position(Some(&a), NOTE_SIZE, &single_monitor(), &notes, 3),
             (LEFT_OF_800, 300.0)
+        );
+    }
+
+    /// 設定ウィンドウ（440×600）を基準にした Anchor
+    fn settings_at(x: f64, y: f64) -> Anchor {
+        Anchor {
+            w: 440.0,
+            h: 600.0,
+            ..anchor(x, y, false)
+        }
+    }
+
+    #[test]
+    fn preview_goes_right_of_settings() {
+        let a = settings_at(500.0, 200.0);
+        assert_eq!(
+            preview_position(&a, NOTE_SIZE, &single_monitor()),
+            (500.0 + 440.0 + BESIDE_GAP, 200.0)
+        );
+    }
+
+    #[test]
+    fn preview_goes_left_when_right_does_not_fit() {
+        let a = settings_at(1920.0 - 440.0, 200.0);
+        assert_eq!(
+            preview_position(&a, NOTE_SIZE, &single_monitor()),
+            (a.x - NOTE_SIZE.0 - BESIDE_GAP, 200.0)
+        );
+    }
+
+    #[test]
+    fn preview_never_goes_below_and_covers_settings_when_neither_side_fits() {
+        let a = Anchor {
+            w: 1500.0,
+            ..settings_at(200.0, 200.0)
+        };
+        // 新しい付箋なら下に出る配置でも、右端に寄せて設定ウィンドウに重ねる
+        assert_eq!(
+            preview_position(&a, NOTE_SIZE, &single_monitor()),
+            (1920.0 - NOTE_SIZE.0, 200.0)
+        );
+    }
+
+    #[test]
+    fn preview_beside_settings_near_bottom_is_lifted_into_monitor() {
+        let a = settings_at(500.0, 900.0);
+        assert_eq!(
+            preview_position(&a, NOTE_SIZE, &single_monitor()),
+            (500.0 + 440.0 + BESIDE_GAP, 1080.0 - NOTE_SIZE.1)
         );
     }
 

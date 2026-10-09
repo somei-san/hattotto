@@ -129,7 +129,11 @@ fn default_zoom() -> u32 {
 /// 階段状にずらし、どのモニターにも入らない付箋もここへ戻す。
 pub(crate) const DEFAULT_POSITION: (f64, f64) = (120.0, 120.0);
 
+/// 新しい付箋の大きさ（論理サイズ）。設定画面のズームのプレビューも同じ大きさで開く。
+pub(crate) const DEFAULT_SIZE: (f64, f64) = (280.0, 320.0);
+
 /// zoom の許容範囲（50〜200%）にクランプする。
+/// 同じ範囲を `note.js` の `changeZoom` と `settings.html` のズームのスライダーにも書いている。
 pub(crate) fn clamp_zoom(zoom: u32) -> u32 {
     zoom.clamp(50, 200)
 }
@@ -152,9 +156,9 @@ impl Note {
             color: color.into(),
             x: DEFAULT_POSITION.0,
             y: DEFAULT_POSITION.1,
-            width: 280.0,
-            height: 320.0,
-            zoom: 100,
+            width: DEFAULT_SIZE.0,
+            height: DEFAULT_SIZE.1,
+            zoom: default_zoom(),
             pinned: false,
             deleted_at: None,
         }
@@ -205,6 +209,9 @@ pub struct Settings {
     pub show_tray_icon: bool,
     #[serde(default)]
     pub language: LanguageSetting,
+    /// 新しく作る付箋のズーム（%）。⌘0 のリセット先もこの値。既存の付箋には反映しない
+    #[serde(default = "default_zoom")]
+    pub default_zoom: u32,
 }
 
 fn default_true() -> bool {
@@ -223,6 +230,7 @@ impl Default for Settings {
             confirm_before_delete: true,
             show_tray_icon: true,
             language: LanguageSetting::Auto,
+            default_zoom: default_zoom(),
         }
     }
 }
