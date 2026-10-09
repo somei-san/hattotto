@@ -5,9 +5,12 @@ import type { Browser, Page } from "@playwright/test";
 const noteBg = (page: Page) =>
   page.evaluate(() => document.getElementById("note")!.style.getPropertyValue("--bg"));
 
-// ── 設定画面の「新しい付箋のズーム」のプレビュー ────────────────
+const noteOpacity = (page: Page) =>
+  page.evaluate(() => document.getElementById("note")!.style.opacity);
 
-/** プレビューとして note.html を開く（src-tauri/src/window.rs の show_zoom_preview と同じ URL）。 */
+// ── 設定画面で選んでいる見た目のプレビュー ────────────────
+
+/** プレビューとして note.html を開く（src-tauri/src/window.rs の show_note_preview と同じ URL）。 */
 async function openPreview(browser: Browser, query: string) {
   const ctx = await browser.newContext({ viewport: { width: 280, height: 320 } });
   const page = await ctx.newPage();
@@ -19,14 +22,21 @@ async function openPreview(browser: Browser, query: string) {
   return { ctx, page };
 }
 
-test.describe("ズームのプレビュー（付箋側）", () => {
-  test("URL の zoom・color で見本の本文を表示し、get_note は呼ばない", async ({ browser }) => {
-    const { ctx, page } = await openPreview(browser, "zoom=150&color=blue");
+const previewCalls = (page: Page) =>
+  page.evaluate(() =>
+    (window as any).__captured_invokes.filter((c: any) => c.cmd === "preview_note"),
+  );
+
+test.describe("プレビュー（付箋側）", () => {
+  test("URL の zoom・color・opacity で見本の本文を表示し、get_note は呼ばない", async ({ browser }) => {
+    const { ctx, page } = await openPreview(browser, "zoom=150&color=blue&opacity=60");
 
     await expect(page.locator("#markdown-view")).toContainText("新しい付箋はこの大きさで開きます。");
     const zoom = await page.evaluate(() => document.getElementById("note")!.style.zoom);
     expect(parseFloat(zoom)).toBe(1.5);
     expect(await noteBg(page)).toBe("var(--blue)");
+    // 保存済みの透過度（モックでは 100）ではなく URL の値で見せる
+    expect(parseFloat(await noteOpacity(page))).toBe(0.6);
 
     const cmds = await page.evaluate(() =>
       (window as any).__captured_invokes.map((c: any) => c.cmd),
@@ -36,23 +46,24 @@ test.describe("ズームのプレビュー（付箋側）", () => {
     await ctx.close();
   });
 
-  test("zoom-preview-update で倍率と色が変わる", async ({ browser }) => {
-    const { ctx, page } = await openPreview(browser, "zoom=100&color=yellow");
+  test("note-preview-update で倍率・色・透過度が変わる", async ({ browser }) => {
+    const { ctx, page } = await openPreview(browser, "zoom=100&color=yellow&opacity=100");
 
     const zoom = await page.evaluate(() => {
-      (window as any).__appWindowListeners["zoom-preview-update"].forEach((fn: any) =>
-        fn({ payload: { zoom: 70, color: "pink" } }),
+      (window as any).__appWindowListeners["note-preview-update"].forEach((fn: any) =>
+        fn({ payload: { zoom: 70, color: "pink", opacity: 40 } }),
       );
       return document.getElementById("note")!.style.zoom;
     });
     expect(parseFloat(zoom)).toBe(0.7);
     expect(await noteBg(page)).toBe("var(--pink)");
+    expect(parseFloat(await noteOpacity(page))).toBe(0.4);
 
     await ctx.close();
   });
 
   test("ズーム操作や移動で保存処理が走っても Rust へ保存を送らない", async ({ browser }) => {
-    const { ctx, page } = await openPreview(browser, "zoom=100&color=yellow");
+    const { ctx, page } = await openPreview(browser, "zoom=100&color=yellow&opacity=100");
 
     await page.evaluate(() => {
       (window as any).__captured_invokes.length = 0;
@@ -71,22 +82,25 @@ test.describe("ズームのプレビュー（付箋側）", () => {
   });
 });
 
-test.describe("ズームのプレビュー（設定画面側）", () => {
-  test("スライダーを動かすと、選んでいる倍率と色で preview_zoom を呼ぶ", async ({ openSettings }) => {
+test.describe("プレビュー（設定画面側）", () => {
+  test("ズームのスライダーを動かすと、選んでいる値で preview_note を呼ぶ", async ({ openSettings }) => {
     const page = await openSettings();
 
     await page.click('.color-dot[data-color="green"]');
-    let calls = await page.evaluate(() =>
-      (window as any).__captured_invokes.filter((c: any) => c.cmd === "preview_zoom"),
-    );
     // スライダーに触るまではプレビューを開かない
-    expect(calls).toEqual([]);
+    expect(await previewCalls(page)).toEqual([]);
 
     await page.locator("#default-zoom-slider").fill("140");
-    calls = await page.evaluate(() =>
-      (window as any).__captured_invokes.filter((c: any) => c.cmd === "preview_zoom"),
-    );
-    expect(calls.at(-1).args).toEqual({ zoom: 140, color: "green" });
+    const calls = await previewCalls(page);
+    expect(calls.at(-1).args).toEqual({ zoom: 140, color: "green", opacity: 100 });
+  });
+
+  test("透過度のスライダーを動かしても、選んでいる値で preview_note を呼ぶ", async ({ openSettings }) => {
+    const page = await openSettings();
+
+    await page.locator("#opacity-slider").fill("60");
+    const calls = await previewCalls(page);
+    expect(calls.at(-1).args).toEqual({ zoom: 100, color: "yellow", opacity: 60 });
   });
 
   test("プレビューを開いた後は、色を変えてもプレビューに反映する", async ({ openSettings }) => {
@@ -95,9 +109,7 @@ test.describe("ズームのプレビュー（設定画面側）", () => {
     await page.locator("#default-zoom-slider").fill("120");
     await page.click('.color-dot[data-color="purple"]');
 
-    const calls = await page.evaluate(() =>
-      (window as any).__captured_invokes.filter((c: any) => c.cmd === "preview_zoom"),
-    );
-    expect(calls.at(-1).args).toEqual({ zoom: 120, color: "purple" });
+    const calls = await previewCalls(page);
+    expect(calls.at(-1).args).toEqual({ zoom: 120, color: "purple", opacity: 100 });
   });
 });

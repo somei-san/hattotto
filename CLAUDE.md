@@ -106,7 +106,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 ### Tauri コマンド一覧
 （登録元は `src-tauri/src/lib.rs` の `generate_handler!`）
 - 付箋: `get_note`, `update_note_content`, `update_note_color`, `update_note_geometry`, `update_note_zoom`, `update_note_pinned`, `delete_note`, `create_note`
-- 設定: `get_settings`, `update_settings`, `open_settings`, `preview_zoom`（新しい付箋のズームのプレビュー）
+- 設定: `get_settings`, `update_settings`, `open_settings`, `preview_note`（設定画面で選んでいるズーム・色・透過度のプレビュー）
 - ゴミ箱: `get_trash`, `get_trash_max`, `restore_note`, `empty_trash`, `open_trash`
 - メニュー: `show_context_menu`
 - 選択範囲: `copy_markdown`（右クリックメニューの「Markdown をコピー」）

@@ -18,7 +18,7 @@ use crate::persistence::{
 };
 use crate::window::{
     create_note_with_window, open_note_window, open_settings_window, open_trash_window,
-    show_zoom_preview,
+    show_note_preview,
 };
 use crate::{menu, tray};
 
@@ -498,10 +498,10 @@ pub(crate) fn open_settings(app: AppHandle) {
     open_settings_window(&app, None);
 }
 
-/// 設定画面で選んでいる新しい付箋のズームと色を、付箋と同じ大きさのプレビューで見せる。
+/// 設定画面で選んでいるズーム・色・透過度を、付箋と同じ大きさのプレビューで見せる。
 #[tauri::command]
-pub(crate) fn preview_zoom(app: AppHandle, zoom: u32, color: String) {
-    show_zoom_preview(&app, zoom, &color);
+pub(crate) fn preview_note(app: AppHandle, zoom: u32, color: String, opacity: u32) {
+    show_note_preview(&app, zoom, &color, opacity);
 }
 
 /// ゴミ箱ウィンドウを開く（既に開いている場合はフォーカスを移す）。

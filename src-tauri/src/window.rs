@@ -7,8 +7,8 @@ use tauri::{
 
 use crate::i18n::{self, Msg};
 use crate::model::{
-    clamp_zoom, is_valid_color_key, resolve_color, AppState, Note, RecoverMutex, COLOR_DEFS,
-    DEFAULT_POSITION, DEFAULT_SIZE,
+    clamp_opacity, clamp_zoom, is_valid_color_key, resolve_color, AppState, Note, RecoverMutex,
+    COLOR_DEFS, DEFAULT_POSITION, DEFAULT_SIZE,
 };
 use crate::persistence::save_notes;
 
@@ -451,7 +451,7 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
             let app_handle = app.clone();
             win.on_window_event(move |event| {
                 if let tauri::WindowEvent::Destroyed = event {
-                    if let Some(preview) = app_handle.get_webview_window(ZOOM_PREVIEW_LABEL) {
+                    if let Some(preview) = app_handle.get_webview_window(NOTE_PREVIEW_LABEL) {
                         let _ = preview.close();
                     }
                 }
@@ -461,25 +461,26 @@ pub(crate) fn open_settings_window(app: &AppHandle, tab: Option<&str>) {
     }
 }
 
-/// 設定画面の「新しい付箋のズーム」のプレビューに使うウィンドウのラベル。
+/// 設定画面で選んでいる見た目のプレビューに使うウィンドウのラベル。
 /// `note-` で始めないので、付箋としては保存も基準選びもされない
-pub(crate) const ZOOM_PREVIEW_LABEL: &str = "zoom-preview";
+pub(crate) const NOTE_PREVIEW_LABEL: &str = "settings-preview";
 
-/// 新しい付箋が `zoom`・`color` でどう見えるかを、付箋と同じ大きさのウィンドウで見せる。
+/// 付箋が `zoom`・`color`・`opacity` でどう見えるかを、付箋と同じ大きさのウィンドウで見せる。
 /// 既に開いていれば中身だけ差し替える。位置は設定画面を基準に、新しい付箋と同じ規則で決める
-pub(crate) fn show_zoom_preview(app: &AppHandle, zoom: u32, color: &str) {
+pub(crate) fn show_note_preview(app: &AppHandle, zoom: u32, color: &str, opacity: u32) {
     let zoom = clamp_zoom(zoom);
+    let opacity = clamp_opacity(opacity);
     // ランダムは開くたびに色が変わって見本にならないので、先頭の色で見せる
     let color = if is_valid_color_key(color) {
         color
     } else {
         COLOR_DEFS[0].key
     };
-    if let Some(win) = app.get_webview_window(ZOOM_PREVIEW_LABEL) {
+    if let Some(win) = app.get_webview_window(NOTE_PREVIEW_LABEL) {
         let _ = win.emit_to(
-            ZOOM_PREVIEW_LABEL,
-            "zoom-preview-update",
-            serde_json::json!({ "zoom": zoom, "color": color }),
+            NOTE_PREVIEW_LABEL,
+            "note-preview-update",
+            serde_json::json!({ "zoom": zoom, "color": color, "opacity": opacity }),
         );
         return;
     }
@@ -496,8 +497,8 @@ pub(crate) fn show_zoom_preview(app: &AppHandle, zoom: u32, color: &str) {
         0,
     );
     let (x, y) = clamp_to_screen(app, x, y);
-    let url = format!("note.html?preview=1&zoom={zoom}&color={color}");
-    match WebviewWindowBuilder::new(app, ZOOM_PREVIEW_LABEL, WebviewUrl::App(url.into()))
+    let url = format!("note.html?preview=1&zoom={zoom}&color={color}&opacity={opacity}");
+    match WebviewWindowBuilder::new(app, NOTE_PREVIEW_LABEL, WebviewUrl::App(url.into()))
         .title("")
         .inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
         .resizable(false)
@@ -512,7 +513,7 @@ pub(crate) fn show_zoom_preview(app: &AppHandle, zoom: u32, color: &str) {
         Ok(win) => {
             let _ = win.set_ignore_cursor_events(true);
         }
-        Err(e) => log::error!("open zoom preview window error: {}", e),
+        Err(e) => log::error!("open note preview window error: {}", e),
     }
 }
 

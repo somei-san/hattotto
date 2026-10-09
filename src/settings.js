@@ -98,7 +98,7 @@ document.querySelectorAll('#color-picker .color-dot').forEach(dot => {
     dot.setAttribute('tabindex', '0');
     currentColor = dot.dataset.color;
     checkDirty();
-    if (zoomPreviewShown) showZoomPreview();
+    if (previewShown) showPreview();
   });
   dot.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dot.click(); }
@@ -171,30 +171,31 @@ saveBtn.addEventListener('click', async () => {
 const opacitySlider = document.getElementById('opacity-slider');
 const opacityValue  = document.getElementById('opacity-value');
 
+// 透過度かズームのスライダーに触るまではプレビューを開かない。開いた後は色の変更も反映する
+let previewShown = false;
+
+function showPreview() {
+  previewShown = true;
+  invoke('preview_note', { zoom: currentDefaultZoom, color: currentColor, opacity: currentOpacity })
+    .catch(e => console.error('preview_note failed:', e));
+}
+
 opacitySlider.addEventListener('input', () => {
   currentOpacity = parseInt(opacitySlider.value, 10);
   opacityValue.textContent = `${currentOpacity}%`;
   checkDirty();
+  showPreview();
 });
 
 // ── Default Zoom Slider ───────────────────────────────
 const defaultZoomSlider = document.getElementById('default-zoom-slider');
 const defaultZoomValue  = document.getElementById('default-zoom-value');
 
-// スライダーに触るまではプレビューを開かない。開いた後は色の変更も反映する
-let zoomPreviewShown = false;
-
-function showZoomPreview() {
-  zoomPreviewShown = true;
-  invoke('preview_zoom', { zoom: currentDefaultZoom, color: currentColor })
-    .catch(e => console.error('preview_zoom failed:', e));
-}
-
 defaultZoomSlider.addEventListener('input', () => {
   currentDefaultZoom = parseInt(defaultZoomSlider.value, 10);
   defaultZoomValue.textContent = `${currentDefaultZoom}%`;
   checkDirty();
-  showZoomPreview();
+  showPreview();
 });
 
 // ── Bring All Toggle ──────────────────────────────

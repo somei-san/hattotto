@@ -146,7 +146,7 @@ async function injectSettingsMock(
           switch (cmd) {
             case "get_settings":               return data.settings;
             case "update_settings":            return null;
-            case "preview_zoom":               return null;
+            case "preview_note":               return null;
             case "plugin:autostart|is_enabled": return data.autostart;
             case "plugin:autostart|enable":    return null;
             case "plugin:autostart|disable":   return null;

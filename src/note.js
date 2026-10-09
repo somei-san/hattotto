@@ -6,8 +6,8 @@ const appWindow = getCurrentWebviewWindow();
 
 const params = new URLSearchParams(window.location.search);
 const noteId = params.get('id');
-// 設定画面の「新しい付箋のズーム」のプレビューとして開かれたか（src-tauri/src/window.rs の
-// show_zoom_preview）。見本の本文を表示するだけで、付箋としての保存は一切しない
+// 設定画面のプレビューとして開かれたか（src-tauri/src/window.rs の
+// show_note_preview）。見本の本文を表示するだけで、付箋としての保存は一切しない
 const isPreview = params.get('preview') === '1';
 
 const noteEl    = document.getElementById('note');
@@ -140,11 +140,13 @@ async function loadNote() {
   I18N.setLang(I18N.resolve(settings?.language, settings?.system_language));
   if (isPreview) {
     note = {
-      content: I18N.t('zoomPreviewSample'),
+      content: I18N.t('notePreviewSample'),
       color: params.get('color'),
       zoom: Number(params.get('zoom')) || 100,
       pinned: false,
     };
+    // 保存済みの透過度ではなく、設定画面で選んでいる透過度で見せる
+    settings = { ...settings, opacity: Number(params.get('opacity')) || 100 };
   }
 
   // 貼り付け画像の asset protocol URL 組み立て。data_dir は起動のたびに変わらないので一度だけ設定する
@@ -3455,10 +3457,11 @@ unlisteners.push(appWindow.listen('ctx-zoom', (e) => {
 // Rust has already saved the color; only update the UI here
 unlisteners.push(appWindow.listen('ctx-apply-color', (e) => applyColor(e.payload)));
 // 設定画面でスライダーや色を動かすたびに届く（プレビューのウィンドウだけ）
-unlisteners.push(appWindow.listen('zoom-preview-update', (e) => {
+unlisteners.push(appWindow.listen('note-preview-update', (e) => {
   applyColor(e.payload.color);
   currentZoom = e.payload.zoom;
   applyZoom(currentZoom);
+  noteEl.style.opacity = e.payload.opacity / 100;
 }));
 
 // ── Listen for settings changes ──────────────────

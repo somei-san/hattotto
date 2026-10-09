@@ -34,7 +34,7 @@ const I18N_TABLE = {
 
   sectionOpacity: { ja: '透過度', en: 'Opacity' },
   sectionDefaultZoom: { ja: '新しい付箋のズーム', en: 'Zoom for new notes' },
-  zoomPreviewSample: {
+  notePreviewSample: {
     ja: '# 見本\n新しい付箋はこの大きさで開きます。\n\n- 箇条書き\n- [ ] チェックボックス\n\n**太字** や `コード` も同じ倍率で表示されます。\n\n1 枚にどれくらい書けるかの目安にしてください。',
     en: '# Sample\nNew notes open at this size.\n\n- Bullet\n- [ ] Checkbox\n\n**Bold** and `code` use the same zoom.\n\nUse this to see how much fits on one note.',
   },

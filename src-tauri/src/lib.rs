@@ -126,7 +126,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::open_settings,
-            commands::preview_zoom,
+            commands::preview_note,
             commands::get_trash,
             commands::get_trash_max,
             commands::restore_note,
