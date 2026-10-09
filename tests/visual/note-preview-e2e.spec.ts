@@ -31,7 +31,7 @@ test.describe("プレビュー（付箋側）", () => {
   test("URL の zoom・color・opacity で見本の本文を表示し、get_note は呼ばない", async ({ browser }) => {
     const { ctx, page } = await openPreview(browser, "zoom=150&color=blue&opacity=60");
 
-    await expect(page.locator("#markdown-view")).toContainText("新しい付箋はこの大きさで開きます。");
+    await expect(page.locator("#markdown-view")).toContainText("設定画面で選んでいるズームと透過度で表示しています。");
     const zoom = await page.evaluate(() => document.getElementById("note")!.style.zoom);
     expect(parseFloat(zoom)).toBe(1.5);
     expect(await noteBg(page)).toBe("var(--blue)");
