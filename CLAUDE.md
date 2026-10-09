@@ -114,7 +114,7 @@ HTML はマークアップと `<style>` だけを持ち、スクリプトは同�
 ### アプリメニュー
 - File: New Note (⌘N), Trash... (⌘⇧T) — ネイティブアイコン付き
 - Edit: Undo/Redo/Cut/Copy/Paste/Select All
-- View: Zoom In (⌘=) / Zoom Out (⌘-) / Actual Size (⌘0)
+- View: Zoom In (⌘=) / Zoom Out (⌘-) / Reset Zoom (⌘0)
 
 ## ユビキタス言語
 

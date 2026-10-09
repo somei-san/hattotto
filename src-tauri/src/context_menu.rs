@@ -158,7 +158,7 @@ pub(crate) fn build_context_menu(
     let zoom_reset = MenuItem::with_id(
         app,
         "ctx_zoom_reset",
-        i18n::text(lang, Msg::CtxZoomReset),
+        i18n::text(lang, Msg::ZoomReset),
         true,
         Some("CmdOrCtrl+0"),
     )?;
